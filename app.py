@@ -5,13 +5,46 @@ import time
 import glob
 import shutil
 import re
+import sys
 from io import BytesIO
-from extract_papers import extract_text_from_pdf, extract_cultural_elements, process_pdfs_parallel
-from config import (
-    CATEGORY_OPTIONS, BASIN_OPTIONS, VERSION, APP_NAME,
-    OUTPUT_BASE_NAME, DEFAULT_BOOK_NAME, FEW_SHOT_EXAMPLES,
-    MAX_PARALLEL_WORKERS, ENABLE_CACHE, ENABLE_OCR, ENABLE_SPLIT
-)
+
+# ========== 调试：强制打印，确认 app.py 已加载 ==========
+print("=== app.py 已加载（v2.3.0-debug）===", flush=True)
+sys.stdout.flush()
+
+# ========== 导入核心模块（加异常捕获） ==========
+try:
+    from extract_papers import extract_text_from_pdf, extract_cultural_elements, process_pdfs_parallel
+    print("✅ extract_papers 导入成功", flush=True)
+except Exception as e:
+    print(f"❌ extract_papers 导入失败：{e}", flush=True)
+    st.error(f"核心模块导入失败：{e}")
+    sys.exit(1)
+
+try:
+    from config import (
+        CATEGORY_OPTIONS, BASIN_OPTIONS, VERSION, APP_NAME,
+        OUTPUT_BASE_NAME, DEFAULT_BOOK_NAME, FEW_SHOT_EXAMPLES,
+        MAX_PARALLEL_WORKERS, ENABLE_CACHE, ENABLE_OCR, ENABLE_SPLIT
+    )
+    print("✅ config 导入成功", flush=True)
+except Exception as e:
+    print(f"❌ config 导入失败：{e}", flush=True)
+    st.error(f"config 模块导入失败：{e}")
+    sys.exit(1)
+
+# ========== 检查 API Key ==========
+try:
+    import os
+    from dotenv import load_dotenv
+    load_dotenv()
+    api_key = os.getenv("DEEPSEEK_API_KEY")
+    if api_key:
+        print(f"✅ API Key 读取成功：{api_key[:10]}...", flush=True)
+    else:
+        print("❌ API Key 读取失败！请检查 Secrets 配置", flush=True)
+except Exception as e:
+    print(f"❌ API Key 检查出错：{e}", flush=True)
 
 # --- 页面配置 ---
 st.set_page_config(page_title=APP_NAME, layout="wide", page_icon="📚")
@@ -183,6 +216,11 @@ with st.sidebar:
 
 # ======================== 主界面 ========================
 if start_btn and uploaded_files:
+    # ========== 调试：按钮被点击 ==========
+    print("=== 🔘 按钮被点击了！===", flush=True)
+    print(f"上传了 {len(uploaded_files)} 个文件", flush=True)
+    sys.stdout.flush()
+    
     st.session_state.processing = True
     st.session_state.df = None
 
@@ -201,7 +239,13 @@ if start_btn and uploaded_files:
 
     status_text.info(f"📄 正在并行处理 {total} 个文件（并行数：{max_workers}）...")
     
-    all_entries = process_pdfs_parallel(pdf_paths, book_name, max_workers=max_workers)
+    print(f"📄 开始并行处理 {total} 个文件...", flush=True)
+    try:
+        all_entries = process_pdfs_parallel(pdf_paths, book_name, max_workers=max_workers)
+        print(f"✅ 处理完成，共提取 {len(all_entries)} 条", flush=True)
+    except Exception as e:
+        print(f"❌ 处理出错：{e}", flush=True)
+        all_entries = []
 
     shutil.rmtree(temp_dir)
     status_text.empty()
@@ -215,8 +259,10 @@ if start_btn and uploaded_files:
                 df[c] = ""
         st.session_state.df = df[cols]
         st.success(f"🎉 完成！共提取 {len(all_entries)} 条")
+        print(f"🎉 完成！共提取 {len(all_entries)} 条", flush=True)
     else:
         st.error("❌ 未提取到数据")
+        print("❌ 未提取到数据", flush=True)
 
     st.session_state.processing = False
 
