@@ -330,7 +330,7 @@ if st.session_state.df is not None and not st.session_state.df.empty:
     
     if not edited_df.equals(df):
         st.session_state.df = edited_df
-        st.success("✅ 数据已更新")s
+        st.success("✅ 数据已更新")
     
     col_down1, col_down2 = st.columns([1, 5])
     with col_down1:
