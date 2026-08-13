@@ -169,6 +169,7 @@ with st.sidebar:
     with st.expander("📝 更新日志", expanded=False):
         st.markdown("""
         **v2.2.0** (2026-08-14)
+        - 📖 反馈或建议请联系作者邮箱youxiang051110@163.com和QQ169636694
         - 📖 新增智能拆分长文献（突破5000字限制）
         - 💾 新增结果缓存（重复处理零Token消耗）
         - ⚡ 新增并行处理（多文件加速50%-70%）
@@ -317,7 +318,7 @@ if st.session_state.df is not None and not st.session_state.df.empty:
     
     if not edited_df.equals(df):
         st.session_state.df = edited_df
-        st.success("✅ 数据已更新")
+        st.success("✅ 数据已更新")s
     
     col_down1, col_down2 = st.columns([1, 5])
     with col_down1:
