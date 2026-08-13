@@ -1,0 +1,7 @@
+.env 
+__pycache__/ 
+cache/ 
+运行日志.log 
+文化要素提取结果*.xlsx 
+temp_pdfs/ 
+.venv/ 
