@@ -61,5 +61,5 @@ FEW_SHOT_EXAMPLES = """
 """
 
 # ---------- 版本信息 ----------
-VERSION = "2.2.0"
+VERSION = "2.3.0"
 APP_NAME = "文献文化要素提取工具"
