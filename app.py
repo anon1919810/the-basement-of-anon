@@ -50,22 +50,25 @@ except Exception as e:
 # ========== 页面配置 ==========
 st.set_page_config(page_title=APP_NAME, layout="wide", page_icon="📚")
 
-# ========== UI 美化样式（完整版 v2.4.0） ==========
+# ========== UI 美化样式（验证生效版） ==========
 st.markdown("""
 <style>
     /* 全局背景 */
     .stApp {
         background-color: #f8f9fa !important;
     }
+    
     /* 侧边栏 */
-    section[data-testid="stSidebar"] {
+    .stSidebar {
         background-color: #ffffff !important;
         border-right: 1px solid #e9ecef !important;
     }
+    
     /* 所有标题 */
-    h1, h2, h3, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
+    h1, h2, h3 {
         color: #1a202c !important;
     }
+    
     /* 主按钮 */
     .stButton button {
         background-color: #3b82f6 !important;
@@ -79,6 +82,7 @@ st.markdown("""
         background-color: #2563eb !important;
         box-shadow: 0 4px 12px rgba(59,130,246,0.4) !important;
     }
+    
     /* 输入框 */
     .stTextInput input, .stTextArea textarea {
         border-radius: 8px !important;
@@ -89,15 +93,18 @@ st.markdown("""
         border-color: #3b82f6 !important;
         box-shadow: 0 0 0 3px rgba(59,130,246,0.2) !important;
     }
-    /* 成功/错误/信息提示框 */
+    
+    /* 提示框 */
     .stAlert {
         border-radius: 8px !important;
     }
+    
     /* 指标卡片数值 */
     [data-testid="stMetricValue"] {
         color: #1a202c !important;
         font-weight: 600 !important;
     }
+    
     /* 下载按钮 */
     .stDownloadButton button {
         background-color: #10b981 !important;
@@ -105,20 +112,13 @@ st.markdown("""
     .stDownloadButton button:hover {
         background-color: #059669 !important;
     }
-    /* 页脚文字 */
+    
+    /* 页脚 */
     .stCaption {
         color: #6b7280 !important;
     }
-    /* 卡片风格区块 */
-    .stAlert, .stSuccess, .stInfo, .stWarning, .stError {
-        border-radius: 8px !important;
-    }
-    /* 数据表格 */
-    .stDataFrame {
-        border-radius: 8px !important;
-        border: 1px solid #e9ecef !important;
-    }
-    /* 折叠面板标题 */
+    
+    /* 折叠面板 */
     .streamlit-expanderHeader {
         font-weight: 500 !important;
         color: #1a202c !important;
@@ -434,7 +434,7 @@ if st.session_state.logged_in:
         submit_msg = st.form_submit_button("📤 发布留言")
         if submit_msg and msg_content.strip():
             db.add_message(st.session_state.user_id, st.session_state.user, msg_content.strip())
-            st.success("✅ do you hear the people sing?")
+            st.success("✅ do you hear the people singing?")
             st.rerun()
         elif submit_msg:
             st.error("❌ 棍母了喵")
