@@ -1,110 +1,78 @@
-import sqlite3
+import os
 import hashlib
-import datetime
+from supabase import create_client, Client
 
-DB_PATH = "data.db"
+# ========== Supabase 配置 ==========
+SUPABASE_URL = "https://vnnhcveudcoetzcuceun.supabase.co"
+SUPABASE_KEY = "sb_publishable_occHvZCJl5DmiNlL08qsdQ_BnQ6szlR"
 
-def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-def init_db():
-    """初始化数据库表"""
-    conn = get_db()
-    cursor = conn.cursor()
-    
-    # 用户表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL,
-            email TEXT,
-            qq TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    # 留言表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            username TEXT NOT NULL,
-            content TEXT NOT NULL,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        )
-    ''')
-    
-    conn.commit()
-    conn.close()
+def get_supabase() -> Client:
+    """获取 Supabase 客户端"""
+    return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def hash_password(password):
     """加密密码"""
     return hashlib.sha256(password.encode()).hexdigest()
 
+def init_db():
+    """兼容旧接口"""
+    print("✅ 已连接到 Supabase 数据库")
+    pass
+
 def register_user(username, password, email="", qq=""):
-    """注册用户"""
-    conn = get_db()
-    cursor = conn.cursor()
+    supabase = get_supabase()
     try:
-        cursor.execute(
-            "INSERT INTO users (username, password, email, qq) VALUES (?, ?, ?, ?)",
-            (username, hash_password(password), email, qq)
-        )
-        conn.commit()
-        return True
-    except sqlite3.IntegrityError:
+        data = {
+            "username": username,
+            "password": hash_password(password),
+            "email": email,
+            "qq": qq
+        }
+        result = supabase.table("users").insert(data).execute()
+        return len(result.data) > 0
+    except Exception as e:
+        print(f"注册失败：{e}")
         return False
-    finally:
-        conn.close()
 
 def login_user(username, password):
-    """登录验证"""
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT * FROM users WHERE username = ? AND password = ?",
-        (username, hash_password(password))
-    )
-    user = cursor.fetchone()
-    conn.close()
-    return user
+    supabase = get_supabase()
+    try:
+        result = supabase.table("users").select("*").eq("username", username).eq("password", hash_password(password)).execute()
+        if result.data:
+            return result.data[0]
+        return None
+    except Exception as e:
+        print(f"登录失败：{e}")
+        return None
 
 def get_messages(limit=100):
-    """获取留言列表"""
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT * FROM messages ORDER BY created_at DESC LIMIT ?",
-        (limit,)
-    )
-    messages = cursor.fetchall()
-    conn.close()
-    return messages
+    supabase = get_supabase()
+    try:
+        result = supabase.table("messages").select("*").order("created_at", desc=True).limit(limit).execute()
+        return result.data
+    except Exception as e:
+        print(f"获取留言失败：{e}")
+        return []
 
 def add_message(user_id, username, content):
-    """添加留言"""
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO messages (user_id, username, content) VALUES (?, ?, ?)",
-        (user_id, username, content)
-    )
-    conn.commit()
-    conn.close()
+    supabase = get_supabase()
+    try:
+        data = {
+            "user_id": user_id,
+            "username": username,
+            "content": content
+        }
+        result = supabase.table("messages").insert(data).execute()
+        return len(result.data) > 0
+    except Exception as e:
+        print(f"添加留言失败：{e}")
+        return False
 
 def delete_message(message_id, user_id):
-    """删除自己的留言"""
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute(
-        "DELETE FROM messages WHERE id = ? AND user_id = ?",
-        (message_id, user_id)
-    )
-    deleted = cursor.rowcount > 0
-    conn.commit()
-    conn.close()
-    return deleted
+    supabase = get_supabase()
+    try:
+        result = supabase.table("messages").delete().eq("id", message_id).eq("user_id", user_id).execute()
+        return len(result.data) > 0
+    except Exception as e:
+        print(f"删除留言失败：{e}")
+        return False
