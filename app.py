@@ -10,7 +10,7 @@ import sys
 from io import BytesIO
 
 # ========== 调试：强制打印，确认 app.py 已加载 ==========
-print("=== app.py 已加载（v2.3.0-debug）===", flush=True)
+print("=== app.py 已加载（v2.4.0）===", flush=True)
 sys.stdout.flush()
 
 # ========== 导入核心模块（加异常捕获） ==========
@@ -47,18 +47,100 @@ try:
 except Exception as e:
     print(f"❌ API Key 检查出错：{e}", flush=True)
 
-# --- 页面配置 ---
+# ========== 页面配置 ==========
 st.set_page_config(page_title=APP_NAME, layout="wide", page_icon="📚")
+
+# ========== 自定义 CSS（Supabase 风格 UI 美化） ==========
+st.markdown("""
+<style>
+    /* 全局背景 */
+    .stApp {
+        background-color: #f8f9fa;
+    }
+    /* 卡片样式 */
+    .css-1r6slb0, .css-1v3fvcr, .st-emotion-cache-1r6slb0, .st-emotion-cache-1v3fvcr {
+        background-color: white;
+        border-radius: 12px;
+        padding: 20px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        border: 1px solid #e9ecef;
+    }
+    /* 标题颜色 */
+    h1, h2, h3, .st-emotion-cache-1v3fvcr h1, .st-emotion-cache-1v3fvcr h2, .st-emotion-cache-1v3fvcr h3 {
+        color: #1a202c !important;
+    }
+    /* 按钮风格 */
+    .stButton button, .st-emotion-cache-1v3fvcr .stButton button {
+        background-color: #3b82f6 !important;
+        color: white !important;
+        border-radius: 8px !important;
+        font-weight: 500 !important;
+        border: none !important;
+        transition: all 0.2s ease;
+    }
+    .stButton button:hover, .st-emotion-cache-1v3fvcr .stButton button:hover {
+        background-color: #2563eb !important;
+        box-shadow: 0 4px 12px rgba(59,130,246,0.4);
+    }
+    /* 侧边栏 */
+    .css-1d391kg, .st-emotion-cache-1d391kg {
+        background-color: white !important;
+        border-right: 1px solid #e9ecef !important;
+    }
+    /* 输入框 */
+    .stTextInput input, .stTextArea textarea, .st-emotion-cache-1v3fvcr .stTextInput input {
+        border-radius: 8px !important;
+        border: 1px solid #d1d5db !important;
+        padding: 8px 12px !important;
+    }
+    .stTextInput input:focus, .stTextArea textarea:focus {
+        border-color: #3b82f6 !important;
+        box-shadow: 0 0 0 3px rgba(59,130,246,0.2) !important;
+    }
+    /* 指标卡片 */
+    [data-testid="stMetricValue"] {
+        color: #1a202c !important;
+        font-weight: 600 !important;
+    }
+    /* 成功/错误信息 */
+    .stAlert {
+        border-radius: 8px !important;
+    }
+    /* 下载按钮 */
+    .stDownloadButton button {
+        background-color: #10b981 !important;
+    }
+    .stDownloadButton button:hover {
+        background-color: #059669 !important;
+    }
+    /* 侧边栏折叠面板 */
+    .streamlit-expanderHeader {
+        font-weight: 500 !important;
+        color: #1a202c !important;
+    }
+    /* 表格样式 */
+    .stDataFrame {
+        border-radius: 8px !important;
+        border: 1px solid #e9ecef !important;
+    }
+    /* 页脚 */
+    .stCaption {
+        color: #6b7280 !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# ========== 标题 ==========
 st.title(f"📚 {APP_NAME}")
 st.markdown(f"版本 {VERSION} — 上传地方志或档案PDF，AI自动提取文化要素")
 
-# --- 初始化session_state ---
+# ========== 初始化 session_state ==========
 if 'df' not in st.session_state:
     st.session_state.df = None
 if 'processing' not in st.session_state:
     st.session_state.processing = False
 
-# --- 登录状态 ---
+# ========== 登录状态 ==========
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
 if 'user' not in st.session_state:
@@ -228,25 +310,26 @@ with st.sidebar:
         - 💾 结果缓存：重复处理零消耗
         - 🔍 OCR集成：自动识别扫描件
         - 📖 智能拆分：突破5000字限制
+        - 🔐 登录/注册系统
+        - 💬 用户留言板
         """)
     
     # ----- 更新日志 -----
     with st.expander("📝 更新日志", expanded=False):
         st.markdown("""
+        **v2.4.0** (2026-08-15)
+        - 🎨 全面UI美化：Supabase风格卡片设计、柔和配色、圆角按钮
+        - ✨ 提升视觉体验：优化输入框、按钮、表格样式
+        - 🔧 完善登录/注册交互反馈
+        - 📝 使用须知中补充新功能说明
+
         **v2.3.0** (2026-08-14)
         - 🔐 新增用户登录/注册系统
         - 💬 新增留言板功能（登录后可使用）
         - 📖 反馈请联系作者邮箱youxiang051110@163.com或QQ169636694
-        - 🚀 云端部署：工具正式上线 Streamlit Cloud，生成公网链接
-        - 🔧 工程化改进：
-         - 新增 `packages.txt` 支持系统依赖（Tesseract + Poppler）
-         - 优化 Secrets 环境变量配置（API Key 安全管理）
-         - 新增调试日志模块，便于云端问题排查
-        - 🐛 修复：
-         - 修复云端 OCR 依赖缺失问题
-         - 修复 Git 敏感信息推送拦截问题
-         - 优化 API Key 读取失败的异常处理
-        - 📝 文档更新：使用须知中补充云端使用说明
+        - 🚀 云端部署：工具正式上线 Streamlit Cloud
+        - 🔧 工程化改进：系统依赖、环境变量、调试日志
+        - 🐛 修复云端OCR依赖缺失、Git敏感信息拦截等问题
 
         **v2.2.0** (2026-08-14)
         - 📖 新增智能拆分长文献（突破5000字限制）
@@ -261,13 +344,8 @@ with st.sidebar:
         - 🔧 优化示例解析逻辑
         
         **v2.0.0** (2026-08-13)
-        - 🎉 重大更新！更加可操作、可互动的界面，更多功能和延展性
-        - ✨ 新增统计看板（总条数、类别/流域分布图表）
-        - ✨ 新增在线编辑表格（双击修改，实时保存）
-        - ✨ 新增真实进度条（同步显示处理进度）
-        - ✨ 新增日志系统（运行日志.log）
-        - 🔧 配置文件分离（config.py）
-        - 📄 新增使用须知、更新日志、致谢页面
+        - 🎉 重大更新：统计看板、在线编辑、真实进度条
+        - 🔧 配置文件分离、日志系统
         
         **v1.0.0** (2026-08-12)
         - 🎉 初始版本发布
@@ -287,6 +365,7 @@ with st.sidebar:
         - Python 3.14, Streamlit 1.61
         - DeepSeek API, PyMuPDF
         - Pandas, OpenPyXL, Tesseract
+        - Supabase (PostgreSQL)
         
         **特别感谢**
         - DeepSeek和Claude提供的强大AI能力
@@ -450,7 +529,11 @@ if st.session_state.df is not None and not st.session_state.df.empty:
         )
 
 else:
-    st.info("👈 左侧上传PDF并点击提取")
+    # 未提取数据时显示提示（仅在未登录时显示，登录且未提取时已在上方显示）
+    if not st.session_state.logged_in:
+        st.info("👈 请先登录，然后上传PDF并点击提取")
+    elif st.session_state.df is None:
+        st.info("👈 左侧上传PDF并点击提取")
 
 st.markdown("---")
-st.caption(f"💡 {APP_NAME} v{VERSION} · 在线修改自动保留")
+st.caption(f"💡 {APP_NAME} v{VERSION} · 在线修改自动保留 · 数据已上云 ☁️")
