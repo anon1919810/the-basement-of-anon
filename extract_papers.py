@@ -35,7 +35,7 @@ from config import (
     LOW_YIELD_THRESHOLD, LOW_YIELD_MIN_CHARS, MAX_LOW_YIELD_RETRIES,
     API_URL, MAX_API_RETRIES, RETRY_BACKOFF_SECONDS, MAX_OUTPUT_TOKENS,
     CATEGORY_OPTIONS, BASIN_OPTIONS, PROMPT_TEMPLATE_VERSION,
-    STRICT_EXTRACTION, MERGE_SIMILAR_ENTRIES,
+    STRICT_EXTRACTION, MERGE_SIMILAR_ENTRIES, STRUCTURE_MODE,
 )
 from province_dict import PROVINCE_DICT
 
@@ -104,6 +104,59 @@ def extract_text_from_pdf(pdf_path):
     text, _ = _extract_text_with_flag(pdf_path)
     return text
 
+def _extract_structured_text(pdf_path):
+    """字体感知提取：把"加粗/大字提行标题"识别为子目并插入【】标记。
+
+    用于文本层PDF无【】但存在加粗/大字标题的情况（如"亭台楼阁""古建筑"类提行标题）。
+    返回带【】标记的结构化文本；无标题结构时返回空（调用方回退原文）。
+    """
+    try:
+        doc = fitz.open(pdf_path)
+        # 第一遍：统计字号，取中位数作为正文字号
+        sizes = []
+        for page in doc:
+            for b in page.get_text("dict").get("blocks", []):
+                if b.get("type") != 0:
+                    continue
+                for line in b.get("lines", []):
+                    for span in line.get("spans", []):
+                        if span.get("text", "").strip():
+                            sizes.append(span.get("size", 0))
+        doc.close()
+        if not sizes:
+            return ""
+        body_size = sorted(sizes)[len(sizes) // 2]
+        threshold = max(body_size * 1.35, body_size + 3.0)
+
+        # 第二遍：重建文本，标题行加【】包裹
+        doc = fitz.open(pdf_path)
+        out_lines = []
+        for page in doc:
+            for b in page.get_text("dict").get("blocks", []):
+                if b.get("type") != 0:
+                    continue
+                for line in b.get("lines", []):
+                    spans = line.get("spans", [])
+                    if not spans:
+                        continue
+                    stripped = "".join(s.get("text", "") for s in spans).strip()
+                    if not stripped:
+                        continue
+                    s0 = spans[0]
+                    bold = bool(s0.get("flags", 0) & 16)  # bit4=加粗
+                    size = s0.get("size", 0)
+                    is_title = (bold or size >= threshold) and len(stripped) <= 24
+                    if is_title:
+                        out_lines.append(f"【{stripped}】")
+                    else:
+                        out_lines.append(stripped)
+            out_lines.append("")
+        doc.close()
+        return "\n".join(out_lines)
+    except Exception as e:
+        print(f"  [警告] 结构化提取失败：{e}")
+        return ""
+
 def _extract_text_with_flag(pdf_path):
     """提取文本，返回 (text, used_ocr)"""
     used_ocr = False
@@ -121,6 +174,12 @@ def _extract_text_with_flag(pdf_path):
             print(f"  [提示] {os.path.basename(pdf_path)} 疑似扫描件，启动OCR...")
             full_text = ocr_pdf(pdf_path)
             used_ocr = True
+        elif len(_ZIMU_RE.findall(full_text)) < 3:
+            # 文本层无【】结构 -> 尝试字体感知的加粗/大字标题结构
+            structured = _extract_structured_text(pdf_path)
+            if len(_ZIMU_RE.findall(structured)) >= 3:
+                print(f"  [结构] 检测到加粗/大字标题子目，使用结构化提取")
+                full_text = structured
 
         return full_text, used_ocr
     except Exception as e:
@@ -165,7 +224,7 @@ def split_text_into_chunks(text, max_length=MAX_TEXT_LENGTH, overlap=CHUNK_OVERL
     return chunks
 
 # ---------- 缓存工具 ----------
-def _prompt_signature(is_ocr=False, is_toc=False, extraction_passes=None):
+def _prompt_signature(is_ocr=False, is_toc=False, extraction_passes=None, is_zimu=False):
     """计算提示词/配置签名：修改模板、Few-shot、模型参数后自动使旧缓存失效"""
     passes = extraction_passes or EXTRACTION_PASSES
     seed = "|".join([
@@ -173,16 +232,17 @@ def _prompt_signature(is_ocr=False, is_toc=False, extraction_passes=None):
         str(MODEL_NAME), str(TEMPERATURE),
         str(MAX_TEXT_LENGTH), str(CHUNK_OVERLAP),
         str(STRICT_EXTRACTION),
+        str(STRUCTURE_MODE),
         str(FEW_SHOT_EXAMPLES),
         str(passes),
-        str(is_ocr), str(is_toc),
+        str(is_ocr), str(is_toc), str(is_zimu),
     ])
     return hashlib.md5(seed.encode("utf-8")).hexdigest()[:12]
 
-def get_cache_key(text, book_name, is_ocr=False, is_toc=False, extraction_passes=None):
-    """生成缓存键（全文哈希 + 文献名 + 配置签名 + OCR/目录/轮数标志）"""
+def get_cache_key(text, book_name, is_ocr=False, is_toc=False, extraction_passes=None, is_zimu=False):
+    """生成缓存键（全文哈希 + 文献名 + 配置签名 + 模式标志）"""
     text_hash = hashlib.md5(text.encode("utf-8")).hexdigest()
-    raw = f"{text_hash}|{book_name}|{_prompt_signature(is_ocr, is_toc, extraction_passes)}"
+    raw = f"{text_hash}|{book_name}|{_prompt_signature(is_ocr, is_toc, extraction_passes, is_zimu)}"
     return hashlib.md5(raw.encode("utf-8")).hexdigest()
 
 def load_from_cache(cache_key):
@@ -242,6 +302,128 @@ def _detect_toc(text):
     """检测目录/索引页：文本开头600字内出现"目录"字样（容忍OCR空格）"""
     head = text[:600].replace(" ", "").replace("\u3000", "")
     return "目录" in head
+
+# ---------- 子目结构模式（【】或加粗/大字提行标题） ----------
+_ZIMU_RE = re.compile(r"【([^】\n]{1,60})】")
+
+def _parse_zimu_blocks(text):
+    """解析【】子目结构：返回 [(标题, 正文), ...]；少于2个返回空"""
+    matches = list(_ZIMU_RE.finditer(text))
+    if len(matches) < 2:
+        return []
+    blocks = []
+    for i, m in enumerate(matches):
+        title = m.group(1).strip()
+        body_start = m.end()
+        body_end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        body = text[body_start:body_end].strip()
+        blocks.append((title, body))
+    return blocks
+
+def _detect_zimu(text):
+    """检测子目结构：文本中【】子目数量>=3"""
+    if STRUCTURE_MODE == "full":
+        return False
+    if STRUCTURE_MODE == "zimu":
+        return True
+    return len(_ZIMU_RE.findall(text)) >= 3
+
+def _first_sentences(body, max_chars=120):
+    """逐字摘录正文开头1-3个完整句子（确定性，保证100%忠实原文）"""
+    sents = _split_sentences(body)
+    out = ""
+    for s in sents:
+        s = s.strip()
+        if not s:
+            continue
+        if out and len(out) + len(s) > max_chars:
+            break
+        out += s
+        if len(out) >= max_chars:
+            break
+    # 折叠PDF换行（仅去换行符，保留空格与标点）
+    return out.replace("\r", "").replace("\n", "").strip()
+
+def _build_zimu_prompt(blocks, book_name, chunk_index, chunk_total):
+    """子目模式提示词：模型只为每个子目填写元数据（名称/引文由代码确定）"""
+    items = []
+    for i, (title, body) in enumerate(blocks, 1):
+        preview = re.sub(r"\s+", "", body)[:180]
+        items.append(f"{i}. 标题【{title}】 正文：{preview}")
+    block_list = "\n".join(items)
+
+    category_enum = "、".join(CATEGORY_OPTIONS)
+    basin_enum = "、".join(BASIN_OPTIONS)
+    prompt = f"""你是严谨的文史档案整理专家。以下是从《{book_name}》中提取出的 {len(blocks)} 个【】子目（每个附正文开头预览）。
+
+要求：
+1. 为每个子目输出一条记录，"名称"必须等于【】中的标题原文，不得修改、不得补全。
+2. 一个子目只输出一条，【严禁在子目内部再细分】。
+3. 若某子目显然不是文化要素（如"凡例""后记""出版说明"等），跳过不输出。
+4. 字段规则：
+   - "类别"只能取：{category_enum}
+   - "时间"：正文中的朝代/年代/年份，未说明填"不详"
+   - "空间"：按"省市区"行政区划格式补全（如"重庆市大足区"），无法判断填"不详"
+   - "流域"：只能取：{basin_enum}
+   - "基础信息"：用简洁语言归纳该子目正文的信息，不超过80字，必须基于正文
+
+只输出一个JSON对象：{{"entries": [{{"名称": "", "类别": "", "时间": "", "空间": "", "流域": "", "基础信息": ""}}]}}
+
+子目列表（第{chunk_index}组，共{chunk_total}组）：
+{block_list}"""
+    return prompt
+
+def _extract_zimu_entries(text, book_name, is_ocr=False):
+    """子目模式提取：名称/引文确定性取自原文，元数据由模型批量填写"""
+    blocks = _parse_zimu_blocks(text)
+    if not blocks:
+        return []
+    log_message(f"  [子目模式] 识别 {len(blocks)} 个【】子目", "INFO")
+
+    # 按提示词体积分组（每组的正文预览总长不超过 ~6000 字）
+    groups, cur, cur_len = [], [], 0
+    for title, body in blocks:
+        size = len(title) + min(len(body), 200)
+        if cur and cur_len + size > 6000:
+            groups.append(cur)
+            cur, cur_len = [], 0
+        cur.append((title, body))
+        cur_len += size
+    if cur:
+        groups.append(cur)
+
+    entries = []
+    for gi, group in enumerate(groups, 1):
+        data = _call_deepseek(_build_zimu_prompt(group, book_name, gi, len(groups)))
+        meta = {}
+        if isinstance(data, dict):
+            for key in ("entries", "条目", "数据", "results"):
+                if isinstance(data.get(key), list):
+                    data = data[key]
+                    break
+        if isinstance(data, list):
+            for raw in data:
+                if isinstance(raw, dict) and raw.get("名称"):
+                    meta[re.sub(r"\s+", "", str(raw["名称"]))] = raw
+        for title, body in group:
+            norm_title = re.sub(r"\s+", "", title)
+            m = meta.get(norm_title, {})
+            entry = {
+                "名称": title,
+                "类别": str(m.get("类别", "")).strip(),
+                "时间": str(m.get("时间", "")).strip(),
+                "空间": str(m.get("空间", "")).strip(),
+                "流域": str(m.get("流域", "")).strip(),
+                "基础信息": str(m.get("基础信息", "")).strip(),
+                "历史文献": _first_sentences(body),
+            }
+            entries.append(entry)
+
+    # 统一规范化（校验类别/流域、空间补全、OCR乱码清理）
+    normalized = _normalize_entries({"entries": entries}, is_ocr=is_ocr)
+    if len(normalized) < len(entries):
+        log_message(f"  [校验] 剔除 {len(entries) - len(normalized)} 条无效子目", "WARNING")
+    return normalized
 
 def _build_prompt(sample, book_name, chunk_index, chunk_total, is_ocr=False, is_toc=False):
     """构建提取 Prompt（v3.4：防编造、严格枚举、输出Schema示例、页码诚实、目录感知）
@@ -728,11 +910,12 @@ def _annotate_name_corrections(entries, source_text):
                 entry["基础信息"] = (info + "；" + note) if info else note
 
 def extract_cultural_elements(text, book_name, is_ocr=False, extraction_passes=None):
-    """从文本提取文化要素（支持拆分、缓存、去重、OCR感知、目录感知、多轮并集）"""
+    """从文本提取文化要素（支持拆分、缓存、去重、OCR感知、目录感知、子目模式）"""
     # 检查缓存
     is_toc = _detect_toc(text)
+    is_zimu = _detect_zimu(text) and not is_toc
     cache_key = get_cache_key(text, book_name, is_ocr=is_ocr, is_toc=is_toc,
-                              extraction_passes=extraction_passes)
+                              extraction_passes=extraction_passes, is_zimu=is_zimu)
     cached = load_from_cache(cache_key)
     if cached is not None:
         log_message(f"  [缓存命中] 直接返回缓存结果 ({len(cached)} 条)", "INFO")
@@ -740,6 +923,13 @@ def extract_cultural_elements(text, book_name, is_ocr=False, extraction_passes=N
 
     if is_toc:
         log_message("  [识别] 目录/索引页，仅提取明确实体", "INFO")
+
+    # 子目模式：每个【】子目一条（名称/引文确定性取自原文，不在子目内细分）
+    if is_zimu:
+        all_entries = _extract_zimu_entries(text, book_name, is_ocr=is_ocr)
+        save_to_cache(cache_key, all_entries)
+        log_message(f"  [缓存] 已保存 {len(all_entries)} 条到缓存", "INFO")
+        return all_entries
 
     # 智能拆分
     if ENABLE_SPLIT and len(text) > MAX_TEXT_LENGTH:

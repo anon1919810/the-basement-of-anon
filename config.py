@@ -16,7 +16,7 @@ MAX_API_RETRIES = 3             # 单块调用失败最大重试次数（网络�
 RETRY_BACKOFF_SECONDS = 2       # 重试退避基数（秒），第n次重试等待 基数 * 2^(n-1)
 MAX_OUTPUT_TOKENS = 8192        # 单次响应最大输出token（deepseek-chat上限8192）
                                 # 注意：默认4096可能截断长JSON导致解析失败，务必保持8192
-PROMPT_TEMPLATE_VERSION = "3.12" # Prompt模板/后处理管线版本号，行为变更后+1（自动使旧缓存失效）
+PROMPT_TEMPLATE_VERSION = "4.1" # Prompt模板/后处理管线版本号，行为变更后+1（自动使旧缓存失效）
 
 # ---------- 文献设置 ----------
 DEFAULT_BOOK_NAME = "武汉市志 文物志"
@@ -32,6 +32,12 @@ BASIN_OPTIONS = ["长江流域", "汉江流域", "不详"]
 # True  = 只提取原文中明确出现的内容，宁可少而准（防止AI编造，学术研究强烈推荐）
 # False = 宁可多提取，也不要遗漏（召回优先，默认推荐；每条仍必须有原文依据）
 STRICT_EXTRACTION = False
+
+# 子目结构模式：
+#   auto = 检测到【】子目（或加粗/大字提行标题）即用"子目模式"（每个子目一条，
+#          不在子目内细分）；否则用全文提取模式
+#   zimu = 强制子目模式；full = 强制全文模式
+STRUCTURE_MODE = "auto"
 
 # 是否合并跨块产生的近似重复条目（如"汉阳旧城"与"汉阳城"为同一实体）
 MERGE_SIMILAR_ENTRIES = True
@@ -104,5 +110,5 @@ FEW_SHOT_EXAMPLES = """
 """
 
 # ---------- 版本信息 ----------
-VERSION = "2.9.1"
+VERSION = "3.0.0"
 APP_NAME = "重庆Major2026·档档案案世界冠军"
