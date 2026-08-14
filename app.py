@@ -1,3 +1,4 @@
+import database as db
 import streamlit as st
 import pandas as pd
 import os
@@ -57,13 +58,77 @@ if 'df' not in st.session_state:
 if 'processing' not in st.session_state:
     st.session_state.processing = False
 
+# --- 登录状态 ---
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
+if 'user' not in st.session_state:
+    st.session_state.user = None
+if 'user_id' not in st.session_state:
+    st.session_state.user_id = None
+
+# 初始化数据库（首次运行自动创建）
+db.init_db()
+
 # ======================== 侧边栏 ========================
 with st.sidebar:
-    st.header("⚙️ 参数设置")
-    book_name = st.text_input("📖 文献名称", value=DEFAULT_BOOK_NAME)
-    uploaded_files = st.file_uploader("📄 上传PDF文件", type=['pdf'], accept_multiple_files=True)
-    start_btn = st.button("🚀 开始智能提取", type="primary", use_container_width=True)
+    # ----- 用户登录 / 注册 -----
+    if not st.session_state.logged_in:
+        with st.expander("🔐 登录 / 注册", expanded=True):
+            login_tab, register_tab = st.tabs(["登录", "注册"])
+            
+            with login_tab:
+                login_username = st.text_input("用户名", key="login_user")
+                login_password = st.text_input("密码", type="password", key="login_pass")
+                if st.button("登录", use_container_width=True):
+                    user = db.login_user(login_username, login_password)
+                    if user:
+                        st.session_state.logged_in = True
+                        st.session_state.user = user["username"]
+                        st.session_state.user_id = user["id"]
+                        st.success(f"✅ 欢迎回来，{user['username']}！")
+                        st.rerun()
+                    else:
+                        st.error("❌ 用户名或密码错误")
+            
+            with register_tab:
+                reg_username = st.text_input("用户名", key="reg_user")
+                reg_password = st.text_input("密码", type="password", key="reg_pass")
+                reg_email = st.text_input("邮箱（选填）", key="reg_email")
+                reg_qq = st.text_input("QQ号（选填）", key="reg_qq")
+                if st.button("注册", use_container_width=True):
+                    if len(reg_username) < 2:
+                        st.error("❌ 用户名至少2个字符")
+                    elif len(reg_password) < 4:
+                        st.error("❌ 密码至少4个字符")
+                    else:
+                        success = db.register_user(reg_username, reg_password, reg_email, reg_qq)
+                        if success:
+                            st.success("✅ 注册成功！请切换到登录页登录")
+                        else:
+                            st.error("❌ 用户名已被占用")
+    else:
+        # 已登录状态
+        st.info(f"👤 当前用户：**{st.session_state.user}**")
+        if st.button("🚪 退出登录", use_container_width=True):
+            st.session_state.logged_in = False
+            st.session_state.user = None
+            st.session_state.user_id = None
+            st.rerun()
     
+    st.markdown("---")
+    
+    # ----- 参数设置（只在登录后显示）-----
+    if st.session_state.logged_in:
+        st.header("⚙️ 参数设置")
+        book_name = st.text_input("📖 文献名称", value=DEFAULT_BOOK_NAME)
+        uploaded_files = st.file_uploader("📄 上传PDF文件", type=['pdf'], accept_multiple_files=True)
+        start_btn = st.button("🚀 开始智能提取", type="primary", use_container_width=True)
+    else:
+        st.info("🔒 请先登录后再使用提取功能")
+        start_btn = False
+        uploaded_files = []
+        book_name = DEFAULT_BOOK_NAME
+
     st.markdown("---")
     
     # ----- 性能配置 -----
@@ -168,7 +233,9 @@ with st.sidebar:
     # ----- 更新日志 -----
     with st.expander("📝 更新日志", expanded=False):
         st.markdown("""
-       **v2.3.0** (2026-08-14)
+        **v2.3.0** (2026-08-14)
+        - 🔐 新增用户登录/注册系统
+        - 💬 新增留言板功能（登录后可使用）
         - 📖 反馈请联系作者邮箱youxiang051110@163.com或QQ169636694
         - 🚀 云端部署：工具正式上线 Streamlit Cloud，生成公网链接
         - 🔧 工程化改进：
@@ -228,7 +295,9 @@ with st.sidebar:
         """)
 
 # ======================== 主界面 ========================
-if start_btn and uploaded_files:
+
+# --- 提取逻辑（增加了 logged_in 检查）---
+if start_btn and uploaded_files and st.session_state.logged_in:
     # ========== 调试：按钮被点击 ==========
     print("=== 🔘 按钮被点击了！===", flush=True)
     print(f"上传了 {len(uploaded_files)} 个文件", flush=True)
@@ -278,6 +347,40 @@ if start_btn and uploaded_files:
         print("❌ 未提取到数据", flush=True)
 
     st.session_state.processing = False
+
+# ======================== 留言板 ========================
+if st.session_state.logged_in:
+    st.markdown("---")
+    st.subheader("💬 用户留言板")
+    
+    # 提交留言
+    with st.form(key="message_form", clear_on_submit=True):
+        msg_content = st.text_area("畅所欲言吧朋友们，今天所有的发言由克里斯蒂亚诺·罗纳尔多·多斯·桑托斯·阿伟罗买单！", placeholder="中国基本古籍库是什么冠军？我AI冠军！！！", height=80)
+        submit_msg = st.form_submit_button("📤 发布留言")
+        if submit_msg and msg_content.strip():
+            db.add_message(st.session_state.user_id, st.session_state.user, msg_content.strip())
+            st.success("✅ do you hear the people sing?")
+            st.rerun()
+        elif submit_msg:
+            st.error("❌ 棍母了喵")
+    
+    # 显示留言列表
+    messages = db.get_messages(limit=50)
+    if messages:
+        for msg in messages:
+            col1, col2 = st.columns([10, 1])
+            with col1:
+                st.markdown(f"**{msg['username']}**  ·  {msg['created_at'][:16]}")
+                st.markdown(f"{msg['content']}")
+                st.markdown("---")
+            with col2:
+                # 只有留言者本人可以删除
+                if msg['user_id'] == st.session_state.user_id:
+                    if st.button("🗑️", key=f"del_{msg['id']}"):
+                        db.delete_message(msg['id'], st.session_state.user_id)
+                        st.rerun()
+    else:
+        st.info("📭 暂无留言，来做第一个留言的人吧！")
 
 # --- 统计看板 ---
 if st.session_state.df is not None and not st.session_state.df.empty:
