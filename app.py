@@ -50,59 +50,37 @@ except Exception as e:
 # ========== 页面配置 ==========
 st.set_page_config(page_title=APP_NAME, layout="wide", page_icon="📚")
 
-# ========== 测试 CSS（极简版） ==========
-st.markdown("""
-<style>
-    /* 让所有标题变成红色，测试 CSS 是否生效 */
-    h1, h2, h3 {
-        color: #ff0000 !important;
-    }
-    /* 让侧边栏背景变成浅蓝色 */
-    .stSidebar {
-        background-color: #e0f0ff !important;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# ========== 自定义 CSS（Supabase 风格 UI 美化） ==========
+# ========== UI 美化样式（完整版 v2.4.0） ==========
 st.markdown("""
 <style>
     /* 全局背景 */
     .stApp {
-        background-color: #f8f9fa;
+        background-color: #f8f9fa !important;
     }
-    /* 卡片样式 */
-    .css-1r6slb0, .css-1v3fvcr, .st-emotion-cache-1r6slb0, .st-emotion-cache-1v3fvcr {
-        background-color: white;
-        border-radius: 12px;
-        padding: 20px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-        border: 1px solid #e9ecef;
+    /* 侧边栏 */
+    section[data-testid="stSidebar"] {
+        background-color: #ffffff !important;
+        border-right: 1px solid #e9ecef !important;
     }
-    /* 标题颜色 */
-    h1, h2, h3, .st-emotion-cache-1v3fvcr h1, .st-emotion-cache-1v3fvcr h2, .st-emotion-cache-1v3fvcr h3 {
+    /* 所有标题 */
+    h1, h2, h3, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
         color: #1a202c !important;
     }
-    /* 按钮风格 */
-    .stButton button, .st-emotion-cache-1v3fvcr .stButton button {
+    /* 主按钮 */
+    .stButton button {
         background-color: #3b82f6 !important;
         color: white !important;
         border-radius: 8px !important;
-        font-weight: 500 !important;
         border: none !important;
-        transition: all 0.2s ease;
+        font-weight: 500 !important;
+        transition: all 0.2s ease !important;
     }
-    .stButton button:hover, .st-emotion-cache-1v3fvcr .stButton button:hover {
+    .stButton button:hover {
         background-color: #2563eb !important;
-        box-shadow: 0 4px 12px rgba(59,130,246,0.4);
-    }
-    /* 侧边栏 */
-    .css-1d391kg, .st-emotion-cache-1d391kg {
-        background-color: white !important;
-        border-right: 1px solid #e9ecef !important;
+        box-shadow: 0 4px 12px rgba(59,130,246,0.4) !important;
     }
     /* 输入框 */
-    .stTextInput input, .stTextArea textarea, .st-emotion-cache-1v3fvcr .stTextInput input {
+    .stTextInput input, .stTextArea textarea {
         border-radius: 8px !important;
         border: 1px solid #d1d5db !important;
         padding: 8px 12px !important;
@@ -111,14 +89,14 @@ st.markdown("""
         border-color: #3b82f6 !important;
         box-shadow: 0 0 0 3px rgba(59,130,246,0.2) !important;
     }
-    /* 指标卡片 */
+    /* 成功/错误/信息提示框 */
+    .stAlert {
+        border-radius: 8px !important;
+    }
+    /* 指标卡片数值 */
     [data-testid="stMetricValue"] {
         color: #1a202c !important;
         font-weight: 600 !important;
-    }
-    /* 成功/错误信息 */
-    .stAlert {
-        border-radius: 8px !important;
     }
     /* 下载按钮 */
     .stDownloadButton button {
@@ -127,19 +105,23 @@ st.markdown("""
     .stDownloadButton button:hover {
         background-color: #059669 !important;
     }
-    /* 侧边栏折叠面板 */
-    .streamlit-expanderHeader {
-        font-weight: 500 !important;
-        color: #1a202c !important;
+    /* 页脚文字 */
+    .stCaption {
+        color: #6b7280 !important;
     }
-    /* 表格样式 */
+    /* 卡片风格区块 */
+    .stAlert, .stSuccess, .stInfo, .stWarning, .stError {
+        border-radius: 8px !important;
+    }
+    /* 数据表格 */
     .stDataFrame {
         border-radius: 8px !important;
         border: 1px solid #e9ecef !important;
     }
-    /* 页脚 */
-    .stCaption {
-        color: #6b7280 !important;
+    /* 折叠面板标题 */
+    .streamlit-expanderHeader {
+        font-weight: 500 !important;
+        color: #1a202c !important;
     }
 </style>
 """, unsafe_allow_html=True)
