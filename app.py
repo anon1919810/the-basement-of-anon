@@ -11,7 +11,7 @@ import sys
 from io import BytesIO
 
 # ========== 调试：强制打印，确认 app.py 已加载 ==========
-print("=== app.py 已加载（v2.7.0）===", flush=True)
+print("=== app.py 已加载（v2.9.0）===", flush=True)
 sys.stdout.flush()
 
 # ========== 导入核心模块（加异常捕获） ==========
@@ -27,7 +27,8 @@ try:
     from config import (
         CATEGORY_OPTIONS, BASIN_OPTIONS, VERSION, APP_NAME,
         OUTPUT_BASE_NAME, DEFAULT_BOOK_NAME, FEW_SHOT_EXAMPLES,
-        MAX_PARALLEL_WORKERS, ENABLE_CACHE, ENABLE_OCR, ENABLE_SPLIT
+        MAX_PARALLEL_WORKERS, ENABLE_CACHE, ENABLE_OCR, ENABLE_SPLIT,
+        EXTRACTION_PASSES,
     )
     print("✅ config 导入成功", flush=True)
 except Exception as e:
@@ -224,6 +225,8 @@ with st.sidebar:
                                    help="突破5000字限制，处理大篇幅文献")
         max_workers = st.slider("并行处理数", min_value=1, max_value=4, value=MAX_PARALLEL_WORKERS,
                                help="同时处理多个文件，建议2-3，过高可能触发API限流")
+        extract_passes = st.slider("每块抽取轮数", min_value=1, max_value=3, value=EXTRACTION_PASSES,
+                                  help="每块调用模型次数并合并去重：1轮省成本，3轮召回最全（API消耗×3）")
     
     st.markdown("---")
     
@@ -318,6 +321,14 @@ with st.sidebar:
     # ----- 更新日志 -----
     with st.expander("📝 更新日志", expanded=False):
         st.markdown("""
+        **v2.9.0** (2026-08-16)
+        - 🎯 修复"一份PDF只能提取1条"：模型对同一块多次调用输出极不稳定（1~45条），
+          新增"每块多轮抽取并集"（默认3轮，可在性能配置调整），召回大幅提升
+        - 📜 历史文献忠实度强化：连续逐字摘录1-3句，禁止省略号/改写/重组语序，
+          附格式示例（实测改写率 25% -> 18%）
+        - 🏭 提取范围新增产业遗存（盐井/盐场/窑址/矿冶等），对齐人工摘录风格
+        - 🔬 参考人工摘录基准（示例/重庆分册），召回对齐达 70%+（含命名变体）
+
         **v2.7.0** (2026-08-16)
         - 🗺️ 长江流域省域字典：空间字段自动补全省/市（湖北全量+12省市）
         - 📝 基础信息摘要上限放宽至80字，信息量更足
@@ -435,7 +446,8 @@ if start_btn and uploaded_files and st.session_state.logged_in:
         all_entries = process_pdfs_parallel(
             pdf_paths, book_name,
             max_workers=max_workers,
-            progress_callback=update_progress
+            progress_callback=update_progress,
+            extraction_passes=extract_passes
         )
         print(f"✅ 处理完成，共提取 {len(all_entries)} 条", flush=True)
     except Exception as e:

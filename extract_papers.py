@@ -31,6 +31,8 @@ from config import (
     FEW_SHOT_EXAMPLES, ENABLE_CACHE, CACHE_EXPIRE_DAYS, CACHE_DIR,
     MAX_PARALLEL_WORKERS, ENABLE_OCR, TESSERACT_PATH, OCR_DPI,
     ENABLE_SPLIT, CHUNK_OVERLAP,
+    EXTRACTION_PASSES,
+    LOW_YIELD_THRESHOLD, LOW_YIELD_MIN_CHARS, MAX_LOW_YIELD_RETRIES,
     API_URL, MAX_API_RETRIES, RETRY_BACKOFF_SECONDS, MAX_OUTPUT_TOKENS,
     CATEGORY_OPTIONS, BASIN_OPTIONS, PROMPT_TEMPLATE_VERSION,
     STRICT_EXTRACTION, MERGE_SIMILAR_ENTRIES,
@@ -163,22 +165,24 @@ def split_text_into_chunks(text, max_length=MAX_TEXT_LENGTH, overlap=CHUNK_OVERL
     return chunks
 
 # ---------- 缓存工具 ----------
-def _prompt_signature(is_ocr=False, is_toc=False):
+def _prompt_signature(is_ocr=False, is_toc=False, extraction_passes=None):
     """计算提示词/配置签名：修改模板、Few-shot、模型参数后自动使旧缓存失效"""
+    passes = extraction_passes or EXTRACTION_PASSES
     seed = "|".join([
         str(PROMPT_TEMPLATE_VERSION),
         str(MODEL_NAME), str(TEMPERATURE),
         str(MAX_TEXT_LENGTH), str(CHUNK_OVERLAP),
         str(STRICT_EXTRACTION),
         str(FEW_SHOT_EXAMPLES),
+        str(passes),
         str(is_ocr), str(is_toc),
     ])
     return hashlib.md5(seed.encode("utf-8")).hexdigest()[:12]
 
-def get_cache_key(text, book_name, is_ocr=False, is_toc=False):
-    """生成缓存键（全文哈希 + 文献名 + 配置签名 + OCR/目录标志）"""
+def get_cache_key(text, book_name, is_ocr=False, is_toc=False, extraction_passes=None):
+    """生成缓存键（全文哈希 + 文献名 + 配置签名 + OCR/目录/轮数标志）"""
     text_hash = hashlib.md5(text.encode("utf-8")).hexdigest()
-    raw = f"{text_hash}|{book_name}|{_prompt_signature(is_ocr, is_toc)}"
+    raw = f"{text_hash}|{book_name}|{_prompt_signature(is_ocr, is_toc, extraction_passes)}"
     return hashlib.md5(raw.encode("utf-8")).hexdigest()
 
 def load_from_cache(cache_key):
@@ -274,6 +278,7 @@ def _build_prompt(sample, book_name, chunk_index, chunk_total, is_ocr=False, is_
 
 【提取范围（包括但不限于）】
 - 考古遗址、历史建筑、古墓葬、碑刻、器物等物质遗存；
+- 古代产业遗存：盐井、盐场、盐道、盐泉、窑址、矿冶遗址、水利工程等；
 - 历史人物、重大事件、战争、自然灾害等史实；
 - 民俗节庆、仪式活动、技艺、饮食、服饰等；
 - 制度、职官、科举、赋税、乡约等；
@@ -281,16 +286,24 @@ def _build_prompt(sample, book_name, chunk_index, chunk_total, is_ocr=False, is_
 - 方言及语言文化现象（方言词汇、称谓、谚语、语法特征、行话等）。
 
 【必须严格遵守】
-1. {principle}
-2. "历史文献"字段必须【完整摘抄原文原句】，不得改写、拼接或编造；不要添加原文没有的内容。
-3. 页码：仅当原文片段中确实出现页码信息时才可标注，否则省略，严禁猜测页码。
-4. 同一要素在文中反复出现时只输出一条，名称统一使用原文中最完整的标准名称。
-5. "基础信息"用简洁语言归纳该条目在原文中的信息，不超过80字，必须基于原文。
-6. "类别"只能取以下五个值之一：{category_enum}
-7. "流域"只能取以下三个值之一：{basin_enum}（无法判断填"不详"）
-8. "时间"：使用原文中的朝代/年代/年份；原文未说明则填"不详"。
-9. "空间"：禁止照抄原文的地理描述，必须按下面的行政区划格式补全。
-10. 若原文中的名称疑似错别字或OCR误字，可在"名称"中按常识改正，但必须在"基础信息"末尾注明"原书作『××』"；若不确定则保持原文不变。{toc_note}
+1. 提取原则：{principle}
+2. "历史文献"：从原文中【连续摘录】与该要素直接相关的句子（1-3句），必须【逐字照抄】：
+   不得改写、不得加入省略号"……"、不得重组语序、不得补全或删减内容；
+   原文是OCR且存在明显乱码串时可删除乱码，其余一律照抄；
+   若要素所在句子因版面残缺无法完整抄录，改摘包含该要素的相邻完整句子。
+3. 具体名称必须单独提取：若文中先总括（如"重庆古桥包括岩溪桥、碑记桥、奈何桥……"），
+   除总括条目外，其中的每个具体名称（每座桥、每座塔、每处窑址、每眼盐井、
+   每处遗址、每座墓葬等）都必须【单独提取一条】，严禁只输出总括条目。
+4. 不要提取统计表/列表中的单列项目（如"汉代盐井""清代池塘""民国木亭"这类
+   分类统计行），除非该名称在正文中有独立描述。
+5. 页码：仅当原文片段中确实出现页码信息时才可标注，否则省略，严禁猜测页码。
+6. 同一要素在文中反复出现时只输出一条，名称统一使用原文中最完整的标准名称。
+7. "基础信息"用简洁语言归纳该条目在原文中的信息，不超过80字，必须基于原文。
+8. "类别"只能取以下五个值之一：{category_enum}
+9. "流域"只能取以下三个值之一：{basin_enum}（无法判断填"不详"）
+10. "时间"：使用原文中的朝代/年代/年份；原文未说明则填"不详"。
+11. "空间"：禁止照抄原文的地理描述，必须按下面的行政区划格式补全。
+12. 若原文中的名称疑似错别字或OCR误字，可在"名称"中按常识改正，但必须在"基础信息"末尾注明"原书作『××』"；若不确定则保持原文不变。{toc_note}
 
 【空间格式规则】
 1. 从原文提取地名，补全省、市、区/县三级，格式如"湖北省武汉市武昌区"。
@@ -304,6 +317,11 @@ def _build_prompt(sample, book_name, chunk_index, chunk_total, is_ocr=False, is_
 
 【分类参考示例】
 {few_shot_block}
+
+【历史文献格式示例】
+原文片段："……该桥始建于元代，清光绪时修长廊。为六孔石墩木梁桥，桥长58.2米，梁上铺石板，桥廊砖木结构。……"
+正确摘录："该桥始建于元代，清光绪时修长廊。为六孔石墩木梁桥，桥长58.2米。"
+（逐字连续摘录，不使用省略号，不改写）
 
 【输出格式】
 只输出一个 JSON 对象，不要输出任何其他文字或解释，结构如下：
@@ -535,15 +553,51 @@ def _call_deepseek(prompt):
     return None
 
 # ---------- 核心提取函数（支持拆分+缓存） ----------
-def _extract_single_chunk(text, book_name, chunk_index=1, chunk_total=1, is_ocr=False, is_toc=False):
-    # 安全上限：覆盖"尾部重叠块"可能达到的最大长度（max_length+overlap+最长段），
-    # 避免长段落在块边界被从中间截断导致"历史文献"摘抄不完整
+def _extract_single_chunk(text, book_name, chunk_index=1, chunk_total=1, is_ocr=False, is_toc=False,
+                          extraction_passes=None):
+    """提取单个文本块。
+
+    策略：多轮抽取取并集（默认EXTRACTION_PASSES=2）——实测模型对同一块
+    多次调用的输出在 1条~45条 间波动且子集互不相同，轮次并集可显著提升召回；
+    单轮模式（EXTRACTION_PASSES=1）下保留低产出重试兜底。
+    """
     sample = text[:MAX_TEXT_LENGTH * 2 + CHUNK_OVERLAP + 50]
     prompt = _build_prompt(sample, book_name, chunk_index, chunk_total, is_ocr=is_ocr, is_toc=is_toc)
-    data = _call_deepseek(prompt)
-    if data is None:
-        return []
-    return _normalize_entries(data, is_ocr=is_ocr)
+
+    passes = max(1, extraction_passes or EXTRACTION_PASSES)
+    all_entries = []
+    seen_names = set()
+    for p in range(passes):
+        data = _call_deepseek(prompt)
+        entries = _normalize_entries(data, is_ocr=is_ocr) if data is not None else []
+        for e in entries:
+            name = e.get("名称", "").strip()
+            if name and name not in seen_names:
+                seen_names.add(name)
+                all_entries.append(e)
+
+    # 单轮模式：低产出重试（模型偶发"只给1条"的失败模式）
+    if passes == 1 and len(all_entries) < LOW_YIELD_THRESHOLD and len(text) > LOW_YIELD_MIN_CHARS:
+        for attempt in range(1, MAX_LOW_YIELD_RETRIES + 1):
+            log_message(f"  [低产出重试 {attempt}/{MAX_LOW_YIELD_RETRIES}] "
+                        f"块{chunk_index} 仅{len(all_entries)}条，重新提取", "WARNING")
+            data2 = _call_deepseek(prompt)
+            entries2 = _normalize_entries(data2, is_ocr=is_ocr) if data2 is not None else []
+            for e in entries2:
+                name = e.get("名称", "").strip()
+                if name and name not in seen_names:
+                    seen_names.add(name)
+                    all_entries.append(e)
+            if len(all_entries) >= LOW_YIELD_THRESHOLD:
+                break
+
+    if passes > 1:
+        log_message(f"  [块{chunk_index}/{chunk_total}] {passes}轮并集: {len(all_entries)} 条", "INFO")
+    # 块内合并近似重复（跨轮次的同名变体）
+    merged = _merge_similar_entries(all_entries) if len(all_entries) > 1 else all_entries
+    if len(merged) < len(all_entries):
+        log_message(f"  [块内合并] 合并 {len(all_entries) - len(merged)} 条", "INFO")
+    return merged
 
 # ---------- 跨块近似重复合并 ----------
 def _names_similar(a, b):
@@ -672,11 +726,12 @@ def _annotate_name_corrections(entries, source_text):
             if note not in info:
                 entry["基础信息"] = (info + "；" + note) if info else note
 
-def extract_cultural_elements(text, book_name, is_ocr=False):
-    """从文本提取文化要素（支持拆分、缓存、去重、OCR感知、目录感知）"""
+def extract_cultural_elements(text, book_name, is_ocr=False, extraction_passes=None):
+    """从文本提取文化要素（支持拆分、缓存、去重、OCR感知、目录感知、多轮并集）"""
     # 检查缓存
     is_toc = _detect_toc(text)
-    cache_key = get_cache_key(text, book_name, is_ocr=is_ocr, is_toc=is_toc)
+    cache_key = get_cache_key(text, book_name, is_ocr=is_ocr, is_toc=is_toc,
+                              extraction_passes=extraction_passes)
     cached = load_from_cache(cache_key)
     if cached is not None:
         log_message(f"  [缓存命中] 直接返回缓存结果 ({len(cached)} 条)", "INFO")
@@ -697,7 +752,8 @@ def extract_cultural_elements(text, book_name, is_ocr=False):
     seen_names = set()
     for idx, chunk in enumerate(chunks):
         entries = _extract_single_chunk(chunk, book_name, chunk_index=idx + 1,
-                                        chunk_total=len(chunks), is_ocr=is_ocr, is_toc=is_toc)
+                                        chunk_total=len(chunks), is_ocr=is_ocr, is_toc=is_toc,
+                                        extraction_passes=extraction_passes)
         if not entries and len(chunk) > 1500:
             log_message(f"  [警告] 第{idx + 1}块内容较多但提取为0条，请关注是否异常", "WARNING")
         log_message(f"  [块{idx + 1}/{len(chunks)}] 提取 {len(entries)} 条", "INFO")
@@ -725,7 +781,7 @@ def extract_cultural_elements(text, book_name, is_ocr=False):
     return all_entries
 
 # ---------- 并行处理函数 ----------
-def process_pdf_file(file_path, book_name):
+def process_pdf_file(file_path, book_name, extraction_passes=None):
     """处理单个PDF文件（供并行调用）"""
     log_message(f"处理：{os.path.basename(file_path)}", "INFO")
     raw_text, used_ocr = _extract_text_with_flag(file_path)
@@ -734,7 +790,8 @@ def process_pdf_file(file_path, book_name):
         return []
     if used_ocr:
         log_message(f"  [来源] OCR识别文本（{len(raw_text)}字符）", "INFO")
-    entries = extract_cultural_elements(raw_text, book_name, is_ocr=used_ocr)
+    entries = extract_cultural_elements(raw_text, book_name, is_ocr=used_ocr,
+                                        extraction_passes=extraction_passes)
     if entries:
         log_message(f"  -> 提取 {len(entries)} 条", "INFO")
     else:
@@ -742,10 +799,11 @@ def process_pdf_file(file_path, book_name):
     return entries
 
 def process_pdfs_parallel(pdf_paths, book_name, max_workers=MAX_PARALLEL_WORKERS,
-                          progress_callback=None):
+                          progress_callback=None, extraction_passes=None):
     """并行处理多个PDF文件。
 
     progress_callback(done, total)：在主线程按完成顺序回调，可直接驱动 st.progress。
+    extraction_passes：每块抽取轮数（None=用config默认值）。
     """
     total = len(pdf_paths)
     if total == 0:
@@ -755,7 +813,8 @@ def process_pdfs_parallel(pdf_paths, book_name, max_workers=MAX_PARALLEL_WORKERS
     done = 0
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_map = {
-            executor.submit(process_pdf_file, path, book_name): i
+            executor.submit(process_pdf_file, path, book_name,
+                            extraction_passes=extraction_passes): i
             for i, path in enumerate(pdf_paths)
         }
         for future in as_completed(future_map):
