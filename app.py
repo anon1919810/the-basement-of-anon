@@ -262,6 +262,7 @@ document.cookie='dsh_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
         st.header("⚙️ 参数设置")
         book_name = st.text_input("📖 文献名称", value=DEFAULT_BOOK_NAME)
         uploaded_files = st.file_uploader("📄 上传PDF或Word文件", type=['pdf', 'docx'], accept_multiple_files=True)
+        st.caption("💡 扫描件建议先用WPS转成Word并让AI修正错字后上传，识别零误差、效果最佳")
         start_btn = st.button("🚀 开始智能提取", type="primary", use_container_width=True)
     else:
         st.info("🔒 请先登录后再使用提取功能")
@@ -364,7 +365,7 @@ document.cookie='dsh_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
         st.markdown("""
         **如何使用**
         1. 输入文献名称
-        2. 上传PDF文件
+        2. 上传PDF或Word文件（扫描件建议先经WPS转Word+AI纠错，效果最佳）
         3. 点击「开始智能提取」
         4. 在表格中编辑数据
         5. 下载Excel结果
