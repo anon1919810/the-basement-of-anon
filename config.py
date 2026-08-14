@@ -16,7 +16,7 @@ MAX_API_RETRIES = 3             # 单块调用失败最大重试次数（网络�
 RETRY_BACKOFF_SECONDS = 2       # 重试退避基数（秒），第n次重试等待 基数 * 2^(n-1)
 MAX_OUTPUT_TOKENS = 8192        # 单次响应最大输出token（deepseek-chat上限8192）
                                 # 注意：默认4096可能截断长JSON导致解析失败，务必保持8192
-PROMPT_TEMPLATE_VERSION = "3.11" # Prompt模板/后处理管线版本号，行为变更后+1（自动使旧缓存失效）
+PROMPT_TEMPLATE_VERSION = "3.12" # Prompt模板/后处理管线版本号，行为变更后+1（自动使旧缓存失效）
 
 # ---------- 文献设置 ----------
 DEFAULT_BOOK_NAME = "武汉市志 文物志"
