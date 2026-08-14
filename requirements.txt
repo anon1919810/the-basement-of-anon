@@ -7,3 +7,4 @@ pillow
 pdf2image
 pytesseract
 python-dotenv
+supabase
