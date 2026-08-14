@@ -1,9 +1,8 @@
-.env 
-__pycache__/ 
-cache/ 
-运行日志.log 
-文化要素提取结果*.xlsx 
-temp_pdfs/ 
-.venv/ 
-
+.env
+__pycache__/
+cache/
+杩愯鏃ュ織*.log
+鏂囧寲瑕佺礌鎻愬彇缁撴灉*.xlsx
+temp_pdfs/
+.venv/
 results/

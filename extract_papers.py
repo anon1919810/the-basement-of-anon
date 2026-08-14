@@ -35,6 +35,7 @@ from config import (
     CATEGORY_OPTIONS, BASIN_OPTIONS, PROMPT_TEMPLATE_VERSION,
     STRICT_EXTRACTION, MERGE_SIMILAR_ENTRIES,
 )
+from province_dict import PROVINCE_DICT
 
 load_dotenv()
 API_KEY = os.getenv("DEEPSEEK_API_KEY")
@@ -162,7 +163,7 @@ def split_text_into_chunks(text, max_length=MAX_TEXT_LENGTH, overlap=CHUNK_OVERL
     return chunks
 
 # ---------- 缓存工具 ----------
-def _prompt_signature():
+def _prompt_signature(is_ocr=False, is_toc=False):
     """计算提示词/配置签名：修改模板、Few-shot、模型参数后自动使旧缓存失效"""
     seed = "|".join([
         str(PROMPT_TEMPLATE_VERSION),
@@ -170,13 +171,14 @@ def _prompt_signature():
         str(MAX_TEXT_LENGTH), str(CHUNK_OVERLAP),
         str(STRICT_EXTRACTION),
         str(FEW_SHOT_EXAMPLES),
+        str(is_ocr), str(is_toc),
     ])
     return hashlib.md5(seed.encode("utf-8")).hexdigest()[:12]
 
-def get_cache_key(text, book_name):
-    """生成缓存键（全文哈希 + 文献名 + 配置签名）"""
+def get_cache_key(text, book_name, is_ocr=False, is_toc=False):
+    """生成缓存键（全文哈希 + 文献名 + 配置签名 + OCR/目录标志）"""
     text_hash = hashlib.md5(text.encode("utf-8")).hexdigest()
-    raw = f"{text_hash}|{book_name}|{_prompt_signature()}"
+    raw = f"{text_hash}|{book_name}|{_prompt_signature(is_ocr, is_toc)}"
     return hashlib.md5(raw.encode("utf-8")).hexdigest()
 
 def load_from_cache(cache_key):
@@ -232,8 +234,13 @@ def _parse_few_shot_examples():
         examples.append(current)
     return examples
 
-def _build_prompt(sample, book_name, chunk_index, chunk_total):
-    """构建提取 Prompt（v3.2：防编造、严格枚举、输出Schema示例、页码诚实）
+def _detect_toc(text):
+    """检测目录/索引页：文本开头600字内出现"目录"字样（容忍OCR空格）"""
+    head = text[:600].replace(" ", "").replace("\u3000", "")
+    return "目录" in head
+
+def _build_prompt(sample, book_name, chunk_index, chunk_total, is_ocr=False, is_toc=False):
+    """构建提取 Prompt（v3.4：防编造、严格枚举、输出Schema示例、页码诚实、目录感知）
 
     注意：不要在提示词中提及"OCR/扫描件/乱码"——实验证明任何此类提示
     都会显著抑制模型对噪声文本的提取召回（11条 -> 1条）。
@@ -255,6 +262,14 @@ def _build_prompt(sample, book_name, chunk_index, chunk_total):
     category_enum = "、".join(CATEGORY_OPTIONS)
     basin_enum = "、".join(BASIN_OPTIONS)
 
+    toc_note = ""
+    if is_toc:
+        toc_note = """
+【目录提示】本片段是书籍目录/索引，不是正文。
+- 只提取其中【明确的实体名称】（如具体建筑、组织、节日、习俗、人物、遗址）；
+- 不要提取章节标题、通用名词（如"居住""服饰""概况""分布""团体""性别结构"）、
+  日期标记（如"正月""初六""十五日"）或页码数字。"""
+
     prompt = f"""你是一位严谨的文史档案整理专家。请仔细阅读以下地方志/档案文献片段（来源：《{book_name}》），提取其中所有具有研究价值的文化要素。
 
 【提取范围（包括但不限于）】
@@ -262,19 +277,20 @@ def _build_prompt(sample, book_name, chunk_index, chunk_total):
 - 历史人物、重大事件、战争、自然灾害等史实；
 - 民俗节庆、仪式活动、技艺、饮食、服饰等；
 - 制度、职官、科举、赋税、乡约等；
-- 信仰、宗教、思想、传说、民谚、心理观念等。
+- 信仰、宗教、思想、传说、民谚、心理观念等；
+- 方言及语言文化现象（方言词汇、称谓、谚语、语法特征、行话等）。
 
 【必须严格遵守】
 1. {principle}
 2. "历史文献"字段必须【完整摘抄原文原句】，不得改写、拼接或编造；不要添加原文没有的内容。
 3. 页码：仅当原文片段中确实出现页码信息时才可标注，否则省略，严禁猜测页码。
 4. 同一要素在文中反复出现时只输出一条，名称统一使用原文中最完整的标准名称。
-5. "基础信息"用简洁语言归纳该条目在原文中的信息，不超过50字，必须基于原文。
+5. "基础信息"用简洁语言归纳该条目在原文中的信息，不超过80字，必须基于原文。
 6. "类别"只能取以下五个值之一：{category_enum}
 7. "流域"只能取以下三个值之一：{basin_enum}（无法判断填"不详"）
 8. "时间"：使用原文中的朝代/年代/年份；原文未说明则填"不详"。
 9. "空间"：禁止照抄原文的地理描述，必须按下面的行政区划格式补全。
-10. 若原文中的名称疑似错别字或OCR误字，可在"名称"中按常识改正，但必须在"基础信息"末尾注明"原书作『××』"；若不确定则保持原文不变。
+10. 若原文中的名称疑似错别字或OCR误字，可在"名称"中按常识改正，但必须在"基础信息"末尾注明"原书作『××』"；若不确定则保持原文不变。{toc_note}
 
 【空间格式规则】
 1. 从原文提取地名，补全省、市、区/县三级，格式如"湖北省武汉市武昌区"。
@@ -297,6 +313,87 @@ def _build_prompt(sample, book_name, chunk_index, chunk_total):
 文献片段（第{chunk_index}部分，共{chunk_total}部分）：
 {sample}"""
     return prompt
+
+# ---------- 空间字段规范化（省域字典） ----------
+def _build_space_index(province_dict):
+    """从省域字典建立检索索引：区县名(含去后缀) -> (省, 市)；市名(含去后缀) -> (省, 市)"""
+    dist_index, dist_base_index = {}, {}
+    city_index, city_base_index = {}, {}
+    for prov, cities in province_dict.items():
+        for city, districts in cities.items():
+            city_index[city] = (prov, city)
+            cb = re.sub(r"[市州地区]$", "", city)
+            if len(cb) >= 2:
+                city_base_index.setdefault(cb, (prov, city))
+            for d in districts:
+                dist_index[d] = (prov, city)
+                db = re.sub(r"[区县市]$", "", d)
+                if len(db) >= 2:
+                    dist_base_index.setdefault(db, (prov, city))
+    return dist_index, dist_base_index, city_index, city_base_index
+
+_DIST_INDEX, _DIST_BASE_INDEX, _CITY_INDEX, _CITY_BASE_INDEX = _build_space_index(PROVINCE_DICT)
+_DIRECT_PROVINCES = ("重庆市", "上海市")
+
+def _normalize_space(space):
+    """用省域字典规范化"空间"字段：补全省/市两级（保守策略，无法确认则原样返回）
+
+    处理示例:
+      "武汉市武昌区"             -> "湖北省武汉市武昌区"
+      "湖北省武昌区东湖西岸"      -> "湖北省武汉市武昌区东湖西岸"
+      "武昌区"                   -> "湖北省武汉市武昌区"
+      "荆州市"                   -> "湖北省荆州市"
+      "渝中区"                   -> "重庆市渝中区"
+      "仙桃市"                   -> "湖北省仙桃市"
+    """
+    space = (space or "").strip()
+    if not space or space == "不详":
+        return space
+    # 直辖市完整形式（如"重庆市渝中区"）视为完整
+    for prov in _DIRECT_PROVINCES:
+        if space.startswith(prov):
+            return space
+
+    hit_prov = hit_city = None
+    # 1) 区县名优先（先全名后去后缀，均按长度降序防短名误配）
+    for idx in (_DIST_INDEX, _DIST_BASE_INDEX):
+        for key in sorted(idx, key=len, reverse=True):
+            if len(key) >= 2 and key in space:
+                hit_prov, hit_city = idx[key]
+                break
+        if hit_prov:
+            break
+    # 2) 市名匹配
+    if not hit_prov:
+        for idx in (_CITY_INDEX, _CITY_BASE_INDEX):
+            for key in sorted(idx, key=len, reverse=True):
+                if len(key) >= 2 and key in space:
+                    hit_prov, hit_city = idx[key]
+                    break
+            if hit_prov:
+                break
+    if not hit_prov:
+        return space
+
+    result = space
+    # 直辖市（省==市）：只需保证市名在前
+    if hit_prov in _DIRECT_PROVINCES:
+        if hit_prov not in result:
+            result = hit_prov + result
+        return result
+    # 已有省：只补市；若命中省与已有省不符，则不干预（保守）
+    if "省" in result:
+        if hit_prov not in result:
+            return space
+        if hit_city and hit_city not in result:
+            result = result.replace(hit_prov, hit_prov + hit_city, 1)
+        return result
+    # 无省：补省 + 市
+    if hit_prov not in result:
+        result = hit_prov + result
+    if hit_city and hit_city != hit_prov and hit_city not in result:
+        result = result.replace(hit_prov, hit_prov + hit_city, 1)
+    return result
 
 # ---------- JSON 解析与规范化 ----------
 # OCR乱码串模式：连续的拉丁字母（可含空格/标点分隔），如 "ALT PRM E"、"BWM BARRE'"
@@ -370,6 +467,8 @@ def _normalize_entries(data, is_ocr=False):
         entry = {field: str(raw.get(field, "")).strip() for field in REQUIRED_FIELDS}
         if not entry["名称"]:
             continue  # 无名称的无效条目
+        entry["名称"] = re.sub(r"\s+", "", entry["名称"])  # 名称去空白（OCR常见"黄鹤 楼"）
+        entry["空间"] = _normalize_space(entry["空间"])     # 省域字典补全省市
         if is_ocr:
             entry["历史文献"] = _clean_quote_garbage(entry["历史文献"])
         if entry["类别"] not in CATEGORY_OPTIONS:
@@ -436,11 +535,11 @@ def _call_deepseek(prompt):
     return None
 
 # ---------- 核心提取函数（支持拆分+缓存） ----------
-def _extract_single_chunk(text, book_name, chunk_index=1, chunk_total=1, is_ocr=False):
+def _extract_single_chunk(text, book_name, chunk_index=1, chunk_total=1, is_ocr=False, is_toc=False):
     # 安全上限：覆盖"尾部重叠块"可能达到的最大长度（max_length+overlap+最长段），
     # 避免长段落在块边界被从中间截断导致"历史文献"摘抄不完整
     sample = text[:MAX_TEXT_LENGTH * 2 + CHUNK_OVERLAP + 50]
-    prompt = _build_prompt(sample, book_name, chunk_index, chunk_total)
+    prompt = _build_prompt(sample, book_name, chunk_index, chunk_total, is_ocr=is_ocr, is_toc=is_toc)
     data = _call_deepseek(prompt)
     if data is None:
         return []
@@ -448,18 +547,34 @@ def _extract_single_chunk(text, book_name, chunk_index=1, chunk_total=1, is_ocr=
 
 # ---------- 跨块近似重复合并 ----------
 def _names_similar(a, b):
-    """名称近似判断：完全相同、子串包含（长度比>=0.5），或序列相似度>=0.7
+    """名称判定：完全相同，或短名为长名子串（长度比>=0.5）
 
-    覆盖典型跨块重复："汉阳城"与"汉阳旧城"（非子串关系，但相似度0.86）
+    不再使用模糊相似度（如"佛教协会/道教协会"相似度0.86但实为不同实体），
+    同实体的近似变体由"摘抄句级重叠"（_quotes_overlap）兜底判定。
+    保护规则：一方含"碑记"而另一方不含时视为不同实体（建筑 vs 碑刻）。
     """
     if a == b:
         return True
+    if ("碑记" in a) != ("碑记" in b):
+        return False
     longer, shorter = (a, b) if len(a) >= len(b) else (b, a)
     if len(shorter) < 2:
         return False
-    if shorter in longer:
-        return len(shorter) / len(longer) >= 0.5
-    return SequenceMatcher(None, a, b).ratio() >= 0.7
+    return shorter in longer and len(shorter) / len(longer) >= 0.5
+
+def _quotes_overlap(qa, qb, min_sentences=2):
+    """摘抄句级重叠：两条历史文献共享>=2个句子（归一化后）视为同一实体
+
+    覆盖跨块重复的核心场景（重叠区内容必然出现在相邻块的摘抄中），
+    如"汉阳旧城"与"汉阳城"的摘抄共享护城石堤等段落。
+    """
+    if not qa or not qb:
+        return False
+    sa = {_norm_sentence(s) for s in _split_sentences(qa) if len(s) >= 4}
+    sb = [_norm_sentence(s) for s in _split_sentences(qb) if len(s) >= 4]
+    if len(sb) < min_sentences:
+        return False
+    return sum(1 for s in sb if s in sa) >= min_sentences
 
 def _spaces_compatible(a, b):
     """空间兼容：完全相同 / 互相包含 / 有一方为空或不详"""
@@ -499,8 +614,9 @@ def _merge_similar_entries(entries):
         target = None
         for m in merged:
             if (entry["类别"] == m["类别"]
-                    and _names_similar(entry["名称"], m["名称"])
-                    and _spaces_compatible(entry["空间"], m["空间"])):
+                    and _spaces_compatible(entry["空间"], m["空间"])
+                    and (_names_similar(entry["名称"], m["名称"])
+                         or _quotes_overlap(entry["历史文献"], m["历史文献"]))):
                 target = m
                 break
         if target is None:
@@ -516,7 +632,7 @@ def _merge_similar_entries(entries):
         # 两条基础信息都非空且内容不同（如跨文件的不同侧面描述）-> 拼接
         if (entry.get("基础信息") and target.get("基础信息")
                 and entry["基础信息"] != target["基础信息"]
-                and len(target["基础信息"]) + len(entry["基础信息"]) <= 120):
+                and len(target["基础信息"]) + len(entry["基础信息"]) <= 160):
             target["基础信息"] = target["基础信息"] + "；" + entry["基础信息"]
     return merged
 
@@ -557,13 +673,17 @@ def _annotate_name_corrections(entries, source_text):
                 entry["基础信息"] = (info + "；" + note) if info else note
 
 def extract_cultural_elements(text, book_name, is_ocr=False):
-    """从文本提取文化要素（支持拆分、缓存、去重、OCR感知）"""
+    """从文本提取文化要素（支持拆分、缓存、去重、OCR感知、目录感知）"""
     # 检查缓存
-    cache_key = get_cache_key(text, book_name)
+    is_toc = _detect_toc(text)
+    cache_key = get_cache_key(text, book_name, is_ocr=is_ocr, is_toc=is_toc)
     cached = load_from_cache(cache_key)
     if cached is not None:
         log_message(f"  [缓存命中] 直接返回缓存结果 ({len(cached)} 条)", "INFO")
         return cached
+
+    if is_toc:
+        log_message("  [识别] 目录/索引页，仅提取明确实体", "INFO")
 
     # 智能拆分
     if ENABLE_SPLIT and len(text) > MAX_TEXT_LENGTH:
@@ -577,7 +697,7 @@ def extract_cultural_elements(text, book_name, is_ocr=False):
     seen_names = set()
     for idx, chunk in enumerate(chunks):
         entries = _extract_single_chunk(chunk, book_name, chunk_index=idx + 1,
-                                        chunk_total=len(chunks), is_ocr=is_ocr)
+                                        chunk_total=len(chunks), is_ocr=is_ocr, is_toc=is_toc)
         if not entries and len(chunk) > 1500:
             log_message(f"  [警告] 第{idx + 1}块内容较多但提取为0条，请关注是否异常", "WARNING")
         log_message(f"  [块{idx + 1}/{len(chunks)}] 提取 {len(entries)} 条", "INFO")
@@ -647,7 +767,10 @@ def process_pdfs_parallel(pdf_paths, book_name, max_workers=MAX_PARALLEL_WORKERS
                 results[idx] = []
             done += 1
             if progress_callback:
-                progress_callback(done, total)
+                try:
+                    progress_callback(done, total)
+                except Exception as e:
+                    log_message(f"  进度回调异常（不影响处理）：{e}", "WARNING")
 
     # 按上传顺序汇总
     all_entries = []
