@@ -11,7 +11,7 @@ import sys
 from io import BytesIO
 
 # ========== 调试：强制打印，确认 app.py 已加载 ==========
-print("=== app.py 已加载（v3.1.1）===", flush=True)
+print("=== app.py 已加载（v3.2.0）===", flush=True)
 sys.stdout.flush()
 
 # ========== 导入核心模块（加异常捕获） ==========
@@ -147,6 +147,46 @@ if 'user' not in st.session_state:
 if 'user_id' not in st.session_state:
     st.session_state.user_id = None
 
+# ========== 24小时自动登录（HMAC令牌 + URL/Cookie 双通道持久化） ==========
+def _set_login(user):
+    st.session_state.logged_in = True
+    st.session_state.user = user["username"]
+    st.session_state.user_id = user["id"]
+
+# 从URL参数恢复登录（刷新/重开网址时）
+if not st.session_state.logged_in:
+    url_token = st.query_params.get("dsh_token")
+    if isinstance(url_token, list):
+        url_token = url_token[0] if url_token else None
+    if url_token:
+        uid = db.validate_session_token(str(url_token))
+        if uid:
+            user = db.get_user_by_id(uid)
+            if user:
+                _set_login(user)
+        else:
+            # 令牌无效或过期：清掉URL参数
+            try:
+                del st.query_params["dsh_token"]
+            except Exception:
+                pass
+
+# Cookie -> URL 桥接：重开网址时若Cookie里有令牌，自动补进URL触发登录
+components.html("""
+<script>
+(function(){
+  try{
+    var m=document.cookie.match(new RegExp('(?:^|; )dsh_token=([^;]*)'));
+    if(m){
+      var t=decodeURIComponent(m[1]);
+      var q=new URLSearchParams(location.search);
+      if(!q.get('dsh_token')){ q.set('dsh_token',t); location.replace(location.pathname+'?'+q.toString()); }
+    }
+  }catch(e){}
+})();
+</script>
+""", height=0)
+
 # 初始化数据库（启动自检：连接异常/缺表时给出明确提示，不阻塞主功能）
 db_ok, db_msg = db.init_db()
 if not db_ok:
@@ -165,10 +205,17 @@ with st.sidebar:
                 if st.button("登录", use_container_width=True):
                     user = db.login_user(login_username, login_password)
                     if user:
-                        st.session_state.logged_in = True
-                        st.session_state.user = user["username"]
-                        st.session_state.user_id = user["id"]
-                        st.success(f"✅ 欢迎回来，{user['username']}！")
+                        _set_login(user)
+                        # 生成24小时令牌：写入URL（刷新/重开保留）+ Cookie（JS自动恢复）
+                        token = db.create_session_token(user["id"], hours=24)
+                        st.query_params["dsh_token"] = token
+                        components.html(f"""
+<script>
+var d=new Date();d.setTime(d.getTime()+24*3600*1000);
+document.cookie='dsh_token={token}; expires='+d.toUTCString()+'; path=/; SameSite=Lax';
+</script>
+""", height=0)
+                        st.success(f"✅ 欢迎回来，{user['username']}！（24小时内免登录）")
                         st.rerun()
                     else:
                         st.error("❌ 用户名或密码错误")
@@ -196,6 +243,16 @@ with st.sidebar:
             st.session_state.logged_in = False
             st.session_state.user = None
             st.session_state.user_id = None
+            # 清除URL令牌与Cookie（强制下次重新登录）
+            try:
+                del st.query_params["dsh_token"]
+            except Exception:
+                pass
+            components.html("""
+<script>
+document.cookie='dsh_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+</script>
+""", height=0)
             st.rerun()
     
     st.markdown("---")
@@ -204,7 +261,7 @@ with st.sidebar:
     if st.session_state.logged_in:
         st.header("⚙️ 参数设置")
         book_name = st.text_input("📖 文献名称", value=DEFAULT_BOOK_NAME)
-        uploaded_files = st.file_uploader("📄 上传PDF文件", type=['pdf'], accept_multiple_files=True)
+        uploaded_files = st.file_uploader("📄 上传PDF或Word文件", type=['pdf', 'docx'], accept_multiple_files=True)
         start_btn = st.button("🚀 开始智能提取", type="primary", use_container_width=True)
     else:
         st.info("🔒 请先登录后再使用提取功能")
@@ -324,6 +381,13 @@ with st.sidebar:
     # ----- 更新日志 -----
     with st.expander("📝 更新日志", expanded=False):
         st.markdown("""
+        **v3.2.0** (2026-08-16)
+        - 🔤 OCR错字自动纠正："潮北省"→"湖北省"、马投漂→马投潭等
+          （易混淆字表+省域字典/已知专名比对，只修一字之差的确定错误，绝不误伤）
+        - 📄 支持Word(.docx)：直接读文本、完全跳过OCR（效果等同文本层PDF）
+        - 🔐 24小时免登录：HMAC会话令牌 + URL/Cookie双通道，重开网址自动登录
+        - ⚙️ 云端需在Secrets配置 SESSION_SECRET
+
         **v3.1.1** (2026-08-16)
         - 🛠️ 修复云端部署失败：RapidOCR改为本地可选（云端自动回退Tesseract），
           依赖安装不再阻塞部署

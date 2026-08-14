@@ -9,6 +9,8 @@ Supabase 数据库操作模块 v2
 import os
 import hashlib
 import hmac
+import base64
+import time
 import secrets
 from dotenv import load_dotenv
 from supabase import create_client, Client
@@ -22,6 +24,54 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY") or "sb_publishable_occHvZCJl5DmiNlL08qs
 if not os.getenv("SUPABASE_URL"):
     print("[提示] 未设置 SUPABASE_URL/SUPABASE_KEY 环境变量，正在使用代码内默认值。"
           "建议配置到 .env（本地）与 Streamlit Cloud Secrets（云端）。")
+
+# ========== 会话令牌（24小时自动登录） ==========
+# 无状态HMAC签名令牌：payload=base64(user_id|过期时间戳)，mac=HMAC(SESSION_SECRET)
+# 服务端验证，无需建表；SESSION_SECRET 务必在云端Secrets配置
+SESSION_SECRET = os.getenv("SESSION_SECRET") or "dev-secret-change-me-please"
+SESSION_HOURS = 24
+
+if not os.getenv("SESSION_SECRET"):
+    print("[警告] 未设置 SESSION_SECRET 环境变量，使用开发默认值（云端请务必在Secrets配置）")
+
+
+def _session_sign(payload):
+    return hmac.new(SESSION_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
+
+
+def create_session_token(user_id, hours=SESSION_HOURS):
+    """生成24小时有效的登录令牌（含用户ID与过期时间，签名防伪造）"""
+    expires = int(time.time()) + hours * 3600
+    payload = base64.urlsafe_b64encode(f"{user_id}|{expires}".encode()).decode().rstrip("=")
+    return f"{payload}.{_session_sign(payload)}"
+
+
+def validate_session_token(token):
+    """校验令牌，有效返回user_id字符串，无效/过期返回None"""
+    if not token:
+        return None
+    try:
+        payload, mac = token.rsplit(".", 1)
+        if not hmac.compare_digest(_session_sign(payload), mac):
+            return None
+        raw = base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)).decode()
+        user_id, exp = raw.split("|")
+        if int(exp) < time.time():
+            return None
+        return user_id
+    except Exception:
+        return None
+
+
+def get_user_by_id(user_id):
+    """按ID查询用户"""
+    supabase = get_supabase()
+    try:
+        r = supabase.table("users").select("*").eq("id", user_id).limit(1).execute()
+        return r.data[0] if r.data else None
+    except Exception as e:
+        print(f"查询用户失败：{e}")
+        return None
 
 
 def get_supabase() -> Client:

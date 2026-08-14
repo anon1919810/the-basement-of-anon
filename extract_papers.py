@@ -36,8 +36,10 @@ from config import (
     API_URL, MAX_API_RETRIES, RETRY_BACKOFF_SECONDS, MAX_OUTPUT_TOKENS,
     CATEGORY_OPTIONS, BASIN_OPTIONS, PROMPT_TEMPLATE_VERSION,
     STRICT_EXTRACTION, MERGE_SIMILAR_ENTRIES, STRUCTURE_MODE,
+    OCR_CORRECT,
 )
 from province_dict import PROVINCE_DICT
+from ocr_corrections import correct_ocr_text
 
 load_dotenv()
 API_KEY = os.getenv("DEEPSEEK_API_KEY")
@@ -126,6 +128,31 @@ def extract_text_from_pdf(pdf_path):
     text, _ = _extract_text_with_flag(pdf_path)
     return text
 
+def _extract_docx(file_path):
+    """从Word(.docx)提取文本：直接读取段落，完全跳过OCR（效果等同文本层PDF）"""
+    try:
+        from docx import Document
+        doc = Document(file_path)
+        parts = []
+        for para in doc.paragraphs:
+            t = para.text.strip()
+            if t:
+                parts.append(t)
+        text = "\n\n".join(parts)
+        # 表格文本（志书常见"附表"）
+        for table in doc.tables:
+            for row in table.rows:
+                cells = [c.text.strip() for c in row.cells if c.text.strip()]
+                if cells:
+                    parts.append("｜".join(cells))
+        return "\n\n".join(parts)
+    except ImportError:
+        print("[警告] 未安装python-docx，无法读取Word文件")
+        return ""
+    except Exception as e:
+        print(f"[警告] Word读取失败：{e}")
+        return ""
+
 def _extract_structured_text(pdf_path):
     """字体感知提取：把"加粗/大字提行标题"识别为子目并插入【】标记。
 
@@ -179,11 +206,14 @@ def _extract_structured_text(pdf_path):
         print(f"  [警告] 结构化提取失败：{e}")
         return ""
 
-def _extract_text_with_flag(pdf_path):
-    """提取文本，返回 (text, used_ocr)"""
+def _extract_text_with_flag(file_path):
+    """提取文本，返回 (text, used_ocr)。支持PDF与Word(.docx)"""
+    if file_path.lower().endswith(".docx"):
+        return _extract_docx(file_path), False
+
     used_ocr = False
     try:
-        doc = fitz.open(pdf_path)
+        doc = fitz.open(file_path)
         full_text = ""
         for page in doc:
             # sort=True 按阅读顺序排序，改善多栏/表格版面
@@ -193,12 +223,12 @@ def _extract_text_with_flag(pdf_path):
 
         # 文本量极少但PDF有内容，启用OCR
         if len(full_text.strip()) < 100 and ENABLE_OCR:
-            print(f"  [提示] {os.path.basename(pdf_path)} 疑似扫描件，启动OCR...")
-            full_text = ocr_pdf(pdf_path)
+            print(f"  [提示] {os.path.basename(file_path)} 疑似扫描件，启动OCR...")
+            full_text = ocr_pdf(file_path)
             used_ocr = True
         elif len(_ZIMU_RE.findall(full_text)) < 3:
             # 文本层无【】结构 -> 尝试字体感知的加粗/大字标题结构
-            structured = _extract_structured_text(pdf_path)
+            structured = _extract_structured_text(file_path)
             if len(_ZIMU_RE.findall(structured)) >= 3:
                 print(f"  [结构] 检测到加粗/大字标题子目，使用结构化提取")
                 full_text = structured
@@ -1003,6 +1033,12 @@ def process_pdf_file(file_path, book_name, extraction_passes=None):
         return []
     if used_ocr:
         log_message(f"  [来源] OCR识别文本（{len(raw_text)}字符）", "INFO")
+        if OCR_CORRECT:
+            corrected = correct_ocr_text(raw_text)
+            fixed = sum(1 for a, b in zip(raw_text, corrected) if a != b) + abs(len(raw_text) - len(corrected))
+            if corrected != raw_text:
+                log_message(f"  [纠错] OCR错字纠正完成（约{fixed}处字符变化）", "INFO")
+                raw_text = corrected
     entries = extract_cultural_elements(raw_text, book_name, is_ocr=used_ocr,
                                         extraction_passes=extraction_passes)
     if entries:

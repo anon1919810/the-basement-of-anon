@@ -48,6 +48,7 @@ CACHE_EXPIRE_DAYS = 7            # 缓存有效期（天）
 CACHE_DIR = "cache"              # 缓存目录（相对项目根目录）
 MAX_PARALLEL_WORKERS = 2         # 并行处理的最大线程数（建议2-3，避免API限流）
 ENABLE_OCR = True                # 是否启用OCR（扫描件识别）
+OCR_CORRECT = True               # 是否纠正OCR常见错字（"潮北省"->"湖北省"；仅作用于OCR文本）
 TESSERACT_PATH = r"C:\Program Files\Tesseract-OCR\tesseract.exe"  # 你的Tesseract安装路径（云端留空走PATH）
 OCR_ENGINE = "auto"              # OCR引擎：auto=本地优先RapidOCR(中文更准)，未安装自动回退Tesseract；
                                  # 云端默认Tesseract（RapidOCR为本地可选，见requirements.txt注释）
@@ -112,5 +113,5 @@ FEW_SHOT_EXAMPLES = """
 """
 
 # ---------- 版本信息 ----------
-VERSION = "3.1.1"
+VERSION = "3.2.0"
 APP_NAME = "重庆Major2026·档档案案世界冠军"
