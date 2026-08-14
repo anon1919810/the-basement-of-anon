@@ -29,7 +29,7 @@ from config import (
     MODEL_NAME, TEMPERATURE, MAX_TEXT_LENGTH, API_TIMEOUT,
     DEFAULT_BOOK_NAME, OUTPUT_BASE_NAME, VERSION, APP_NAME,
     FEW_SHOT_EXAMPLES, ENABLE_CACHE, CACHE_EXPIRE_DAYS, CACHE_DIR,
-    MAX_PARALLEL_WORKERS, ENABLE_OCR, TESSERACT_PATH, OCR_DPI,
+    MAX_PARALLEL_WORKERS, ENABLE_OCR, TESSERACT_PATH, OCR_DPI, OCR_ENGINE,
     ENABLE_SPLIT, CHUNK_OVERLAP,
     EXTRACTION_PASSES,
     LOW_YIELD_THRESHOLD, LOW_YIELD_MIN_CHARS, MAX_LOW_YIELD_RETRIES,
@@ -68,13 +68,31 @@ def _clean_ocr_text(text):
     return "\n".join(lines)
 
 def ocr_pdf(pdf_path):
-    """使用Tesseract OCR识别扫描版PDF（灰度化 + 分批转换防内存溢出 + 噪音过滤 + 进度输出）"""
+    """使用OCR识别扫描版PDF（优先RapidOCR：中文准确率远高于Tesseract，且能识别【】标记；
+    失败自动回退Tesseract。灰度化 + 分批转换防内存溢出 + 噪音过滤 + 进度输出）"""
     try:
         from pdf2image import convert_from_path
-        import pytesseract
 
         if TESSERACT_PATH and os.path.exists(TESSERACT_PATH):
-            pytesseract.pytesseract.tesseract_cmd = TESSERACT_PATH
+            pytesseract = None
+            try:
+                import pytesseract
+                pytesseract.pytesseract.tesseract_cmd = TESSERACT_PATH
+            except ImportError:
+                pytesseract = None
+
+        # 惰性加载 RapidOCR 引擎（首次调用初始化，约1-2秒）
+        rapid_engine = [None]
+
+        def _rapid(img):
+            if rapid_engine[0] is None:
+                from rapidocr_onnxruntime import RapidOCR
+                rapid_engine[0] = RapidOCR()
+            import numpy as np
+            result, _ = rapid_engine[0](np.array(img.convert("RGB")))
+            if not result:
+                return ""
+            return "\n".join(line[1] for line in result)
 
         with fitz.open(pdf_path) as doc:
             n_pages = doc.page_count
@@ -87,12 +105,19 @@ def ocr_pdf(pdf_path):
                                        first_page=start, last_page=end)
             for img in images:
                 gray = img.convert("L")  # 灰度化提升识别率
-                text = pytesseract.image_to_string(gray, lang='chi_sim+eng')
+                text = ""
+                if OCR_ENGINE in ("auto", "rapidocr"):
+                    try:
+                        text = _rapid(gray)
+                    except Exception as e:
+                        print(f"  [OCR] RapidOCR失败({e})，回退Tesseract", flush=True)
+                if not text and pytesseract is not None and OCR_ENGINE in ("auto", "tesseract"):
+                    text = pytesseract.image_to_string(gray, lang='chi_sim+eng')
                 full_text += text + "\n"
             print(f"  [OCR] 进度 {end}/{n_pages} 页", flush=True)
         return _clean_ocr_text(full_text)
     except ImportError:
-        print("[警告] 未安装pdf2image或pytesseract，OCR功能不可用")
+        print("[警告] 未安装pdf2image，OCR功能不可用")
         return ""
     except Exception as e:
         print(f"[警告] OCR识别失败：{e}")
@@ -313,7 +338,7 @@ def _parse_zimu_blocks(text):
         return []
     blocks = []
     for i, m in enumerate(matches):
-        title = m.group(1).strip()
+        title = m.group(1).strip().strip("（）() ")  # 清理OCR读【】时混入的括号
         body_start = m.end()
         body_end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
         body = text[body_start:body_end].strip()

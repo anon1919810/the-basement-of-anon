@@ -49,6 +49,7 @@ CACHE_DIR = "cache"              # 缓存目录（相对项目根目录）
 MAX_PARALLEL_WORKERS = 2         # 并行处理的最大线程数（建议2-3，避免API限流）
 ENABLE_OCR = True                # 是否启用OCR（扫描件识别）
 TESSERACT_PATH = r"C:\Program Files\Tesseract-OCR\tesseract.exe"  # 你的Tesseract安装路径
+OCR_ENGINE = "auto"              # OCR引擎：auto=优先RapidOCR(中文准确率远高于Tesseract)，失败回退Tesseract；rapidocr/tesseract=强制指定
 OCR_DPI = 300                    # OCR分辨率（志书小字号建议200-300；越大越准但越慢）
 
 # ---------- 智能拆分配置 ----------
@@ -110,5 +111,5 @@ FEW_SHOT_EXAMPLES = """
 """
 
 # ---------- 版本信息 ----------
-VERSION = "3.0.0"
+VERSION = "3.1.0"
 APP_NAME = "重庆Major2026·档档案案世界冠军"

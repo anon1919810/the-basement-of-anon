@@ -8,3 +8,4 @@ pdf2image
 pytesseract
 python-dotenv
 supabase
+rapidocr_onnxruntime

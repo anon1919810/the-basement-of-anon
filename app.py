@@ -11,7 +11,7 @@ import sys
 from io import BytesIO
 
 # ========== 调试：强制打印，确认 app.py 已加载 ==========
-print("=== app.py 已加载（v3.0.0）===", flush=True)
+print("=== app.py 已加载（v3.1.0）===", flush=True)
 sys.stdout.flush()
 
 # ========== 导入核心模块（加异常捕获） ==========
@@ -324,6 +324,12 @@ with st.sidebar:
     # ----- 更新日志 -----
     with st.expander("📝 更新日志", expanded=False):
         st.markdown("""
+        **v3.1.0** (2026-08-16)
+        - 🔍 OCR引擎升级：默认 RapidOCR（中文准确率碾压Tesseract，还能识别【】标记），
+          Tesseract自动兜底。实测"马投漂村南"→"马投潭村南"，拉丁乱码消失，
+          扫描件也可自动进入子目模式
+        - ⚙️ 可选OCR引擎：config OCR_ENGINE = auto/rapidocr/tesseract
+
         **v3.0.0** (2026-08-16)
         - 📚 子目模式：检测【】子目（或加粗/大字提行标题），每个子目一条，
           不再子目内细分（修复"灵敏度过高"）；名称/引文确定性取自原文
