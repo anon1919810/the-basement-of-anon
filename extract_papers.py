@@ -31,7 +31,7 @@ from config import (
     FEW_SHOT_EXAMPLES, ENABLE_CACHE, CACHE_EXPIRE_DAYS, CACHE_DIR,
     MAX_PARALLEL_WORKERS, ENABLE_OCR, TESSERACT_PATH, OCR_DPI, OCR_ENGINE,
     ENABLE_SPLIT, CHUNK_OVERLAP,
-    EXTRACTION_PASSES,
+    EXTRACTION_PASSES, ADAPTIVE_PASSES,
     LOW_YIELD_THRESHOLD, LOW_YIELD_MIN_CHARS, MAX_LOW_YIELD_RETRIES,
     API_URL, MAX_API_RETRIES, RETRY_BACKOFF_SECONDS, MAX_OUTPUT_TOKENS,
     CATEGORY_OPTIONS, BASIN_OPTIONS, PROMPT_TEMPLATE_VERSION,
@@ -803,6 +803,7 @@ def _extract_single_chunk(text, book_name, chunk_index=1, chunk_total=1, is_ocr=
     all_entries = []
     seen_names = set()
     for p in range(passes):
+        prev_count = len(all_entries)
         data = _call_deepseek(prompt)
         entries = _normalize_entries(data, is_ocr=is_ocr) if data is not None else []
         for e in entries:
@@ -810,6 +811,11 @@ def _extract_single_chunk(text, book_name, chunk_index=1, chunk_total=1, is_ocr=
             if name and name not in seen_names:
                 seen_names.add(name)
                 all_entries.append(e)
+        # 自适应收敛：第2轮起，若新增条数不足前一轮的25%则提前结束（省Token）
+        if (ADAPTIVE_PASSES and p >= 1 and prev_count >= 8
+                and len(all_entries) - prev_count < max(2, prev_count * 0.25)):
+            log_message(f"  [收敛] 块{chunk_index} 第{p + 1}轮新增不足，提前结束（共{len(all_entries)}条）", "INFO")
+            break
 
     # 单轮模式：低产出重试（模型偶发"只给1条"的失败模式）
     if passes == 1 and len(all_entries) < LOW_YIELD_THRESHOLD and len(text) > LOW_YIELD_MIN_CHARS:
@@ -961,6 +967,34 @@ def _annotate_name_corrections(entries, source_text):
             if note not in info:
                 entry["基础信息"] = (info + "；" + note) if info else note
 
+def _verify_quotes(entries, source_text):
+    """引文忠实度校验：逐字命中原文（允许OCR乱码删除的子序列）即通过；
+    否则在"基础信息"末尾追加"⚠引文待核对"标记，返回标记条数。
+
+    注意：子目模式的引文为确定性摘录，必然通过；此标记主要捕捉
+    "全文模式"下模型对OCR乱码段落的改写/拼接。
+    """
+    S = re.sub(r"\s+", "", source_text or "")
+    if not S:
+        return 0
+    flagged = 0
+    for entry in entries:
+        q = re.sub(r"\s+", "", entry.get("历史文献", ""))
+        if len(q) < 10:
+            continue  # 过短碎片不判定（子目模式的短句也不误报）
+        if q in S:
+            continue
+        # 子序列检查：允许引文删除了原文中的乱码串
+        it = iter(S)
+        if all(c in it for c in q):
+            continue
+        info = entry.get("基础信息", "")
+        marker = "⚠引文待核对"
+        if marker not in info:
+            entry["基础信息"] = (info + "；" + marker) if info else marker
+        flagged += 1
+    return flagged
+
 def extract_cultural_elements(text, book_name, is_ocr=False, extraction_passes=None):
     """从文本提取文化要素（支持拆分、缓存、去重、OCR感知、目录感知、子目模式）"""
     # 检查缓存
@@ -1017,6 +1051,11 @@ def extract_cultural_elements(text, book_name, is_ocr=False, extraction_passes=N
     annotated = _annotate_name_corrections(all_entries, text)
     if annotated:
         log_message(f"  [标注] {annotated} 条名称与原文用字不同，已注明'原书作'", "INFO")
+
+    # 引文忠实度校验：不逐字命中原文的条目自动标记（"⚠引文待核对"）
+    flagged = _verify_quotes(all_entries, text)
+    if flagged:
+        log_message(f"  [校验] {flagged} 条引文未逐字命中原文，已标记待核对", "WARNING")
 
     # 保存缓存
     save_to_cache(cache_key, all_entries)

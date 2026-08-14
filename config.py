@@ -16,7 +16,7 @@ MAX_API_RETRIES = 3             # 单块调用失败最大重试次数（网络�
 RETRY_BACKOFF_SECONDS = 2       # 重试退避基数（秒），第n次重试等待 基数 * 2^(n-1)
 MAX_OUTPUT_TOKENS = 8192        # 单次响应最大输出token（deepseek-chat上限8192）
                                 # 注意：默认4096可能截断长JSON导致解析失败，务必保持8192
-PROMPT_TEMPLATE_VERSION = "4.1" # Prompt模板/后处理管线版本号，行为变更后+1（自动使旧缓存失效）
+PROMPT_TEMPLATE_VERSION = "4.2" # Prompt模板/后处理管线版本号，行为变更后+1（自动使旧缓存失效）
 
 # ---------- 文献设置 ----------
 DEFAULT_BOOK_NAME = "武汉市志 文物志"
@@ -60,9 +60,10 @@ CHUNK_OVERLAP = 200              # 拆分时上下文重叠字符数（防止信
 
 # ---------- 多轮抽取（应对模型输出不稳定） ----------
 # 实测同一块多次调用结果在 1条 ~ 45条 间波动，且每次覆盖的子集互不相同。
-# EXTRACTION_PASSES 表示每块调用次数并合并去重：轮次越高召回越全（API成本线性增长）。
-# 2=均衡（默认推荐）；3=高召回（API不限量时推荐）；1=省成本（配合低产出重试兜底）
+# EXTRACTION_PASSES 表示每块最多调用次数并合并去重。
+# ADAPTIVE_PASSES=True 时：前两轮后若新增条目<25%则提前收敛（省Token，默认推荐）
 EXTRACTION_PASSES = 3
+ADAPTIVE_PASSES = True
 LOW_YIELD_THRESHOLD = 3          # 块提取条数低于该值时触发重试（仅单轮模式）
 LOW_YIELD_MIN_CHARS = 1500       # 仅对内容较多的块重试（避免空白/版权页空转）
 MAX_LOW_YIELD_RETRIES = 2        # 最多重试次数
@@ -113,5 +114,5 @@ FEW_SHOT_EXAMPLES = """
 """
 
 # ---------- 版本信息 ----------
-VERSION = "3.2.1"
+VERSION = "3.3.0"
 APP_NAME = "重庆Major2026·档档案案世界冠军"

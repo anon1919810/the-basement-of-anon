@@ -9,6 +9,7 @@ pytesseract
 python-dotenv
 supabase
 python-docx
-# 可选（本地提升扫描件OCR质量，云端暂不安装以免部署失败）：
-# pip install rapidocr_onnxruntime
-# rapidocr_onnxruntime
+# 云端OCR强化（v3.3.0尝试）：pin稳定版避免opencv5安装问题。
+# 若云端部署再次失败，删除以下3行即可回退Tesseract。
+rapidocr_onnxruntime==1.2.3
+opencv-python==4.10.0.84
