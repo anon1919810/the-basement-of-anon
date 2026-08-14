@@ -72,16 +72,13 @@ def ocr_pdf(pdf_path):
     失败自动回退Tesseract。灰度化 + 分批转换防内存溢出 + 噪音过滤 + 进度输出）"""
     try:
         from pdf2image import convert_from_path
+        import pytesseract
 
+        # 仅当配置了本地存在的Tesseract路径时覆盖；否则交给PATH查找（云端由packages.txt安装）
         if TESSERACT_PATH and os.path.exists(TESSERACT_PATH):
-            pytesseract = None
-            try:
-                import pytesseract
-                pytesseract.pytesseract.tesseract_cmd = TESSERACT_PATH
-            except ImportError:
-                pytesseract = None
+            pytesseract.pytesseract.tesseract_cmd = TESSERACT_PATH
 
-        # 惰性加载 RapidOCR 引擎（首次调用初始化，约1-2秒）
+        # 惰性加载 RapidOCR 引擎（首次调用初始化，约1-2秒；未安装则自动回退Tesseract）
         rapid_engine = [None]
 
         def _rapid(img):
@@ -110,14 +107,14 @@ def ocr_pdf(pdf_path):
                     try:
                         text = _rapid(gray)
                     except Exception as e:
-                        print(f"  [OCR] RapidOCR失败({e})，回退Tesseract", flush=True)
-                if not text and pytesseract is not None and OCR_ENGINE in ("auto", "tesseract"):
+                        print(f"  [OCR] RapidOCR不可用({type(e).__name__})，回退Tesseract", flush=True)
+                if not text and OCR_ENGINE in ("auto", "tesseract"):
                     text = pytesseract.image_to_string(gray, lang='chi_sim+eng')
                 full_text += text + "\n"
             print(f"  [OCR] 进度 {end}/{n_pages} 页", flush=True)
         return _clean_ocr_text(full_text)
     except ImportError:
-        print("[警告] 未安装pdf2image，OCR功能不可用")
+        print("[警告] 未安装pdf2image或pytesseract，OCR功能不可用")
         return ""
     except Exception as e:
         print(f"[警告] OCR识别失败：{e}")

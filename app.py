@@ -11,7 +11,7 @@ import sys
 from io import BytesIO
 
 # ========== 调试：强制打印，确认 app.py 已加载 ==========
-print("=== app.py 已加载（v3.1.0）===", flush=True)
+print("=== app.py 已加载（v3.1.1）===", flush=True)
 sys.stdout.flush()
 
 # ========== 导入核心模块（加异常捕获） ==========
@@ -324,6 +324,11 @@ with st.sidebar:
     # ----- 更新日志 -----
     with st.expander("📝 更新日志", expanded=False):
         st.markdown("""
+        **v3.1.1** (2026-08-16)
+        - 🛠️ 修复云端部署失败：RapidOCR改为本地可选（云端自动回退Tesseract），
+          依赖安装不再阻塞部署
+        - 🔧 修复Tesseract在云端的调用（无Windows路径时走系统PATH）
+
         **v3.1.0** (2026-08-16)
         - 🔍 OCR引擎升级：默认 RapidOCR（中文准确率碾压Tesseract，还能识别【】标记），
           Tesseract自动兜底。实测"马投漂村南"→"马投潭村南"，拉丁乱码消失，

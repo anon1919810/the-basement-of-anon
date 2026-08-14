@@ -8,4 +8,6 @@ pdf2image
 pytesseract
 python-dotenv
 supabase
-rapidocr_onnxruntime
+# 可选（本地提升扫描件OCR质量，云端暂不安装以免部署失败）：
+# pip install rapidocr_onnxruntime
+# rapidocr_onnxruntime
