@@ -11,7 +11,7 @@ import sys
 from io import BytesIO
 
 # ========== 调试：强制打印，确认 app.py 已加载 ==========
-print("=== app.py 已加载（v3.3.0）===", flush=True)
+print("=== app.py 已加载（v3.4.0）===", flush=True)
 sys.stdout.flush()
 
 # ========== 导入核心模块（加异常捕获） ==========
@@ -382,6 +382,14 @@ document.cookie='dsh_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
     # ----- 更新日志 -----
     with st.expander("📝 更新日志", expanded=False):
         st.markdown("""
+        **v3.4.0** (2026-08-16)
+        - 🧩 模块化重构：拆分为 prompts/ocr_engine/postprocess/shared 四模块，
+          核心调度只留职责（回归测试验证行为完全一致）
+        - 🧪 新增回归测试 `_run_regression.py`：一键核对黄金标准
+          （遗址12条100%/Word版260条），防"改A坏B"，退出码可接CI
+        - 📚 新增轻量学习 `_learn_corrections.py`：从人工确认的数据自动
+          挖掘OCR纠错对，--apply一键写入纠错词典（易管理/快/自动化）
+
         **v3.3.0** (2026-08-16)
         - 🛡️ 引文忠实度自动校验：每条"历史文献"自动与原文比对，
           未逐字命中的自动标记"⚠引文待核对"，可疑条目一眼可见
@@ -502,7 +510,9 @@ if start_btn and uploaded_files and st.session_state.logged_in:
     status_text.info(f"📄 正在并行处理 {total} 个文件（并行数：{max_workers}）...")
     
     # 运行期覆盖模块级参数（OCR分辨率/抽取轮数）
-    extract_mod.OCR_DPI = ocr_dpi
+    import config as app_config
+    app_config.OCR_DPI = ocr_dpi       # ocr_engine 动态读 config，此设置全局生效
+    extract_mod.OCR_DPI = ocr_dpi      # 兼容旧引用
     print(f"📄 开始并行处理 {total} 个文件（OCR:{ocr_dpi}dpi, 每块{extract_passes}轮）...", flush=True)
     try:
         all_entries = process_pdfs_parallel(
