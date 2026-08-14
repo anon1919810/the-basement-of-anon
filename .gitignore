@@ -5,3 +5,5 @@ cache/
 文化要素提取结果*.xlsx 
 temp_pdfs/ 
 .venv/ 
+
+results/

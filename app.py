@@ -1,5 +1,6 @@
 import database as db
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import os
 import time
@@ -10,7 +11,7 @@ import sys
 from io import BytesIO
 
 # ========== 调试：强制打印，确认 app.py 已加载 ==========
-print("=== app.py 已加载（v2.4.0）===", flush=True)
+print("=== app.py 已加载（v2.6.0）===", flush=True)
 sys.stdout.flush()
 
 # ========== 导入核心模块（加异常捕获） ==========
@@ -50,78 +51,78 @@ except Exception as e:
 # ========== 页面配置 ==========
 st.set_page_config(page_title=APP_NAME, layout="wide", page_icon="📚")
 
-# ========== UI 美化样式（验证生效版） ==========
+# ========== UI 美化样式（直接内联注入） ==========
 st.markdown("""
 <style>
-    /* 全局背景 */
-    .stApp {
+    body {
         background-color: #f8f9fa !important;
+        color: #1a202c !important;
     }
-    
-    /* 侧边栏 */
-    .stSidebar {
+    section[data-testid="stSidebar"] {
         background-color: #ffffff !important;
         border-right: 1px solid #e9ecef !important;
     }
-    
-    /* 所有标题 */
     h1, h2, h3 {
         color: #1a202c !important;
+        font-weight: 600 !important;
     }
-    
-    /* 主按钮 */
-    .stButton button {
+    .stButton > button {
         background-color: #3b82f6 !important;
         color: white !important;
         border-radius: 8px !important;
         border: none !important;
         font-weight: 500 !important;
+        padding: 0.5rem 1rem !important;
         transition: all 0.2s ease !important;
     }
-    .stButton button:hover {
+    .stButton > button:hover {
         background-color: #2563eb !important;
         box-shadow: 0 4px 12px rgba(59,130,246,0.4) !important;
     }
-    
-    /* 输入框 */
     .stTextInput input, .stTextArea textarea {
         border-radius: 8px !important;
         border: 1px solid #d1d5db !important;
         padding: 8px 12px !important;
+        background-color: #ffffff !important;
     }
     .stTextInput input:focus, .stTextArea textarea:focus {
         border-color: #3b82f6 !important;
         box-shadow: 0 0 0 3px rgba(59,130,246,0.2) !important;
     }
-    
-    /* 提示框 */
     .stAlert {
         border-radius: 8px !important;
     }
-    
-    /* 指标卡片数值 */
     [data-testid="stMetricValue"] {
         color: #1a202c !important;
         font-weight: 600 !important;
+        font-size: 2rem !important;
     }
-    
-    /* 下载按钮 */
-    .stDownloadButton button {
+    .stDownloadButton > button {
         background-color: #10b981 !important;
+        color: white !important;
+        border-radius: 8px !important;
+        border: none !important;
+        font-weight: 500 !important;
     }
-    .stDownloadButton button:hover {
+    .stDownloadButton > button:hover {
         background-color: #059669 !important;
     }
-    
-    /* 页脚 */
     .stCaption {
         color: #6b7280 !important;
+        font-size: 0.9rem !important;
     }
-    
-    /* 折叠面板 */
     .streamlit-expanderHeader {
         font-weight: 500 !important;
         color: #1a202c !important;
+    }
+    .stFileUploader > div {
+        border-radius: 8px !important;
+        border: 2px dashed #d1d5db !important;
+        background-color: #fafafa !important;
+    }
+    .stFileUploader > div:hover {
+        border-color: #3b82f6 !important;
+        background-color: #f0f7ff !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -144,8 +145,10 @@ if 'user' not in st.session_state:
 if 'user_id' not in st.session_state:
     st.session_state.user_id = None
 
-# 初始化数据库（首次运行自动创建）
-db.init_db()
+# 初始化数据库（启动自检：连接异常/缺表时给出明确提示，不阻塞主功能）
+db_ok, db_msg = db.init_db()
+if not db_ok:
+    st.warning(f"⚠️ {db_msg}（提取功能不受影响）")
 
 # ======================== 侧边栏 ========================
 with st.sidebar:
@@ -230,9 +233,11 @@ with st.sidebar:
         
         examples_list = []
         current = {}
+        # 匹配 "1. 示例1：" 或 "示例："（排除标题行"以下是一些...示例，..."）
+        header_pattern = re.compile(r'^(?:\d+\.\s*)?示例\d*[：:]')
         for line in FEW_SHOT_EXAMPLES.strip().split('\n'):
             line = line.strip()
-            if line.startswith('示例') and '：' in line:
+            if header_pattern.match(line):
                 if current:
                     examples_list.append(current)
                     current = {}
@@ -313,6 +318,24 @@ with st.sidebar:
     # ----- 更新日志 -----
     with st.expander("📝 更新日志", expanded=False):
         st.markdown("""
+        **v2.6.0** (2026-08-16)
+        - 🔍 OCR 增强：灰度化 + 200dpi + 分批转换 + 乱码自动清理（扫描件可用性大幅提升）
+        - 🔗 跨文件合并：同一文献的分册/分页提取结果自动合并重复条目
+        - 🗄️ 数据库加固：凭据入环境变量、密码加盐、启动自检（缺表/断连有明确提示）
+        - 📊 逐块日志：每块提取数量可见，异常低产出会告警
+
+        **v2.5.3** (2026-08-16)
+        - 🔗 合并跨块近似重复条目（如"汉阳旧城/汉阳城"），摘抄按句去重拼接
+        - 📝 名称修正自动注明"原书作『××』"，保证学术可追溯
+        - ⏳ 真实进度条：处理进度实时更新，不再"假死"
+
+        **v2.5.0** (2026-08-16)
+        - 🧠 Prompt 全面重构：防编造、输出Schema示例、严格枚举、页码诚实原则
+        - 🔧 API 自动重试：网络错误/429/5xx 指数退避，结果更稳定
+        - 📦 JSON 输出规范化 + 字段校验：坏数据自动修复/标记
+        - 💾 缓存键升级：修改模板或Few-shot后自动失效旧缓存
+        - 🐛 修复独立运行 main() 崩溃、超长段落截断等问题
+
         **v2.4.0** (2026-08-15)
         - 🎨 全面UI美化：Supabase风格卡片设计、柔和配色、圆角按钮
         - ✨ 提升视觉体验：优化输入框、按钮、表格样式
@@ -394,11 +417,19 @@ if start_btn and uploaded_files and st.session_state.logged_in:
     progress_bar = st.progress(0, text="初始化...")
     status_text = st.empty()
 
+    # 真实进度回调：主线程按完成顺序更新，避免进度条"假死"
+    def update_progress(done, total):
+        progress_bar.progress(done / total, text=f"⏳ 正在处理 {done}/{total} 个文件...")
+
     status_text.info(f"📄 正在并行处理 {total} 个文件（并行数：{max_workers}）...")
     
     print(f"📄 开始并行处理 {total} 个文件...", flush=True)
     try:
-        all_entries = process_pdfs_parallel(pdf_paths, book_name, max_workers=max_workers)
+        all_entries = process_pdfs_parallel(
+            pdf_paths, book_name,
+            max_workers=max_workers,
+            progress_callback=update_progress
+        )
         print(f"✅ 处理完成，共提取 {len(all_entries)} 条", flush=True)
     except Exception as e:
         print(f"❌ 处理出错：{e}", flush=True)
@@ -434,7 +465,7 @@ if st.session_state.logged_in:
         submit_msg = st.form_submit_button("📤 发布留言")
         if submit_msg and msg_content.strip():
             db.add_message(st.session_state.user_id, st.session_state.user, msg_content.strip())
-            st.success("✅ do you hear the people singing?")
+            st.success("✅ do you hear the people sing?")
             st.rerun()
         elif submit_msg:
             st.error("❌ 棍母了喵")
