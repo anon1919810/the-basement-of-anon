@@ -50,6 +50,20 @@ except Exception as e:
 # ========== 页面配置 ==========
 st.set_page_config(page_title=APP_NAME, layout="wide", page_icon="📚")
 
+# ========== 测试 CSS（极简版） ==========
+st.markdown("""
+<style>
+    /* 让所有标题变成红色，测试 CSS 是否生效 */
+    h1, h2, h3 {
+        color: #ff0000 !important;
+    }
+    /* 让侧边栏背景变成浅蓝色 */
+    .stSidebar {
+        background-color: #e0f0ff !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 # ========== 自定义 CSS（Supabase 风格 UI 美化） ==========
 st.markdown("""
 <style>
