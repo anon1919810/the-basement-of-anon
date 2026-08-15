@@ -224,6 +224,46 @@ def get_high_rated_extractions(min_rating=8, limit=50):
     return list_extractions(limit=limit, min_rating=min_rating)
 
 
+def get_user_stats():
+    """用户维度统计：提取次数/总条数/最近提取/平均评分（按提取次数降序）"""
+    supabase = get_supabase()
+    try:
+        r = supabase.table("extraction_results").select(
+            "user_id, username, entry_count, rating, created_at").execute()
+        rows = r.data or []
+        stats = {}
+        for x in rows:
+            uid = str(x.get("user_id"))
+            s = stats.setdefault(uid, {
+                "user_id": uid,
+                "username": x.get("username") or "?",
+                "提取次数": 0,
+                "总条数": 0,
+                "评分次数": 0,
+                "评分合计": 0,
+                "最近提取": "",
+            })
+            s["提取次数"] += 1
+            s["总条数"] += x.get("entry_count") or 0
+            if x.get("rating"):
+                s["评分次数"] += 1
+                s["评分合计"] += int(x["rating"])
+            t = str(x.get("created_at") or "")[:16]
+            if t > s["最近提取"]:
+                s["最近提取"] = t
+        out = []
+        for s in stats.values():
+            s["平均评分"] = round(s["评分合计"] / s["评分次数"], 1) if s["评分次数"] else None
+            s.pop("评分次数")
+            s.pop("评分合计")
+            out.append(s)
+        out.sort(key=lambda s: s["提取次数"], reverse=True)
+        return out
+    except Exception as e:
+        print(f"用户统计失败：{e}")
+        return []
+
+
 # ========== 管理员后台 ==========
 def delete_message_any(message_id):
     """管理员删除任意留言"""

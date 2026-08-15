@@ -538,6 +538,10 @@ document.cookie='dsh_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
     # ----- 更新日志 -----
     with st.expander("📝 更新日志", expanded=False):
         st.markdown("""
+        **v4.6.0** (2026-08-16)
+        - 🛡️ 管理后台新增"用户统计"：每位用户的ID、提取次数、总条数、
+          最近提取时间、平均评分，附总体汇总
+
         **v4.5.2** (2026-08-16)
         - 🐛 修复多用户同时提取时的文件冲突（每次提取使用独立临时目录）
 
@@ -839,7 +843,8 @@ def _generate_baselines(min_rating=8):
 if st.session_state.logged_in and st.session_state.get("user") in ADMIN_USERNAMES:
     st.markdown("---")
     st.subheader("🛡️ 管理后台")
-    admin_tab1, admin_tab2, admin_tab3 = st.tabs(["🗑️ 留言管理", "🔑 Key 管理", "📊 提取记录"])
+    admin_tab1, admin_tab2, admin_tab3, admin_tab4 = st.tabs(
+        ["🗑️ 留言管理", "🔑 Key 管理", "📊 提取记录", "👥 用户统计"])
 
     with admin_tab1:
         st.caption("全部留言（可删除任意一条）")
@@ -909,6 +914,34 @@ if st.session_state.logged_in and st.session_state.get("user") in ADMIN_USERNAME
                         st.rerun()
         else:
             st.info("暂无提取记录（确认已执行最新 db_schema.sql，并完成过提取）")
+
+    with admin_tab4:
+        st.caption("按用户统计：提取次数 / 总条数 / 最近提取 / 平均评分")
+        ustats = db.get_user_stats()
+        if ustats:
+            col_tot1, col_tot2, col_tot3, col_tot4 = st.columns(4)
+            with col_tot1:
+                st.metric("👥 用户数", len(ustats))
+            with col_tot2:
+                st.metric("🔁 总提取次数", sum(u["提取次数"] for u in ustats))
+            with col_tot3:
+                st.metric("📄 提取总条数", sum(u["总条数"] for u in ustats))
+            rated = [u for u in ustats if u["平均评分"]]
+            with col_tot4:
+                st.metric("⭐ 平均评分",
+                          round(sum(u["平均评分"] for u in rated) / len(rated), 1) if rated else "—")
+            st.dataframe(pd.DataFrame(ustats),
+                         use_container_width=True, hide_index=True,
+                         column_config={
+                             "user_id": "用户ID",
+                             "username": "用户名",
+                             "提取次数": st.column_config.NumberColumn("提取次数"),
+                             "总条数": st.column_config.NumberColumn("总条数"),
+                             "最近提取": "最近提取",
+                             "平均评分": st.column_config.NumberColumn("平均评分", format="%.1f"),
+                         })
+        else:
+            st.info("暂无统计数据（确认已执行最新 db_schema.sql，并完成过提取）")
 
 # --- 统计看板 ---
 if st.session_state.df is not None and not st.session_state.df.empty:
