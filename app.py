@@ -11,7 +11,7 @@ import sys
 from io import BytesIO
 
 # ========== 调试：强制打印，确认 app.py 已加载 ==========
-print("=== app.py 已加载（v3.6.0）===", flush=True)
+print("=== app.py 已加载（v4.0.0）===", flush=True)
 sys.stdout.flush()
 
 # ========== 导入核心模块（加异常捕获） ==========
@@ -476,6 +476,12 @@ document.cookie='dsh_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
     # ----- 更新日志 -----
     with st.expander("📝 更新日志", expanded=False):
         st.markdown("""
+        **v4.0.0** (2026-08-16) 🎉 正式版
+        - 📄 正式发布：完整工作流（Word路线/子目模式/OCR/纠错/校验）
+        - 📖 新增 README 与 .env.example（部署与环境变量一目了然）
+        - 🧪 发布前体检：回归测试 2/2 通过、启动冒烟测试通过
+        - 🎟️ 邀请码机制、🛡️ 管理后台、🔑 用户自带Key（自v3.5/3.6）
+
         **v3.6.0** (2026-08-16)
         - 🎟️ 邀请码机制：用户填对邀请码后24小时内用作者Key，否则只能用自己的Key
           （INVITE_CODE 在 .env/Secrets 配置；REQUIRE_KEY_OR_INVITE 可回退旧行为）
