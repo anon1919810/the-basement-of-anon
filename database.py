@@ -157,6 +157,73 @@ def get_invite(user_id):
         return False
 
 
+# ========== 提取结果入库 + 评分（供管理查看与高分转回归基准） ==========
+def save_extraction(user_id, username, book_name, file_name, entries, source_text=""):
+    """保存一次提取结果（含原文与结果JSON）；表未建时优雅返回0"""
+    supabase = get_supabase()
+    try:
+        import json
+        data = {
+            "user_id": user_id,
+            "username": username,
+            "book_name": book_name,
+            "file_name": file_name,
+            "entry_count": len(entries),
+            "source_text": (source_text or "")[:200000],
+            "result_json": json.dumps(entries, ensure_ascii=False),
+        }
+        r = supabase.table("extraction_results").insert(data).execute()
+        return r.data[0]["id"] if r.data else 0
+    except Exception as e:
+        print(f"保存提取结果失败：{e}")
+        return 0
+
+
+def update_rating(record_id, rating, feedback=""):
+    """更新评分为 1-10 与意见"""
+    supabase = get_supabase()
+    try:
+        supabase.table("extraction_results").update(
+            {"rating": int(rating), "feedback": feedback}).eq("id", record_id).execute()
+        return True
+    except Exception as e:
+        print(f"更新评分失败：{e}")
+        return False
+
+
+def list_extractions(limit=100, user_id=None, min_rating=None):
+    """按时间倒序列出提取记录；可按用户/最低评分过滤"""
+    supabase = get_supabase()
+    try:
+        q = supabase.table("extraction_results").select("*").order("created_at", desc=True).limit(limit)
+        if user_id:
+            q = q.eq("user_id", user_id)
+        r = q.execute()
+        rows = r.data or []
+        if min_rating:
+            rows = [x for x in rows if x.get("rating") and x["rating"] >= min_rating]
+        return rows
+    except Exception as e:
+        print(f"查询提取记录失败：{e}")
+        return []
+
+
+def delete_extraction(record_id):
+    """管理员删除一条提取记录"""
+    supabase = get_supabase()
+    try:
+        r = supabase.table("extraction_results").delete().eq("id", record_id).execute()
+        return len(r.data) > 0
+    except Exception as e:
+        print(f"删除提取记录失败：{e}")
+        return False
+
+
+def get_high_rated_extractions(min_rating=8, limit=50):
+    """取高评分提取（供生成回归基准）"""
+    return list_extractions(limit=limit, min_rating=min_rating)
+
+
 # ========== 管理员后台 ==========
 def delete_message_any(message_id):
     """管理员删除任意留言"""

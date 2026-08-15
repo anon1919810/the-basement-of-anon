@@ -36,6 +36,21 @@ CREATE TABLE IF NOT EXISTS messages (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- ---------- 提取结果表（原文+结果，供管理查看与"高分转回归基准"） ----------
+CREATE TABLE IF NOT EXISTS extraction_results (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    username TEXT NOT NULL,
+    book_name TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    entry_count INT,
+    source_text TEXT,        -- 提取所用的原文（文本层/Word直接文本；OCR为纠正后文本）
+    result_json JSONB,       -- 提取结果（条目数组）
+    rating INT,              -- 用户评分 1-10（可选）
+    feedback TEXT,           -- 用户意见（可选）
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- ---------- 行级安全 ----------
 -- 本应用用应用内登录（非Supabase Auth），故放开匿名读写，访问控制由应用层负责
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
@@ -46,6 +61,9 @@ CREATE POLICY "anon all users" ON users FOR ALL USING (true) WITH CHECK (true);
 
 -- messages：读写删均允许（删除时应用层已按 user_id 约束；管理员可删任意）
 CREATE POLICY "anon all messages" ON messages FOR ALL USING (true) WITH CHECK (true);
+
+-- extraction_results：读写均允许（访问控制由应用层负责）
+CREATE POLICY "anon all extraction_results" ON extraction_results FOR ALL USING (true) WITH CHECK (true);
 
 -- 提示：若你之前执行过旧版脚本，重复执行本脚本即可（旧的窄策略会被新策略覆盖/共存，
 -- 操作权限取并集，不会冲突）。

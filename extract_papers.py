@@ -52,6 +52,9 @@ if not API_KEY:
 # 未设置则回退到作者的API_KEY（每次处理前app.py都会显式重置，避免串用）
 ACTIVE_API_KEY = None
 
+# 最近一次批处理的源文本（供入库/生成回归基准；process_pdfs_parallel 开始时清空）
+LAST_SOURCES = []
+
 # 复用 HTTP 连接（避免每次请求重建握手）
 _http = requests.Session()
 
@@ -407,6 +410,7 @@ def process_pdf_file(file_path, book_name, extraction_passes=None):
                 raw_text = corrected
     entries = extract_cultural_elements(raw_text, book_name, is_ocr=used_ocr,
                                         extraction_passes=extraction_passes)
+    LAST_SOURCES.append(raw_text)  # 记录源文本（供入库/生成回归基准）
     if entries:
         log_message(f"  -> 提取 {len(entries)} 条", "INFO")
     else:
@@ -424,6 +428,7 @@ def process_pdfs_parallel(pdf_paths, book_name, max_workers=MAX_PARALLEL_WORKERS
     total = len(pdf_paths)
     if total == 0:
         return []
+    LAST_SOURCES.clear()  # 新一批处理开始时清空源文本记录
 
     results = [None] * total
     done = 0

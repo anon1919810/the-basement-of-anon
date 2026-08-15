@@ -11,7 +11,7 @@ import sys
 from io import BytesIO
 
 # ========== 调试：强制打印，确认 app.py 已加载 ==========
-print("=== app.py 已加载（v4.1.0）===", flush=True)
+print("=== app.py 已加载（v4.2.0）===", flush=True)
 sys.stdout.flush()
 
 # ========== 导入核心模块（加异常捕获） ==========
@@ -478,6 +478,13 @@ document.cookie='dsh_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
     # ----- 更新日志 -----
     with st.expander("📝 更新日志", expanded=False):
         st.markdown("""
+        **v4.2.0** (2026-08-16)
+        - 🗄️ 提取结果入库：每次提取自动保存（用户/文献/文件/条数/原文/结果JSON）
+        - ⭐ 评分系统：提取后可打1-10分+意见；高分结果自动沉淀为回归基准
+        - 🛡️ 管理后台增强：新增"提取记录"标签（按用户/评分过滤、查看条目、删除），
+          一键"从高分提取生成回归基准"（示例/regression_baselines/）
+        - 🧪 回归测试自动纳入评分基准（source_text直跑，无需原文件）
+
         **v4.1.0** (2026-08-16)
         - 📜 历史文献标注来源：《书名》："引文"（书名用你填写的文献名称）
         - 🔍 仅提取最大子目（可选项，默认开）：识别【】及"名称：正文"式条目，
@@ -670,6 +677,13 @@ if start_btn and uploaded_files and st.session_state.logged_in:
         # 历史文献标注来源：《书名》："引文"
         df["历史文献"] = df["历史文献"].map(lambda q: extract_mod.format_quote(q, book_name))
         st.session_state.df = df[cols]
+        # 提取结果入库（供管理查看与高分转回归基准）
+        src_text = "\n\n".join(getattr(extract_mod, "LAST_SOURCES", []))
+        rec_id = db.save_extraction(
+            st.session_state.user_id, st.session_state.user,
+            book_name, ", ".join(f.name for f in uploaded_files),
+            all_entries, src_text)
+        st.session_state.last_extraction_id = rec_id if rec_id else None
         st.success(f"🎉 完成！共提取 {len(all_entries)} 条")
         print(f"🎉 完成！共提取 {len(all_entries)} 条", flush=True)
     else:
@@ -677,6 +691,19 @@ if start_btn and uploaded_files and st.session_state.logged_in:
         print("❌ 未提取到数据", flush=True)
 
     st.session_state.processing = False
+
+# ======================== 评分区（每次提取后） ========================
+if st.session_state.get("last_extraction_id"):
+    st.markdown("---")
+    st.subheader("⭐ 评价本次提取")
+    st.caption("评分高的提取结果将被选为回归基准，帮助改进工具")
+    rating = st.slider("给本次提取打分（1-10）", 1, 10, 8, key="extract_rating")
+    feedback = st.text_input("意见和建议（选填）", key="extract_feedback")
+    if st.button("提交评价", key="submit_rating"):
+        if db.update_rating(st.session_state.last_extraction_id, rating, feedback):
+            st.success("✅ 感谢评价！高分提取将用于训练回归基准")
+        else:
+            st.error("❌ 提交失败：请确认已执行最新 db_schema.sql（需 extraction_results 表）")
 
 # ======================== 留言板 ========================
 if st.session_state.logged_in:
@@ -713,10 +740,33 @@ if st.session_state.logged_in:
         st.info("📭 暂无留言，来做第一个留言的人吧！")
 
 # ======================== 管理后台（仅管理员可见） ========================
+def _generate_baselines(min_rating=8):
+    """从高评分提取生成回归基准（示例/regression_baselines/*.json）"""
+    import json as _json
+    recs = db.get_high_rated_extractions(min_rating=min_rating)
+    out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "示例", "regression_baselines")
+    os.makedirs(out_dir, exist_ok=True)
+    n = 0
+    for rec in recs:
+        try:
+            items = _json.loads(rec.get("result_json") or "[]")
+            names = [it.get("名称", "") for it in items if it.get("名称")]
+            src = rec.get("source_text") or ""
+            if not names or len(src) < 100:
+                continue
+            bl = {"book_name": rec["book_name"], "source_text": src, "golden_names": names}
+            with open(os.path.join(out_dir, f"baseline_{rec['id']}.json"), "w", encoding="utf-8") as f:
+                _json.dump(bl, f, ensure_ascii=False, indent=2)
+            n += 1
+        except Exception:
+            continue
+    return n
+
+
 if st.session_state.logged_in and st.session_state.get("user") in ADMIN_USERNAMES:
     st.markdown("---")
     st.subheader("🛡️ 管理后台")
-    admin_tab1, admin_tab2 = st.tabs(["🗑️ 留言管理", "🔑 Key 管理"])
+    admin_tab1, admin_tab2, admin_tab3 = st.tabs(["🗑️ 留言管理", "🔑 Key 管理", "📊 提取记录"])
 
     with admin_tab1:
         st.caption("全部留言（可删除任意一条）")
@@ -750,6 +800,42 @@ if st.session_state.logged_in and st.session_state.get("user") in ADMIN_USERNAME
                         st.rerun()
         else:
             st.info("暂无用户设置 Key")
+
+    with admin_tab3:
+        st.caption("用户提取记录：评分≥8 可一键生成回归基准")
+        if st.button("🎓 从高分提取生成回归基准（评分≥8）", key="gen_baseline"):
+            n = _generate_baselines(8)
+            st.success(f"✅ 已生成 {n} 个回归基准到 示例/regression_baselines/（下次 _run_regression.py 自动纳入）")
+        filter_user = st.text_input("按用户名过滤（留空=全部）", key="adm_extract_user")
+        min_rating = st.selectbox("只看评分≥", [0, 6, 8, 9, 10], index=0, key="adm_extract_rating")
+        recs = db.list_extractions(limit=100, min_rating=min_rating or None)
+        if filter_user:
+            recs = [r for r in recs if filter_user in (r.get("username") or "")]
+        if recs:
+            for r in recs:
+                c1, c2 = st.columns([10, 1])
+                with c1:
+                    st.markdown(f"**{r.get('username','')}** · {r.get('book_name','')} · "
+                                f"{r.get('file_name','')} · {r.get('entry_count',0)}条 · "
+                                f"评分{r.get('rating') or '—'} · {str(r.get('created_at',''))[:16]}")
+                    if r.get("feedback"):
+                        st.caption(f"📝 {r['feedback']}")
+                    with st.expander("查看条目"):
+                        import json as _json2
+                        try:
+                            items = _json2.loads(r.get("result_json") or "[]")
+                            for it in items[:20]:
+                                st.markdown(f"- {it.get('名称','')} | {it.get('类别','')} | {it.get('空间','')}")
+                            if len(items) > 20:
+                                st.caption(f"…共 {len(items)} 条")
+                        except Exception:
+                            st.caption("（无法解析）")
+                with c2:
+                    if st.button("🗑️", key=f"adm_extract_del_{r['id']}"):
+                        db.delete_extraction(r["id"])
+                        st.rerun()
+        else:
+            st.info("暂无提取记录（确认已执行最新 db_schema.sql，并完成过提取）")
 
 # --- 统计看板 ---
 if st.session_state.df is not None and not st.session_state.df.empty:

@@ -19,6 +19,7 @@
 import os
 import re
 import glob
+import json
 import sys
 import argparse
 
@@ -40,8 +41,7 @@ CASES = [
         "min_coverage": 0.9,
         "min_fidelity": 0.9,
         "quick_ok": True,
-    },
-    {
+    },    {
         "file": "示例/重庆分册  上.docx",
         "book": "重庆分册 上",
         "golden_xlsx": "示例/重庆分册 文化要素提取结果.xlsx",
@@ -66,6 +66,24 @@ CASES = [
         "quick_ok": False,                    # 需重OCR，--quick时跳过
     },
 ]
+
+# 自动并入"高分转回归基准"（管理后台生成到 示例/regression_baselines/*.json）
+_BASE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "示例", "regression_baselines")
+for _bf in sorted(glob.glob(os.path.join(_BASE_DIR, "*.json"))):
+    try:
+        with open(_bf, encoding="utf-8") as _f:
+            _b = json.load(_f)
+        if _b.get("source_text") and _b.get("golden_names"):
+            CASES.append({
+                "source_text": _b["source_text"],
+                "book": _b.get("book_name", "未知文献"),
+                "golden_names": _b["golden_names"],
+                "min_coverage": 0.7,
+                "min_fidelity": 0.8,
+                "quick_ok": True,
+            })
+    except Exception:
+        continue
 
 
 def norm(s):
@@ -125,12 +143,15 @@ def main():
     results = []
     failed = 0
     for i, case in enumerate(CASES, 1):
-        fp = case["file"]
+        fp = case.get("file", "")
+        # source_text 类用例（评分生成基准）：无需文件
+        if case.get("source_text"):
+            pass
         # 解析文件路径：支持glob通配符；不存在时按前缀在示例目录中模糊定位
-        if "*" in fp or "?" in fp:
+        elif "*" in fp or "?" in fp:
             cands = glob.glob(fp) or glob.glob(os.path.join(os.path.dirname(fp) or ".", os.path.basename(fp)))
             fp = cands[0] if cands else fp
-        if not os.path.exists(fp):
+        if fp and not os.path.exists(fp):
             base = os.path.basename(fp)
             ext = "*.docx" if base.lower().endswith(".docx") else "*.pdf"
             cands = [p for p in glob.glob(os.path.join(os.path.dirname(fp) or ".", ext))
@@ -141,11 +162,18 @@ def main():
                 print(f"[{i}] 跳过（文件不存在）：{base}")
                 continue
         if args.quick and not case.get("quick_ok", True):
-            print(f"[{i}] 跳过（--quick）：{os.path.basename(fp)}")
+            print(f"[{i}] 跳过（--quick）：{os.path.basename(fp) if fp else case.get('book','')}")
             continue
 
-        print(f"\n{'='*64}\n[{i}] {os.path.basename(fp)}")
-        entries = ep.process_pdf_file(fp, case["book"])   # 缓存命中则零API
+        print(f"\n{'='*64}\n[{i}] {os.path.basename(fp) if not case.get('source_text') else '评分基准:' + case.get('book','')}")
+
+        # 执行提取：source_text类直接跑文本（评分生成的基准），否则走文件（含OCR）
+        if case.get("source_text"):
+            entries = ep.extract_cultural_elements(case["source_text"], case["book"])
+            source = case["source_text"]
+        else:
+            entries = ep.process_pdf_file(fp, case["book"])   # 缓存命中则零API
+            source = get_source_text(fp)
 
         # 黄金名称
         if case.get("golden_names"):
@@ -158,7 +186,6 @@ def main():
         coverage = sum(1 for g in golden if matched(g, pipe_names)) / len(golden)
 
         # 引文忠实
-        source = get_source_text(fp)
         fidelity = quote_fidelity(entries, source)
 
         status = "✅ PASS" if (coverage >= case["min_coverage"] and fidelity >= case["min_fidelity"]) else "❌ FAIL"
