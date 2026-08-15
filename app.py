@@ -351,7 +351,11 @@ document.cookie='dsh_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
             st.rerun()
     
     st.markdown("---")
-    
+
+    # ----- 页面导航 -----
+    _PAGES = {"📚 提取工作台": "workbench", "🛡️ 管理后台": "admin", "📖 使用帮助": "help"}
+    nav_mode = _PAGES[st.sidebar.radio("页面", list(_PAGES), key="nav_page")]
+
     # ----- 参数设置（只在登录后显示）-----
     if st.session_state.logged_in:
         st.header("⚙️ 参数设置")
@@ -538,6 +542,11 @@ document.cookie='dsh_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
     # ----- 更新日志 -----
     with st.expander("📝 更新日志", expanded=False):
         st.markdown("""
+        **v4.7.0** (2026-08-16)
+        - 🌍 统计看板新增地域分布地图（省级，绿色渐变）
+        - 🤖 AI 对话升级为流式输出（打字机效果）
+        - 📑 多页面导航：提取工作台 / 管理后台 / 使用帮助
+
         **v4.6.0** (2026-08-16)
         - 🛡️ 管理后台新增"用户统计"：每位用户的ID、提取次数、总条数、
           最近提取时间、平均评分，附总体汇总
@@ -659,7 +668,170 @@ document.cookie='dsh_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
         - Greenday乐队超棒的音乐
         """)
 
+# ======================== 管理后台 / 帮助页（多页面导航） ========================
+def _generate_baselines(min_rating=8):
+    """从高评分提取生成回归基准（示例/regression_baselines/*.json）"""
+    import json as _json
+    recs = db.get_high_rated_extractions(min_rating=min_rating)
+    out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "示例", "regression_baselines")
+    os.makedirs(out_dir, exist_ok=True)
+    n = 0
+    for rec in recs:
+        try:
+            items = _json.loads(rec.get("result_json") or "[]")
+            names = [it.get("名称", "") for it in items if it.get("名称")]
+            src = rec.get("source_text") or ""
+            if not names or len(src) < 100:
+                continue
+            bl = {"book_name": rec["book_name"], "source_text": src, "golden_names": names}
+            with open(os.path.join(out_dir, f"baseline_{rec['id']}.json"), "w", encoding="utf-8") as f:
+                _json.dump(bl, f, ensure_ascii=False, indent=2)
+            n += 1
+        except Exception:
+            continue
+    return n
+
+
+def _render_admin_page():
+    """管理后台（仅管理员可见）"""
+    if not (st.session_state.logged_in and st.session_state.get("user") in ADMIN_USERNAMES):
+        st.info("🔒 管理后台仅管理员可见")
+        return
+    st.markdown("---")
+    st.subheader("🛡️ 管理后台")
+    admin_tab1, admin_tab2, admin_tab3, admin_tab4 = st.tabs(
+        ["🗑️ 留言管理", "🔑 Key 管理", "📊 提取记录", "👥 用户统计"])
+
+    with admin_tab1:
+        st.caption("全部留言（可删除任意一条）")
+        all_msgs = db.get_messages(limit=200)
+        if all_msgs:
+            for m in all_msgs:
+                c1, c2 = st.columns([10, 1])
+                with c1:
+                    st.markdown(f"**{m['username']}** · {str(m['created_at'])[:16]}")
+                    st.markdown(f"{m['content']}")
+                    st.markdown("---")
+                with c2:
+                    if st.button("🗑️", key=f"adm_del_{m['id']}"):
+                        db.delete_message_any(m["id"])
+                        st.rerun()
+        else:
+            st.info("暂无留言")
+
+    with admin_tab2:
+        st.caption("已设置自己 API Key 的用户（Key 为密文，仅可清空）")
+        key_users = db.list_users_with_keys()
+        if key_users:
+            for u in key_users:
+                c1, c2 = st.columns([10, 1])
+                with c1:
+                    st.markdown(f"**{u['username']}** · Key已设置 · 邀请码状态："
+                                f"{'✅有效' if db.get_invite(u['id']) else '—'}")
+                with c2:
+                    if st.button("清空", key=f"adm_key_{u['id']}"):
+                        db.clear_api_key(u["id"])
+                        st.rerun()
+        else:
+            st.info("暂无用户设置 Key")
+
+    with admin_tab3:
+        st.caption("用户提取记录：评分≥8 可一键生成回归基准")
+        if st.button("🎓 从高分提取生成回归基准（评分≥8）", key="gen_baseline"):
+            n = _generate_baselines(8)
+            st.success(f"✅ 已生成 {n} 个回归基准到 示例/regression_baselines/（下次 _run_regression.py 自动纳入）")
+        filter_user = st.text_input("按用户名过滤（留空=全部）", key="adm_extract_user")
+        min_rating = st.selectbox("只看评分≥", [0, 6, 8, 9, 10], index=0, key="adm_extract_rating")
+        recs = db.list_extractions(limit=100, min_rating=min_rating or None)
+        if filter_user:
+            recs = [r for r in recs if filter_user in (r.get("username") or "")]
+        if recs:
+            for r in recs:
+                c1, c2 = st.columns([10, 1])
+                with c1:
+                    st.markdown(f"**{r.get('username','')}** · {r.get('book_name','')} · "
+                                f"{r.get('file_name','')} · {r.get('entry_count',0)}条 · "
+                                f"评分{r.get('rating') or '—'} · {str(r.get('created_at',''))[:16]}")
+                    if r.get("feedback"):
+                        st.caption(f"📝 {r['feedback']}")
+                    with st.expander("查看条目"):
+                        import json as _json2
+                        try:
+                            items = _json2.loads(r.get("result_json") or "[]")
+                            for it in items[:20]:
+                                st.markdown(f"- {it.get('名称','')} | {it.get('类别','')} | {it.get('空间','')}")
+                            if len(items) > 20:
+                                st.caption(f"…共 {len(items)} 条")
+                        except Exception:
+                            st.caption("（无法解析）")
+                with c2:
+                    if st.button("🗑️", key=f"adm_extract_del_{r['id']}"):
+                        db.delete_extraction(r["id"])
+                        st.rerun()
+        else:
+            st.info("暂无提取记录（确认已执行最新 db_schema.sql，并完成过提取）")
+
+    with admin_tab4:
+        st.caption("按用户统计：提取次数 / 总条数 / 最近提取 / 平均评分")
+        ustats = db.get_user_stats()
+        if ustats:
+            col_tot1, col_tot2, col_tot3, col_tot4 = st.columns(4)
+            with col_tot1:
+                st.metric("👥 用户数", len(ustats))
+            with col_tot2:
+                st.metric("🔁 总提取次数", sum(u["提取次数"] for u in ustats))
+            with col_tot3:
+                st.metric("📄 提取总条数", sum(u["总条数"] for u in ustats))
+            rated = [u for u in ustats if u["平均评分"]]
+            with col_tot4:
+                st.metric("⭐ 平均评分",
+                          round(sum(u["平均评分"] for u in rated) / len(rated), 1) if rated else "—")
+            st.dataframe(pd.DataFrame(ustats),
+                         use_container_width=True, hide_index=True,
+                         column_config={
+                             "user_id": "用户ID",
+                             "username": "用户名",
+                             "提取次数": st.column_config.NumberColumn("提取次数"),
+                             "总条数": st.column_config.NumberColumn("总条数"),
+                             "最近提取": "最近提取",
+                             "平均评分": st.column_config.NumberColumn("平均评分", format="%.1f"),
+                         })
+        else:
+            st.info("暂无统计数据（确认已执行最新 db_schema.sql，并完成过提取）")
+
+
+def _render_help_page():
+    """使用帮助页"""
+    st.markdown("---")
+    st.subheader("📖 使用帮助")
+    st.markdown("""
+**如何使用**
+1. 登录后，在左侧填写文献名称并上传 PDF 或 Word 文件
+2. 扫描件建议先用 WPS 转成 Word 并让 AI 修正错字，识别零误差、效果最佳
+3. 点击「开始智能提取」，等待结果
+4. 在 AI 工作台用 AI 补充基础信息，然后在线编辑表格
+5. 打分评价本次提取（高分结果会被选为回归基准，帮助改进工具）
+6. 下载 Excel 结果
+
+**常见问题**
+- 没有提取权限？设置自己的 DeepSeek Key，或填写作者邀请码（24小时内可用）
+- 引文出现"⚠待核对"？该条摘录与原文不一致，请对照原扫描页人工确认
+- 管理后台不显示？登录用户名需与作者配置的管理员名单一致
+
+**联系作者**
+- QQ：169636694
+- 邮箱：youxiang051110@163.com
+""")
+
+
 # ======================== 主界面 ========================
+# 页面分发：管理后台 / 帮助页 独立渲染；其余为提取工作台
+if nav_mode != "workbench" and not start_btn:
+    if nav_mode == "admin":
+        _render_admin_page()
+    else:
+        _render_help_page()
+    st.stop()
 
 # --- 提取逻辑（增加了 logged_in 检查）---
 if start_btn and uploaded_files and st.session_state.logged_in:
@@ -816,132 +988,7 @@ if st.session_state.logged_in:
     else:
         st.info("📭 暂无留言，来做第一个留言的人吧！")
 
-# ======================== 管理后台（仅管理员可见） ========================
-def _generate_baselines(min_rating=8):
-    """从高评分提取生成回归基准（示例/regression_baselines/*.json）"""
-    import json as _json
-    recs = db.get_high_rated_extractions(min_rating=min_rating)
-    out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "示例", "regression_baselines")
-    os.makedirs(out_dir, exist_ok=True)
-    n = 0
-    for rec in recs:
-        try:
-            items = _json.loads(rec.get("result_json") or "[]")
-            names = [it.get("名称", "") for it in items if it.get("名称")]
-            src = rec.get("source_text") or ""
-            if not names or len(src) < 100:
-                continue
-            bl = {"book_name": rec["book_name"], "source_text": src, "golden_names": names}
-            with open(os.path.join(out_dir, f"baseline_{rec['id']}.json"), "w", encoding="utf-8") as f:
-                _json.dump(bl, f, ensure_ascii=False, indent=2)
-            n += 1
-        except Exception:
-            continue
-    return n
-
-
-if st.session_state.logged_in and st.session_state.get("user") in ADMIN_USERNAMES:
-    st.markdown("---")
-    st.subheader("🛡️ 管理后台")
-    admin_tab1, admin_tab2, admin_tab3, admin_tab4 = st.tabs(
-        ["🗑️ 留言管理", "🔑 Key 管理", "📊 提取记录", "👥 用户统计"])
-
-    with admin_tab1:
-        st.caption("全部留言（可删除任意一条）")
-        all_msgs = db.get_messages(limit=200)
-        if all_msgs:
-            for m in all_msgs:
-                c1, c2 = st.columns([10, 1])
-                with c1:
-                    st.markdown(f"**{m['username']}** · {str(m['created_at'])[:16]}")
-                    st.markdown(f"{m['content']}")
-                    st.markdown("---")
-                with c2:
-                    if st.button("🗑️", key=f"adm_del_{m['id']}"):
-                        db.delete_message_any(m["id"])
-                        st.rerun()
-        else:
-            st.info("暂无留言")
-
-    with admin_tab2:
-        st.caption("已设置自己 API Key 的用户（Key 为密文，仅可清空）")
-        key_users = db.list_users_with_keys()
-        if key_users:
-            for u in key_users:
-                c1, c2 = st.columns([10, 1])
-                with c1:
-                    st.markdown(f"**{u['username']}** · Key已设置 · 邀请码状态："
-                                f"{'✅有效' if db.get_invite(u['id']) else '—'}")
-                with c2:
-                    if st.button("清空", key=f"adm_key_{u['id']}"):
-                        db.clear_api_key(u["id"])
-                        st.rerun()
-        else:
-            st.info("暂无用户设置 Key")
-
-    with admin_tab3:
-        st.caption("用户提取记录：评分≥8 可一键生成回归基准")
-        if st.button("🎓 从高分提取生成回归基准（评分≥8）", key="gen_baseline"):
-            n = _generate_baselines(8)
-            st.success(f"✅ 已生成 {n} 个回归基准到 示例/regression_baselines/（下次 _run_regression.py 自动纳入）")
-        filter_user = st.text_input("按用户名过滤（留空=全部）", key="adm_extract_user")
-        min_rating = st.selectbox("只看评分≥", [0, 6, 8, 9, 10], index=0, key="adm_extract_rating")
-        recs = db.list_extractions(limit=100, min_rating=min_rating or None)
-        if filter_user:
-            recs = [r for r in recs if filter_user in (r.get("username") or "")]
-        if recs:
-            for r in recs:
-                c1, c2 = st.columns([10, 1])
-                with c1:
-                    st.markdown(f"**{r.get('username','')}** · {r.get('book_name','')} · "
-                                f"{r.get('file_name','')} · {r.get('entry_count',0)}条 · "
-                                f"评分{r.get('rating') or '—'} · {str(r.get('created_at',''))[:16]}")
-                    if r.get("feedback"):
-                        st.caption(f"📝 {r['feedback']}")
-                    with st.expander("查看条目"):
-                        import json as _json2
-                        try:
-                            items = _json2.loads(r.get("result_json") or "[]")
-                            for it in items[:20]:
-                                st.markdown(f"- {it.get('名称','')} | {it.get('类别','')} | {it.get('空间','')}")
-                            if len(items) > 20:
-                                st.caption(f"…共 {len(items)} 条")
-                        except Exception:
-                            st.caption("（无法解析）")
-                with c2:
-                    if st.button("🗑️", key=f"adm_extract_del_{r['id']}"):
-                        db.delete_extraction(r["id"])
-                        st.rerun()
-        else:
-            st.info("暂无提取记录（确认已执行最新 db_schema.sql，并完成过提取）")
-
-    with admin_tab4:
-        st.caption("按用户统计：提取次数 / 总条数 / 最近提取 / 平均评分")
-        ustats = db.get_user_stats()
-        if ustats:
-            col_tot1, col_tot2, col_tot3, col_tot4 = st.columns(4)
-            with col_tot1:
-                st.metric("👥 用户数", len(ustats))
-            with col_tot2:
-                st.metric("🔁 总提取次数", sum(u["提取次数"] for u in ustats))
-            with col_tot3:
-                st.metric("📄 提取总条数", sum(u["总条数"] for u in ustats))
-            rated = [u for u in ustats if u["平均评分"]]
-            with col_tot4:
-                st.metric("⭐ 平均评分",
-                          round(sum(u["平均评分"] for u in rated) / len(rated), 1) if rated else "—")
-            st.dataframe(pd.DataFrame(ustats),
-                         use_container_width=True, hide_index=True,
-                         column_config={
-                             "user_id": "用户ID",
-                             "username": "用户名",
-                             "提取次数": st.column_config.NumberColumn("提取次数"),
-                             "总条数": st.column_config.NumberColumn("总条数"),
-                             "最近提取": "最近提取",
-                             "平均评分": st.column_config.NumberColumn("平均评分", format="%.1f"),
-                         })
-        else:
-            st.info("暂无统计数据（确认已执行最新 db_schema.sql，并完成过提取）")
+# 管理后台与帮助页：已迁移为函数 _render_admin_page / _render_help_page（见主界面前定义）
 
 # --- 统计看板 ---
 if st.session_state.df is not None and not st.session_state.df.empty:
@@ -974,6 +1021,38 @@ if st.session_state.df is not None and not st.session_state.df.empty:
         river_counts = df["流域"].value_counts()
         if not river_counts.empty:
             st.bar_chart(river_counts, color="#2196F3")
+
+    # ---------- 地域分布地图（省级） ----------
+    st.caption("🌍 地域分布（按空间字段省级统计）")
+    prov_counts = (df["空间"].astype(str)
+                   .str.extract(r"^(?:.*?省|重庆市|上海市)")[0]
+                   .replace("", "不详")
+                   .value_counts())
+    if not prov_counts.empty:
+        col_map1, col_map2 = st.columns([2, 1])
+        with col_map1:
+            try:
+                import plotly.graph_objects as go
+                with open(os.path.join("assets", "china_provinces.json"), encoding="utf-8") as f:
+                    _geo = json.load(f)
+                _fig = go.Figure(go.Choropleth(
+                    geojson=_geo,
+                    locations=prov_counts.index.tolist(),
+                    z=prov_counts.values.tolist(),
+                    featureidkey="properties.name",
+                    colorscale="Greens",
+                    marker_line_color="#ffffff", marker_line_width=0.6,
+                    colorbar=dict(thickness=10, len=0.6, title="条数"),
+                ))
+                _fig.update_geos(fitbounds="locations", visible=False)
+                _fig.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=380,
+                                   paper_bgcolor="rgba(0,0,0,0)")
+                st.plotly_chart(_fig, use_container_width=True)
+            except Exception as _e:
+                st.bar_chart(prov_counts, color="#3ECF8E")
+                st.caption(f"（地图加载失败，已显示柱状图：{type(_e).__name__}）")
+        with col_map2:
+            st.bar_chart(prov_counts, color="#3ECF8E")
 
     # ======================== AI 工作台（统计看板下方、在线编辑上方） ========================
     st.markdown("---")
@@ -1014,25 +1093,30 @@ if st.session_state.df is not None and not st.session_state.df.empty:
             st.success("✅ 已写入，可继续在线编辑或下载")
             st.rerun()
 
-    # 自由对话（保留最近几轮）
-    with st.expander("💬 自由对话（向 AI 提问/查证）", expanded=False):
-        q = st.text_input("你的问题（如：盘龙城遗址的发现过程是怎样的？）", key="ai_q")
-        if st.button("发送", key="ai_send"):
-            ok, tip = _ai_ready()
-            if not ok:
-                st.error(f"🔒 {tip}")
-            elif q.strip():
-                hist = st.session_state.get("ai_history", [])
-                hist.append({"role": "user", "content": q.strip()})
-                reply = extract_mod.chat_completion(hist[-6:])
+    # 自由对话（流式，ChatGPT 式）
+    st.markdown("### 💬 自由对话")
+    st.caption("向 AI 提问/查证，回答会逐字流式显示")
+    hist = st.session_state.get("ai_history", [])
+    for m in hist[-10:]:
+        with st.chat_message("user" if m["role"] == "user" else "assistant"):
+            st.markdown(m["content"])
+    q = st.chat_input("向 AI 提问（如：盘龙城遗址的发现过程是怎样的？）")
+    if q:
+        ok, tip = _ai_ready()
+        if not ok:
+            st.error(f"🔒 {tip}")
+        elif q.strip():
+            hist = st.session_state.get("ai_history", [])
+            hist.append({"role": "user", "content": q.strip()})
+            with st.chat_message("user"):
+                st.markdown(q.strip())
+            with st.chat_message("assistant"):
+                reply = st.write_stream(extract_mod.chat_completion_stream(hist[-8:]))
                 if reply:
                     hist.append({"role": "assistant", "content": reply})
-                    st.session_state.ai_history = hist
                 else:
-                    st.error("❌ AI 调用失败")
-        for m in st.session_state.get("ai_history", [])[-8:]:
-            role = "🧑" if m["role"] == "user" else "🤖"
-            st.markdown(f"{role} **{m['content'][:200] if m['role']=='user' else m['content']}**")
+                    st.error("❌ AI 调用失败（请检查你的 API Key）")
+            st.session_state.ai_history = hist
 
     st.markdown("---")
     st.subheader("✏️ 在线编辑表格")
