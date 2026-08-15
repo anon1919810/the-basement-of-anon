@@ -240,6 +240,46 @@ def chat_completion(messages, max_tokens=2048, temperature=0.3):
         return None
 
 
+def chat_completion_stream(messages, max_tokens=2048, temperature=0.3):
+    """流式对话调用（SSE）：逐段 yield 文本（用于打字机效果）。
+
+    使用当前有效Key；调用失败时 yield None 一次后结束。
+    """
+    key = ACTIVE_API_KEY or API_KEY
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": MODEL_NAME,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": True,
+    }
+    try:
+        resp = _http.post(API_URL, headers=headers, json=payload, timeout=API_TIMEOUT, stream=True)
+        if resp.status_code != 200:
+            log_message(f"  流式对话调用失败：{resp.status_code} {resp.text[:150]}", "ERROR")
+            yield None
+            return
+        for line in resp.iter_lines(decode_unicode=True):
+            if not line or not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if data == "[DONE]":
+                break
+            try:
+                delta = json.loads(data)["choices"][0]["delta"].get("content", "")
+            except Exception:
+                continue
+            if delta:
+                yield delta
+    except Exception as e:
+        log_message(f"  流式对话异常：{e}", "ERROR")
+        yield None
+
+
 # ---------- 核心提取函数（支持拆分+缓存） ----------
 def _extract_single_chunk(text, book_name, chunk_index=1, chunk_total=1, is_ocr=False, is_toc=False,
                           extraction_passes=None):
