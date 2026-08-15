@@ -1,0 +1,107 @@
+import { useEffect, useState } from 'react'
+import { api } from '../lib/api'
+
+export default function Admin() {
+  const [users, setUsers] = useState<any>(null)
+  const [extractions, setExtractions] = useState<any[]>([])
+  const [err, setErr] = useState('')
+
+  async function load() {
+    setErr('')
+    try {
+      const [u, e] = await Promise.all([
+        api('/api/admin/users'),
+        api('/api/admin/extractions'),
+      ])
+      setUsers(u)
+      setExtractions(e.extractions || [])
+    } catch (e2: any) {
+      setErr(e2.message || '加载失败（可能不是管理员）')
+    }
+  }
+
+  useEffect(() => {
+    load()
+  }, [])
+
+  async function grantInvite(uid: string) {
+    try {
+      await api(`/api/admin/users/${uid}/grant-invite`, { method: 'POST' })
+      load()
+    } catch (e: any) {
+      setErr(e.message)
+    }
+  }
+
+  async function deleteExtraction(id: number) {
+    try {
+      await api(`/api/admin/extractions/${id}`, { method: 'DELETE' })
+      load()
+    } catch (e: any) {
+      setErr(e.message)
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      {err && <div className="card !border-red-200 text-sm text-red-500">{err}</div>}
+
+      <section className="card">
+        <h2 className="mb-3 text-base font-semibold">👥 用户统计</h2>
+        {users && (
+          <div className="overflow-x-auto">
+            <table className="data">
+              <thead>
+                <tr><th>用户名</th><th>提取次数</th><th>总条数</th><th>平均评分</th><th>最近提取</th><th>操作</th></tr>
+              </thead>
+              <tbody>
+                {(users.stats || []).map((s: any) => (
+                  <tr key={s.user_id}>
+                    <td>{s.username}</td>
+                    <td>{s['提取次数']}</td>
+                    <td>{s['总条数']}</td>
+                    <td>{s['平均评分'] ?? '-'}</td>
+                    <td>{s['最近提取']}</td>
+                    <td>
+                      <button className="btn !py-0 !px-2 text-xs" onClick={() => grantInvite(s.user_id)}>
+                        开通邀请
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <section className="card">
+        <h2 className="mb-3 text-base font-semibold">🗃️ 提取记录（{extractions.length}）</h2>
+        <div className="overflow-x-auto">
+          <table className="data">
+            <thead>
+              <tr><th>ID</th><th>用户名</th><th>书名</th><th>文件名</th><th>条数</th><th>评分</th><th>时间</th><th>删除</th></tr>
+            </thead>
+            <tbody>
+              {extractions.map((x) => (
+                <tr key={x.id}>
+                  <td>{x.id}</td>
+                  <td>{x.username}</td>
+                  <td>{x.book_name}</td>
+                  <td>{x.file_name}</td>
+                  <td>{x.entry_count}</td>
+                  <td>{x.rating ?? '-'}</td>
+                  <td>{String(x.created_at || '').slice(0, 16)}</td>
+                  <td>
+                    <button className="text-xs text-neutral-400 hover:text-red-500"
+                            onClick={() => deleteExtraction(x.id)}>删除</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  )
+}

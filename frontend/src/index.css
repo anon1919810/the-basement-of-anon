@@ -1,0 +1,70 @@
+@import "tailwindcss";
+
+@theme {
+  --color-accent: #3ecf8e;
+}
+
+/* Supabase 风格：白底、直角、1px 细线、绿色强调 */
+html, body, #root {
+  height: 100%;
+}
+body {
+  background: #ffffff;
+  color: #1f2937;
+  font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+.btn {
+  border: 1px solid #1f2937;
+  border-radius: 0;
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  background: #ffffff;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.btn:hover { background: #f3f4f6; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-accent {
+  border-color: #3ecf8e;
+  background: #3ecf8e;
+  color: #ffffff;
+}
+.btn-accent:hover { background: #34c481; color: #ffffff; }
+
+.input {
+  width: 100%;
+  border: 1px solid #d1d5db;
+  border-radius: 0;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  outline: none;
+  background: #ffffff;
+}
+.input:focus { border-color: #3ecf8e; }
+
+.card {
+  border: 1px solid #e5e7eb;
+  border-radius: 0;
+  background: #ffffff;
+  padding: 1rem;
+}
+
+table.data {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+table.data th, table.data td {
+  border: 1px solid #e5e7eb;
+  padding: 0.4rem 0.6rem;
+  text-align: left;
+  vertical-align: top;
+}
+table.data th {
+  background: #f9fafb;
+  font-weight: 600;
+  white-space: nowrap;
+}
