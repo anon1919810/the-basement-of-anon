@@ -191,7 +191,7 @@ st.markdown("""
 
 # ========== 标题 ==========
 st.title(f"📚 {APP_NAME}")
-st.markdown(f"版本 v{VERSION} {VERSION_TAG} — 一切从今始 · 上传地方志或档案PDF，AI自动提取文化要素")
+st.markdown(f"版本 v{VERSION} {VERSION_TAG}")
 
 # ========== 初始化 session_state ==========
 if 'df' not in st.session_state:
