@@ -11,7 +11,7 @@ import sys
 from io import BytesIO
 
 # ========== 调试：强制打印，确认 app.py 已加载 ==========
-print("=== app.py 已加载（v3.5.0）===", flush=True)
+print("=== app.py 已加载（v3.6.0）===", flush=True)
 sys.stdout.flush()
 
 # ========== 导入核心模块（加异常捕获） ==========
@@ -49,6 +49,16 @@ try:
         print("❌ API Key 读取失败！请检查 Secrets 配置", flush=True)
 except Exception as e:
     print(f"❌ API Key 检查出错：{e}", flush=True)
+
+# ========== 权限与邀请码配置（可用环境变量覆盖，建议放 .env / 云端Secrets） ==========
+# ADMIN_USERNAMES：管理员用户名（逗号分隔），默认作者
+ADMIN_USERNAMES = [u.strip() for u in os.getenv("ADMIN_USERNAMES", "失败主义谋士千早爱音").split(",") if u.strip()]
+# INVITE_CODE：邀请码（留空=关闭邀请机制）；用户填对后24小时内可用作者Key
+INVITE_CODE = os.getenv("INVITE_CODE", "")
+INVITE_VALID_HOURS = int(os.getenv("INVITE_VALID_HOURS", "24"))
+# REQUIRE_KEY_OR_INVITE：True=非管理员用户必须自带Key或有效邀请码才能提取；
+#                        False=回退旧行为（所有人用作者Key）
+REQUIRE_KEY_OR_INVITE = os.getenv("REQUIRE_KEY_OR_INVITE", "true").lower() != "false"
 
 # ========== 页面配置 ==========
 st.set_page_config(page_title=APP_NAME, layout="wide", page_icon="📚")
@@ -159,6 +169,24 @@ def _set_login(user):
             st.session_state.user_api_key = saved
     except Exception:
         pass
+
+
+def resolve_key_source():
+    """返回 (来源, 有效Key)：决定本次提取用谁的Key。
+    来源：user(自带Key) / admin(作者Key) / invite(邀请码有效) / None(无权限)
+    """
+    user_key = st.session_state.get("user_api_key")
+    if user_key:
+        return "user", user_key
+    if st.session_state.get("user") in ADMIN_USERNAMES:
+        return "admin", None
+    if INVITE_CODE:
+        try:
+            if db.get_invite(st.session_state.get("user_id")):
+                return "invite", None
+        except Exception:
+            pass
+    return None, None
 
 # 从URL参数恢复登录（刷新/重开网址时）
 if not st.session_state.logged_in:
@@ -298,8 +326,33 @@ document.cookie='dsh_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
                         tip = "" if ok else f"（{msg}）"
                         st.success(f"✅ 已启用你的 Key，本次及后续提取将使用它 {tip}")
                         st.rerun()
-            if st.session_state.get("user_api_key"):
-                st.info(f"👤 当前提取将使用：你的 Key（{st.session_state.user_api_key[:8]}…）")
+
+            # 邀请码：填对后24小时内可用作者Key
+            if INVITE_CODE:
+                st.markdown("---")
+                st.caption("没有自己的 Key？填写作者邀请码可临时使用作者 Key（24小时）")
+                invite_input = st.text_input("邀请码", type="password", key="invite_input")
+                if st.button("🎟️ 兑换邀请码", key="use_invite"):
+                    if invite_input.strip() == INVITE_CODE:
+                        if db.save_invite(st.session_state.user_id, INVITE_VALID_HOURS):
+                            st.success(f"✅ 兑换成功！{INVITE_VALID_HOURS}小时内可使用作者 Key 提取")
+                            st.rerun()
+                        else:
+                            st.error("❌ 兑换失败（数据库未更新，请确认已执行最新 db_schema.sql）")
+                    else:
+                        st.error("❌ 邀请码错误")
+
+            # 当前Key来源状态
+            source, _key = resolve_key_source()
+            if source == "user":
+                st.info("👤 当前提取将使用：你的 Key（已设置）")
+            elif source == "admin":
+                st.info("👑 当前提取将使用：作者 Key（管理员）")
+            elif source == "invite":
+                st.info("🎟️ 当前提取将使用：作者 Key（邀请码有效期内）")
+            else:
+                st.warning("⚠️ 当前无提取权限：请设置自己的 Key，或填写邀请码")
+            if st.session_state.get("user_api_key") or source == "invite" or source == "admin":
                 if st.button("↩️ 恢复默认（作者 Key）", key="reset_user_key"):
                     st.session_state.pop("user_api_key", None)
                     st.rerun()
@@ -423,6 +476,14 @@ document.cookie='dsh_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
     # ----- 更新日志 -----
     with st.expander("📝 更新日志", expanded=False):
         st.markdown("""
+        **v3.6.0** (2026-08-16)
+        - 🎟️ 邀请码机制：用户填对邀请码后24小时内用作者Key，否则只能用自己的Key
+          （INVITE_CODE 在 .env/Secrets 配置；REQUIRE_KEY_OR_INVITE 可回退旧行为）
+        - 🛡️ 管理后台（管理员可见）：留言管理（删任意）+ Key管理（看谁设了Key、清空）
+        - 🗄️ 整合Supabase脚本：BIGSERIAL结构 + api_key/invite_until/is_admin列，
+          修复原删除留言策略（auth.uid()恒空导致静默失败）
+        - 🔑 Key来源三态：自带Key > 管理员/邀请码用作者Key > 无权限拦截
+
         **v3.5.0** (2026-08-16)
         - 🔑 用户自带API Key：登录后可在侧边栏填入自己的DeepSeek Key，
           提取时自动使用（不占用作者额度）；保存时轻量验证、加密持久化
@@ -560,9 +621,15 @@ if start_btn and uploaded_files and st.session_state.logged_in:
     import config as app_config
     app_config.OCR_DPI = ocr_dpi       # ocr_engine 动态读 config，此设置全局生效
     extract_mod.OCR_DPI = ocr_dpi      # 兼容旧引用
-    # 每次处理前显式设置API Key（用户自带优先，否则回退作者Key；防止跨用户串用）
-    extract_mod.ACTIVE_API_KEY = st.session_state.get("user_api_key") or None
-    key_note = "用户自带Key" if extract_mod.ACTIVE_API_KEY else "作者默认Key"
+
+    # 权限判定：确定本次提取用谁的Key（用户自带 > 管理员/邀请码用作者Key）
+    source, user_key = resolve_key_source()
+    if source is None and REQUIRE_KEY_OR_INVITE:
+        st.error("🔒 你没有提取权限：请设置自己的 DeepSeek Key，或填写作者邀请码（24小时免费使用）")
+        st.session_state.processing = False
+        st.stop()
+    extract_mod.ACTIVE_API_KEY = user_key if source == "user" else None  # 防跨用户串用
+    key_note = {"user": "用户自带Key", "admin": "作者Key(管理员)", "invite": "作者Key(邀请码)"}.get(source, "作者默认Key")
     print(f"📄 开始并行处理 {total} 个文件（OCR:{ocr_dpi}dpi, 每块{extract_passes}轮, {key_note}）...", flush=True)
     try:
         all_entries = process_pdfs_parallel(
@@ -628,6 +695,45 @@ if st.session_state.logged_in:
                         st.rerun()
     else:
         st.info("📭 暂无留言，来做第一个留言的人吧！")
+
+# ======================== 管理后台（仅管理员可见） ========================
+if st.session_state.logged_in and st.session_state.get("user") in ADMIN_USERNAMES:
+    st.markdown("---")
+    st.subheader("🛡️ 管理后台")
+    admin_tab1, admin_tab2 = st.tabs(["🗑️ 留言管理", "🔑 Key 管理"])
+
+    with admin_tab1:
+        st.caption("全部留言（可删除任意一条）")
+        all_msgs = db.get_messages(limit=200)
+        if all_msgs:
+            for m in all_msgs:
+                c1, c2 = st.columns([10, 1])
+                with c1:
+                    st.markdown(f"**{m['username']}** · {str(m['created_at'])[:16]}")
+                    st.markdown(f"{m['content']}")
+                    st.markdown("---")
+                with c2:
+                    if st.button("🗑️", key=f"adm_del_{m['id']}"):
+                        db.delete_message_any(m["id"])
+                        st.rerun()
+        else:
+            st.info("暂无留言")
+
+    with admin_tab2:
+        st.caption("已设置自己 API Key 的用户（Key 为密文，仅可清空）")
+        key_users = db.list_users_with_keys()
+        if key_users:
+            for u in key_users:
+                c1, c2 = st.columns([10, 1])
+                with c1:
+                    st.markdown(f"**{u['username']}** · Key已设置 · 邀请码状态："
+                                f"{'✅有效' if db.get_invite(u['id']) else '—'}")
+                with c2:
+                    if st.button("清空", key=f"adm_key_{u['id']}"):
+                        db.clear_api_key(u["id"])
+                        st.rerun()
+        else:
+            st.info("暂无用户设置 Key")
 
 # --- 统计看板 ---
 if st.session_state.df is not None and not st.session_state.df.empty:

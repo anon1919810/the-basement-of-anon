@@ -130,6 +130,67 @@ def get_api_key(user_id):
     return None
 
 
+# ========== 邀请码（24小时作者Key使用权） ==========
+def save_invite(user_id, hours=24):
+    """为用户开通 invite_until = 现在 + hours 小时"""
+    try:
+        from datetime import datetime, timedelta, timezone
+        until = (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat()
+        get_supabase().table("users").update({"invite_until": until}).eq("id", user_id).execute()
+        return True
+    except Exception as e:
+        print(f"开通邀请失败：{e}")
+        return False
+
+
+def get_invite(user_id):
+    """邀请码是否仍在有效期内（列缺失/无记录/过期均返回False）"""
+    try:
+        from datetime import datetime
+        r = get_supabase().table("users").select("invite_until").eq("id", user_id).limit(1).execute()
+        val = r.data[0].get("invite_until") if r.data else None
+        if not val:
+            return False
+        dt = datetime.fromisoformat(str(val).replace("Z", "+00:00"))
+        return datetime.now(dt.tzinfo) < dt
+    except Exception:
+        return False
+
+
+# ========== 管理员后台 ==========
+def delete_message_any(message_id):
+    """管理员删除任意留言"""
+    supabase = get_supabase()
+    try:
+        r = supabase.table("messages").delete().eq("id", message_id).execute()
+        return len(r.data) > 0
+    except Exception as e:
+        print(f"管理员删除留言失败：{e}")
+        return False
+
+
+def list_users_with_keys():
+    """列出已设置API Key的用户（仅显示用户名与是否启用）"""
+    supabase = get_supabase()
+    try:
+        r = supabase.table("users").select("id, username, api_key, invite_until").execute()
+        return [u for u in r.data if u.get("api_key")]
+    except Exception as e:
+        print(f"查询用户Key失败：{e}")
+        return []
+
+
+def clear_api_key(user_id):
+    """管理员清空某用户的Key与邀请状态"""
+    supabase = get_supabase()
+    try:
+        supabase.table("users").update({"api_key": None, "invite_until": None}).eq("id", user_id).execute()
+        return True
+    except Exception as e:
+        print(f"清空Key失败：{e}")
+        return False
+
+
 def get_supabase() -> Client:
     """获取 Supabase 客户端"""
     return create_client(SUPABASE_URL, SUPABASE_KEY)
