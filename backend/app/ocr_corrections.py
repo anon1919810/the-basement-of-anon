@@ -13,7 +13,7 @@ import re
 import os
 import glob
 
-from province_dict import PROVINCE_DICT
+from .province_dict import PROVINCE_DICT
 
 # 高置信度形近字混淆对：错字 -> 正字（仅用于专名比对，不全局替换）
 CHAR_CONFUSIONS = {

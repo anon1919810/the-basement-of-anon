@@ -126,3 +126,7 @@ FEW_SHOT_EXAMPLES = """
 VERSION = "4.7.0"
 VERSION_TAG = "车书万里"          # 版本名：寓意"一切从今始"（整个v4.0系列 = 车书万里版本）
 APP_NAME = "杨端明的撷菁轩"
+
+# ---------- 后端适配：缓存目录改为仓库根绝对路径（避免CWD差异） ----------
+from pathlib import Path as _Path  # noqa: E402
+CACHE_DIR = str(_Path(__file__).resolve().parent.parent.parent / "cache")
