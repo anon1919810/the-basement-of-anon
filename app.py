@@ -11,7 +11,7 @@ import sys
 from io import BytesIO
 
 # ========== 调试：强制打印，确认 app.py 已加载 ==========
-print(f"=== app.py 已加载（v{VERSION} {VERSION_TAG}）===", flush=True)
+print("=== app.py 已加载（v4.5.0 车书万里）===", flush=True)
 sys.stdout.flush()
 
 # ========== 导入核心模块（加异常捕获） ==========
@@ -631,7 +631,7 @@ document.cookie='dsh_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
     with st.expander("🙏 致谢", expanded=False):
         st.markdown("""
         **开发者**
-        - 杨端明
+        - 失败主义谋士千早爱音
 
         **联系作者**
         - QQ：169636694
