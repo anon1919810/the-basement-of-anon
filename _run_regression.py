@@ -50,6 +50,14 @@ CASES = [
         "quick_ok": True,
     },
     {
+        "file": "示例/提取自江西省志*.docx",
+        "book": "江西省志 文化艺术志",
+        "golden_xlsx": "示例/江西_文化要素提取结果 (10).xlsx",
+        "min_coverage": 0.5,                  # 最大子目模式：6/7（船歌为子项，按设计排除）
+        "min_fidelity": 0.8,
+        "quick_ok": True,
+    },
+    {
         "file": "示例/test(4).pdf",
         "book": "武汉市志 文物志",
         "golden_xlsx": "示例/武汉市志 文物志_文化要素提取结果 (9).xlsx",
@@ -118,11 +126,15 @@ def main():
     failed = 0
     for i, case in enumerate(CASES, 1):
         fp = case["file"]
+        # 解析文件路径：支持glob通配符；不存在时按前缀在示例目录中模糊定位
+        if "*" in fp or "?" in fp:
+            cands = glob.glob(fp) or glob.glob(os.path.join(os.path.dirname(fp) or ".", os.path.basename(fp)))
+            fp = cands[0] if cands else fp
         if not os.path.exists(fp):
-            # 容错：按前缀在示例目录中模糊定位（如 test(4).pdf 的括号变体）
             base = os.path.basename(fp)
-            cands = [p for p in glob.glob(os.path.join(os.path.dirname(fp) or ".", "*.pdf"))
-                     if base.split("(")[0] in os.path.basename(p)]
+            ext = "*.docx" if base.lower().endswith(".docx") else "*.pdf"
+            cands = [p for p in glob.glob(os.path.join(os.path.dirname(fp) or ".", ext))
+                     if base.split("(")[0][:6] in os.path.basename(p)]
             if cands:
                 fp = cands[0]
             else:

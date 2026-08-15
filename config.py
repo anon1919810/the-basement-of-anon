@@ -39,6 +39,15 @@ STRICT_EXTRACTION = False
 #   zimu = 强制子目模式；full = 强制全文模式
 STRUCTURE_MODE = "auto"
 
+# 仅提取最大子目（默认开启，前端可切换）：
+#   True  = 优先按"最大子目"粒度提取——【】子目 / "名称：正文"式条目段落；
+#           无子目结构时回退全文提取
+#   False = 始终全文提取（子项也会被提取，粒度更细）
+EXTRACT_MAX_ONLY = True
+
+# 历史文献是否标注来源：《书名》："引文"（默认开启；仅影响输出展示，内部引文不变）
+QUOTE_WITH_SOURCE = True
+
 # 是否合并跨块产生的近似重复条目（如"汉阳旧城"与"汉阳城"为同一实体）
 MERGE_SIMILAR_ENTRIES = True
 
@@ -114,5 +123,5 @@ FEW_SHOT_EXAMPLES = """
 """
 
 # ---------- 版本信息 ----------
-VERSION = "4.0.0"
+VERSION = "4.1.0"
 APP_NAME = "重庆Major2026·档档案案世界冠军"

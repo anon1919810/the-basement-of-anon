@@ -11,7 +11,7 @@ import sys
 from io import BytesIO
 
 # ========== 调试：强制打印，确认 app.py 已加载 ==========
-print("=== app.py 已加载（v4.0.0）===", flush=True)
+print("=== app.py 已加载（v4.1.0）===", flush=True)
 sys.stdout.flush()
 
 # ========== 导入核心模块（加异常捕获） ==========
@@ -29,7 +29,7 @@ try:
         CATEGORY_OPTIONS, BASIN_OPTIONS, VERSION, APP_NAME,
         OUTPUT_BASE_NAME, DEFAULT_BOOK_NAME, FEW_SHOT_EXAMPLES,
         MAX_PARALLEL_WORKERS, ENABLE_CACHE, ENABLE_OCR, ENABLE_SPLIT,
-        EXTRACTION_PASSES, OCR_DPI,
+        EXTRACTION_PASSES, OCR_DPI, EXTRACT_MAX_ONLY,
     )
     print("✅ config 导入成功", flush=True)
 except Exception as e:
@@ -298,6 +298,8 @@ document.cookie='dsh_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
         book_name = st.text_input("📖 文献名称", value=DEFAULT_BOOK_NAME)
         uploaded_files = st.file_uploader("📄 上传PDF或Word文件", type=['pdf', 'docx'], accept_multiple_files=True)
         st.caption("💡 扫描件建议先用WPS转成Word并让AI修正错字后上传，识别零误差、效果最佳")
+        extract_max_only = st.checkbox("🔍 仅提取最大子目（推荐）", value=EXTRACT_MAX_ONLY,
+                                       help="只提取【】/“名称：正文”式的最大子目，跳过子目内细分子项（如“船歌”）")
 
         # ----- 用户自带API Key -----
         with st.expander("🔑 使用自己的API Key（可选）", expanded=False):
@@ -476,6 +478,11 @@ document.cookie='dsh_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
     # ----- 更新日志 -----
     with st.expander("📝 更新日志", expanded=False):
         st.markdown("""
+        **v4.1.0** (2026-08-16)
+        - 📜 历史文献标注来源：《书名》："引文"（书名用你填写的文献名称）
+        - 🔍 仅提取最大子目（可选项，默认开）：识别【】及"名称：正文"式条目，
+          跳过子目内细分子项（如江西志"船歌"不再提取）
+
         **v4.0.0** (2026-08-16) 🎉 正式版
         - 📄 正式发布：完整工作流（Word路线/子目模式/OCR/纠错/校验）
         - 📖 新增 README 与 .env.example（部署与环境变量一目了然）
@@ -635,8 +642,9 @@ if start_btn and uploaded_files and st.session_state.logged_in:
         st.session_state.processing = False
         st.stop()
     extract_mod.ACTIVE_API_KEY = user_key if source == "user" else None  # 防跨用户串用
+    extract_mod.EXTRACT_MAX_ONLY = extract_max_only  # 仅提取最大子目开关
     key_note = {"user": "用户自带Key", "admin": "作者Key(管理员)", "invite": "作者Key(邀请码)"}.get(source, "作者默认Key")
-    print(f"📄 开始并行处理 {total} 个文件（OCR:{ocr_dpi}dpi, 每块{extract_passes}轮, {key_note}）...", flush=True)
+    print(f"📄 开始并行处理 {total} 个文件（OCR:{ocr_dpi}dpi, 每块{extract_passes}轮, {key_note}, 最大子目:{extract_max_only}）...", flush=True)
     try:
         all_entries = process_pdfs_parallel(
             pdf_paths, book_name,
@@ -659,6 +667,8 @@ if start_btn and uploaded_files and st.session_state.logged_in:
         for c in cols:
             if c not in df.columns:
                 df[c] = ""
+        # 历史文献标注来源：《书名》："引文"
+        df["历史文献"] = df["历史文献"].map(lambda q: extract_mod.format_quote(q, book_name))
         st.session_state.df = df[cols]
         st.success(f"🎉 完成！共提取 {len(all_entries)} 条")
         print(f"🎉 完成！共提取 {len(all_entries)} 条", flush=True)

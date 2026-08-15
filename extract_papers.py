@@ -31,7 +31,7 @@ from config import (
     LOW_YIELD_THRESHOLD, LOW_YIELD_MIN_CHARS, MAX_LOW_YIELD_RETRIES,
     API_URL, MAX_API_RETRIES, RETRY_BACKOFF_SECONDS, MAX_OUTPUT_TOKENS,
     PROMPT_TEMPLATE_VERSION, STRICT_EXTRACTION, STRUCTURE_MODE,
-    MERGE_SIMILAR_ENTRIES, OCR_CORRECT,
+    MERGE_SIMILAR_ENTRIES, OCR_CORRECT, EXTRACT_MAX_ONLY, QUOTE_WITH_SOURCE,
     # 兼容导出（app.py 等可能直接引用）
     OCR_DPI, OCR_ENGINE, TESSERACT_PATH, ENABLE_OCR,
 )
@@ -54,6 +54,15 @@ ACTIVE_API_KEY = None
 
 # 复用 HTTP 连接（避免每次请求重建握手）
 _http = requests.Session()
+
+
+def format_quote(quote, book_name):
+    """历史文献标注来源：《书名》："引文"（仅输出展示时使用，内部引文保持纯净以便校验/合并）"""
+    if not quote:
+        return quote
+    if QUOTE_WITH_SOURCE and book_name:
+        return f"《{book_name}》：“{quote}”"
+    return quote
 
 
 # ---------- 智能拆分 ----------
@@ -254,9 +263,10 @@ def _extract_single_chunk(text, book_name, chunk_index=1, chunk_total=1, is_ocr=
     return merged
 
 
-def _extract_zimu_entries(text, book_name, is_ocr=False):
+def _extract_zimu_entries(text, book_name, is_ocr=False, blocks=None):
     """子目模式提取：名称/引文确定性取自原文，元数据由模型批量填写"""
-    blocks = _parse_zimu_blocks(text)
+    if blocks is None:
+        blocks = _parse_zimu_blocks(text) or _parse_colon_entries(text)
     if not blocks:
         return []
     log_message(f"  [子目模式] 识别 {len(blocks)} 个【】子目", "INFO")
@@ -311,7 +321,11 @@ def extract_cultural_elements(text, book_name, is_ocr=False, extraction_passes=N
     """从文本提取文化要素（支持拆分、缓存、去重、OCR感知、目录感知、子目模式）"""
     # 检查缓存
     is_toc = _detect_toc(text)
-    is_zimu = _detect_zimu(text) and not is_toc
+    # 子目模式判定：【】子目，或（开启"仅提取最大子目"时）"名称：正文"式条目
+    is_zimu = (not is_toc) and (
+        _detect_zimu(text)
+        or (EXTRACT_MAX_ONLY and len(_parse_colon_entries(text)) >= 2)
+    )
     cache_key = get_cache_key(text, book_name, is_ocr=is_ocr, is_toc=is_toc,
                               extraction_passes=extraction_passes, is_zimu=is_zimu)
     cached = load_from_cache(cache_key)
@@ -322,7 +336,7 @@ def extract_cultural_elements(text, book_name, is_ocr=False, extraction_passes=N
     if is_toc:
         log_message("  [识别] 目录/索引页，仅提取明确实体", "INFO")
 
-    # 子目模式：每个【】子目一条（名称/引文确定性取自原文，不在子目内细分）
+    # 子目模式：每个子目一条（名称/引文确定性取自原文，不在子目内细分）
     if is_zimu:
         all_entries = _extract_zimu_entries(text, book_name, is_ocr=is_ocr)
         save_to_cache(cache_key, all_entries)
@@ -462,6 +476,7 @@ def main():
 
     if all_entries:
         df = pd.DataFrame(all_entries)
+        df["历史文献"] = df["历史文献"].map(lambda q: format_quote(q, DEFAULT_BOOK_NAME))
         output_file = f"{OUTPUT_BASE_NAME}.xlsx"
         df.to_excel(output_file, index=False, engine='openpyxl')
         log_message(f"完成！共提取 {len(all_entries)} 条，保存至 {output_file}", "INFO")

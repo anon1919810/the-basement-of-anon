@@ -57,6 +57,29 @@ def _parse_zimu_blocks(text):
     return blocks
 
 
+# "名称：正文"式子目正则：段落以2-10字名称+全角/半角冒号开头（如"手摇狮：金溪县…"）
+_COLON_ENTRY_RE = re.compile(r"^([^，。；：、\s]{2,10})[：:](.+)", re.S)
+
+
+def _parse_colon_entries(text):
+    """解析"名称：正文"式子目（志书常见条目格式）。
+
+    例：江西文化艺术志"手摇狮：金溪县琅琚乡杨村的传统舞蹈。…"
+    段落中间的提及（如"船歌"）不会命中，从而实现"只提取最大子目"。
+    返回 [(标题, 正文), ...]；少于2个返回空。
+    """
+    blocks = []
+    for para in text.split("\n\n"):
+        m = _COLON_ENTRY_RE.match(para.strip())
+        if not m:
+            continue
+        title = m.group(1).strip()
+        body = m.group(2).strip()
+        if len(body) >= 10:  # 需要实质性正文
+            blocks.append((title, body))
+    return blocks if len(blocks) >= 2 else []
+
+
 def _detect_zimu(text):
     """检测子目结构：文本中【】子目数量>=3"""
     if STRUCTURE_MODE == "full":
@@ -207,5 +230,6 @@ def _build_prompt(sample, book_name, chunk_index, chunk_total, is_ocr=False, is_
 
 __all__ = [
     "_parse_few_shot_examples", "_detect_toc", "_parse_zimu_blocks",
-    "_detect_zimu", "_first_sentences", "_build_zimu_prompt", "_build_prompt",
+    "_parse_colon_entries", "_detect_zimu", "_first_sentences",
+    "_build_zimu_prompt", "_build_prompt",
 ]
