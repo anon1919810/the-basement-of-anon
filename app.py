@@ -719,66 +719,6 @@ if st.session_state.get("last_extraction_id"):
         else:
             st.error("❌ 提交失败：请确认已执行最新 db_schema.sql（需 extraction_results 表）")
 
-# ======================== AI 工作台（提取后补充/深化） ========================
-if st.session_state.logged_in and st.session_state.df is not None and not st.session_state.df.empty:
-    st.markdown("---")
-    st.subheader("🤖 AI 工作台")
-    st.caption("提取后用 AI 补充基础信息，然后在线编辑表格；也可打开 DeepSeek 网页版继续深入搜索")
-    st.link_button("🌐 打开 DeepSeek 网页版（搜索模式）", "https://chat.deepseek.com/")
-
-    # 条目级补充
-    df_now = st.session_state.df
-    names_list = df_now["名称"].astype(str).tolist()
-    sel_name = st.selectbox("选择要补充的条目", names_list, key="ai_sel")
-    if st.button("🧠 AI 补充该条目的基础信息", key="ai_supplement"):
-        ok, tip = _ai_ready()
-        if not ok:
-            st.error(f"🔒 {tip}")
-        else:
-            row = df_now[df_now["名称"] == sel_name].iloc[0]
-            ctx = (f"名称：{row['名称']}\n类别：{row['类别']}\n时间：{row['时间']}\n"
-                   f"空间：{row['空间']}\n基础信息：{row['基础信息']}\n"
-                   f"历史文献：{str(row['历史文献'])[:200]}")
-            msgs = [
-                {"role": "system", "content": "你是文史研究助手。请基于条目信息和你的知识，"
-                                              "补充更详实的基础信息（史实、背景、意义等），"
-                                              "用简洁中文，不超过150字，只输出补充后的基础信息全文。"},
-                {"role": "user", "content": ctx},
-            ]
-            reply = extract_mod.chat_completion(msgs)
-            if reply:
-                st.session_state.ai_supplement = reply
-            else:
-                st.error("❌ AI 调用失败（请检查你的 API Key 是否有效/有余额）")
-    if st.session_state.get("ai_supplement"):
-        st.markdown(f"**🤖 AI 建议补充：**\n\n{st.session_state.ai_supplement}")
-        if st.button("📥 写入该条目的基础信息", key="ai_write"):
-            df_now.loc[df_now["名称"] == sel_name, "基础信息"] = st.session_state.ai_supplement
-            st.session_state.df = df_now
-            st.session_state.ai_supplement = None
-            st.success("✅ 已写入，可继续在线编辑或下载")
-            st.rerun()
-
-    # 自由对话（保留最近几轮）
-    with st.expander("💬 自由对话（向 AI 提问/查证）", expanded=False):
-        q = st.text_input("你的问题（如：盘龙城遗址的发现过程是怎样的？）", key="ai_q")
-        if st.button("发送", key="ai_send"):
-            ok, tip = _ai_ready()
-            if not ok:
-                st.error(f"🔒 {tip}")
-            elif q.strip():
-                hist = st.session_state.get("ai_history", [])
-                hist.append({"role": "user", "content": q.strip()})
-                reply = extract_mod.chat_completion(hist[-6:])
-                if reply:
-                    hist.append({"role": "assistant", "content": reply})
-                    st.session_state.ai_history = hist
-                else:
-                    st.error("❌ AI 调用失败")
-        for m in st.session_state.get("ai_history", [])[-8:]:
-            role = "🧑" if m["role"] == "user" else "🤖"
-            st.markdown(f"{role} **{m['content'][:200] if m['role']=='user' else m['content']}**")
-
 # ======================== 留言板 ========================
 if st.session_state.logged_in:
     st.markdown("---")
@@ -942,7 +882,66 @@ if st.session_state.df is not None and not st.session_state.df.empty:
         river_counts = df["流域"].value_counts()
         if not river_counts.empty:
             st.bar_chart(river_counts, color="#2196F3")
-    
+
+    # ======================== AI 工作台（统计看板下方、在线编辑上方） ========================
+    st.markdown("---")
+    st.subheader("🤖 AI 工作台")
+    st.caption("用 AI 补充基础信息，然后在线编辑表格；也可打开 DeepSeek 网页版继续深入搜索")
+    st.link_button("🌐 打开 DeepSeek 网页版（搜索模式）", "https://chat.deepseek.com/")
+
+    # 条目级补充
+    df_now = st.session_state.df
+    names_list = df_now["名称"].astype(str).tolist()
+    sel_name = st.selectbox("选择要补充的条目", names_list, key="ai_sel")
+    if st.button("🧠 AI 补充该条目的基础信息", key="ai_supplement"):
+        ok, tip = _ai_ready()
+        if not ok:
+            st.error(f"🔒 {tip}")
+        else:
+            row = df_now[df_now["名称"] == sel_name].iloc[0]
+            ctx = (f"名称：{row['名称']}\n类别：{row['类别']}\n时间：{row['时间']}\n"
+                   f"空间：{row['空间']}\n基础信息：{row['基础信息']}\n"
+                   f"历史文献：{str(row['历史文献'])[:200]}")
+            msgs = [
+                {"role": "system", "content": "你是文史研究助手。请基于条目信息和你的知识，"
+                                              "补充更详实的基础信息（史实、背景、意义等），"
+                                              "用简洁中文，不超过150字，只输出补充后的基础信息全文。"},
+                {"role": "user", "content": ctx},
+            ]
+            reply = extract_mod.chat_completion(msgs)
+            if reply:
+                st.session_state.ai_supplement = reply
+            else:
+                st.error("❌ AI 调用失败（请检查你的 API Key 是否有效/有余额）")
+    if st.session_state.get("ai_supplement"):
+        st.markdown(f"**🤖 AI 建议补充：**\n\n{st.session_state.ai_supplement}")
+        if st.button("📥 写入该条目的基础信息", key="ai_write"):
+            df_now.loc[df_now["名称"] == sel_name, "基础信息"] = st.session_state.ai_supplement
+            st.session_state.df = df_now
+            st.session_state.ai_supplement = None
+            st.success("✅ 已写入，可继续在线编辑或下载")
+            st.rerun()
+
+    # 自由对话（保留最近几轮）
+    with st.expander("💬 自由对话（向 AI 提问/查证）", expanded=False):
+        q = st.text_input("你的问题（如：盘龙城遗址的发现过程是怎样的？）", key="ai_q")
+        if st.button("发送", key="ai_send"):
+            ok, tip = _ai_ready()
+            if not ok:
+                st.error(f"🔒 {tip}")
+            elif q.strip():
+                hist = st.session_state.get("ai_history", [])
+                hist.append({"role": "user", "content": q.strip()})
+                reply = extract_mod.chat_completion(hist[-6:])
+                if reply:
+                    hist.append({"role": "assistant", "content": reply})
+                    st.session_state.ai_history = hist
+                else:
+                    st.error("❌ AI 调用失败")
+        for m in st.session_state.get("ai_history", [])[-8:]:
+            role = "🧑" if m["role"] == "user" else "🤖"
+            st.markdown(f"{role} **{m['content'][:200] if m['role']=='user' else m['content']}**")
+
     st.markdown("---")
     st.subheader("✏️ 在线编辑表格")
     
