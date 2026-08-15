@@ -23,6 +23,9 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 
+# 权限开关：True=非管理员用户必须自带Key或有效邀请码才能提取
+REQUIRE_KEY_OR_INVITE = os.getenv("REQUIRE_KEY_OR_INVITE", "true").lower() != "false"
+
 CORS_ORIGINS = [
     o.strip()
     for o in os.getenv(
