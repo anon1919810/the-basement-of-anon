@@ -1,6 +1,6 @@
 # 配置指南：网络加速 / Cline / Render / UptimeRobot
 
-> 写给杨端明本人看，纯操作步骤，没有代码细节。版本基线：v4.7.0 车书万里。
+> 写给宝宝本人看，纯操作步骤，没有代码细节。版本基线：v4.7.0 车书万里。
 
 ---
 
@@ -21,8 +21,11 @@
 
 1. VS Code → 左侧「扩展」→ 搜索 **Cline** → 安装（作者 saoudrizwan）。
 2. 左侧出现 Cline 图标 → 点开。
-3. 顶部 **API Provider** 选 **OpenAI Compatible**（若列表里直接有 DeepSeek 选项，选它也行）。
-4. **Base URL** 填：`https://api.deepseek.com/v1`
+3. 顶部 **API Provider** 选提供商。**两个入口二选一**（看你的 Cline 版本）：
+   - **新版 Cline：列表里直接有 `DeepSeek`** → 选它，**只需要填 API Key，不用填 Base URL**（地址自动填好）。推荐走这个。
+   - 旧版只有 **OpenAI Compatible（OpenAI 兼容）** → 选它后才会出现 **Base URL** 输入框（中文版可能显示为"基础 URL / 基本 URL"）。
+   - 解释：**Base URL = AI 服务的地址（门牌号）**，API Key = 钥匙。Cline 要找到 DeepSeek 的"门"才能进去。
+4. **Base URL**（仅 OpenAI Compatible 需要）填：`https://api.deepseek.com/v1`（或 `https://api.deepseek.com`，两者都行）。
 5. **API Key** 填：DeepSeek 的 API Key（即本地 `.env` 里 `DEEPSEEK_API_KEY` 的值；
    也可登录 platform.deepseek.com 查看/复制）。
 6. **Model ID** 填：`deepseek-chat`（日常）；复杂推理可换 `deepseek-reasoner`（更慢更聪明）。
