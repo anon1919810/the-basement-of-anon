@@ -123,5 +123,5 @@ FEW_SHOT_EXAMPLES = """
 """
 
 # ---------- 版本信息 ----------
-VERSION = "4.3.0"
+VERSION = "4.3.1"
 APP_NAME = "重庆Major2026·档档案案世界冠军"
