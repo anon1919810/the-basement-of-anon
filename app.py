@@ -8,6 +8,7 @@ import glob
 import shutil
 import re
 import sys
+import tempfile
 from io import BytesIO
 
 # ========== 调试：强制打印，确认 app.py 已加载 ==========
@@ -537,6 +538,9 @@ document.cookie='dsh_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
     # ----- 更新日志 -----
     with st.expander("📝 更新日志", expanded=False):
         st.markdown("""
+        **v4.5.2** (2026-08-16)
+        - 🐛 修复多用户同时提取时的文件冲突（每次提取使用独立临时目录）
+
         **v4.5.0** (2026-08-16) 🚀 正式发布
         - 🎉 车书万里版：一切从今始
         - 🏛️ 工具更名为「杨端明的撷菁轩」
@@ -663,8 +667,20 @@ if start_btn and uploaded_files and st.session_state.logged_in:
     st.session_state.processing = True
     st.session_state.df = None
 
-    temp_dir = "temp_pdfs"
-    os.makedirs(temp_dir, exist_ok=True)
+    # 每次运行使用独立临时目录（避免多用户/多标签页并发互相删文件）
+    os.makedirs("temp_pdfs", exist_ok=True)
+    # 清理超过1天的崩溃残留临时目录（幂等，不影响运行中的目录）
+    try:
+        _now = time.time()
+        for _d in glob.glob(os.path.join("temp_pdfs", "run_*")):
+            try:
+                if os.path.isdir(_d) and _now - os.path.getmtime(_d) > 86400:
+                    shutil.rmtree(_d, ignore_errors=True)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    temp_dir = tempfile.mkdtemp(prefix="run_", dir="temp_pdfs")
 
     # 拒绝>10MB的单文件（防止大扫描件云端处理超时）
     MAX_UPLOAD_MB = 10
@@ -720,7 +736,8 @@ if start_btn and uploaded_files and st.session_state.logged_in:
         print(f"❌ 处理出错：{e}", flush=True)
         all_entries = []
 
-    shutil.rmtree(temp_dir)
+    # 清理本次临时目录（ignore_errors：清理失败不阻塞页面）
+    shutil.rmtree(temp_dir, ignore_errors=True)
     status_text.empty()
     progress_bar.empty()
 
