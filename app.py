@@ -11,7 +11,7 @@ import sys
 from io import BytesIO
 
 # ========== 调试：强制打印，确认 app.py 已加载 ==========
-print("=== app.py 已加载（v4.4.0）===", flush=True)
+print(f"=== app.py 已加载（v{VERSION} {VERSION_TAG}）===", flush=True)
 sys.stdout.flush()
 
 # ========== 导入核心模块（加异常捕获） ==========
@@ -26,7 +26,7 @@ except Exception as e:
 
 try:
     from config import (
-        CATEGORY_OPTIONS, BASIN_OPTIONS, VERSION, APP_NAME,
+        CATEGORY_OPTIONS, BASIN_OPTIONS, VERSION, VERSION_TAG, APP_NAME,
         OUTPUT_BASE_NAME, DEFAULT_BOOK_NAME, FEW_SHOT_EXAMPLES,
         MAX_PARALLEL_WORKERS, ENABLE_CACHE, ENABLE_OCR, ENABLE_SPLIT,
         EXTRACTION_PASSES, OCR_DPI, EXTRACT_MAX_ONLY,
@@ -191,7 +191,7 @@ st.markdown("""
 
 # ========== 标题 ==========
 st.title(f"📚 {APP_NAME}")
-st.markdown(f"版本 {VERSION} — 上传地方志或档案PDF，AI自动提取文化要素")
+st.markdown(f"版本 v{VERSION} {VERSION_TAG} — 一切从今始 · 上传地方志或档案PDF，AI自动提取文化要素")
 
 # ========== 初始化 session_state ==========
 if 'df' not in st.session_state:
@@ -537,6 +537,12 @@ document.cookie='dsh_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
     # ----- 更新日志 -----
     with st.expander("📝 更新日志", expanded=False):
         st.markdown("""
+        **v4.5.0** (2026-08-16) 🚀 正式发布
+        - 🎉 车书万里版：一切从今始
+        - 🏛️ 工具更名为「杨端明的撷菁轩」
+        - 📬 新增联系作者（QQ/邮箱）
+        - ✅ 发布前全面检查通过
+
         **v4.4.0** (2026-08-16)
         - 🎨 界面全新升级：Supabase 风格（白底、直角边框、简约细线条）
 
@@ -556,7 +562,7 @@ document.cookie='dsh_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
         - 📜 历史文献标注来源：《书名》："引文"
         - 🔍 仅提取最大子目（可开关），不再细分到子项
 
-        **v4.0.0** (2026-08-16) 🎉 正式版
+        **v4.0.0** (2026-08-16) 🎉 正式版（车书万里版本）
         - 📄 正式发布：完整工作流（Word路线/子目/OCR/纠错/校验）
         - 📖 新增使用文档与环境变量示例
         - 🧪 发布前全面体检通过
@@ -625,16 +631,22 @@ document.cookie='dsh_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
     with st.expander("🙏 致谢", expanded=False):
         st.markdown("""
         **开发者**
-        - 失败主义谋士千早爱音
-        
+        - 杨端明
+
+        **联系作者**
+        - QQ：169636694
+        - 邮箱：youxiang051110@163.com
+
         **技术栈**
         - Python 3.14, Streamlit 1.61
         - DeepSeek API, PyMuPDF
         - Pandas, OpenPyXL, Tesseract
         - Supabase (PostgreSQL)
-        
+
         **特别感谢**
         - DeepSeek和Claude提供的强大AI能力
+        - 王小波和纪德深邃动人的文学
+        - 所有为本工具提供建议和机器学习素材的朋友们
         - 清华大学开源镜像站和多多软件站伟大的互联网分享精神
         - Greenday乐队超棒的音乐
         """)
