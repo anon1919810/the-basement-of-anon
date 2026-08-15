@@ -14,6 +14,9 @@ create table if not exists public.users (
   created_at timestamptz default now()
 );
 
+-- 用户自带DeepSeek API Key（加密存储；可选——不建此列仍可用，只是下次登录不能自动启用）
+alter table public.users add column if not exists api_key text;
+
 -- 留言表
 create table if not exists public.messages (
   id uuid primary key default gen_random_uuid(),

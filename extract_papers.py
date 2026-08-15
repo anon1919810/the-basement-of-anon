@@ -48,12 +48,12 @@ API_KEY = os.getenv("DEEPSEEK_API_KEY")
 if not API_KEY:
     print("[错误] 请在 .env 文件中设置 DEEPSEEK_API_KEY")
 
+# 运行期可覆盖的API Key：用户登录后设置自己的Key时由app.py赋值，
+# 未设置则回退到作者的API_KEY（每次处理前app.py都会显式重置，避免串用）
+ACTIVE_API_KEY = None
+
 # 复用 HTTP 连接（避免每次请求重建握手）
 _http = requests.Session()
-_headers = {
-    "Authorization": f"Bearer {API_KEY}",
-    "Content-Type": "application/json",
-}
 
 
 # ---------- 智能拆分 ----------
@@ -147,7 +147,15 @@ def _sleep_backoff(attempt):
 
 
 def _call_deepseek(prompt):
-    """调用 DeepSeek API，返回解析后的 JSON（失败自动重试）"""
+    """调用 DeepSeek API，返回解析后的 JSON（失败自动重试）。
+
+    使用当前有效Key：用户自带Key（ACTIVE_API_KEY）优先，否则用作者的默认Key。
+    """
+    key = ACTIVE_API_KEY or API_KEY
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+    }
     payload = {
         "model": MODEL_NAME,
         "messages": [{"role": "user", "content": prompt}],
@@ -158,7 +166,7 @@ def _call_deepseek(prompt):
 
     for attempt in range(1, MAX_API_RETRIES + 1):
         try:
-            resp = _http.post(API_URL, headers=_headers, json=payload, timeout=API_TIMEOUT)
+            resp = _http.post(API_URL, headers=headers, json=payload, timeout=API_TIMEOUT)
         except requests.RequestException as e:
             log_message(f"  [重试 {attempt}/{MAX_API_RETRIES}] 网络异常：{e}", "WARNING")
             if attempt < MAX_API_RETRIES:

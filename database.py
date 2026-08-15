@@ -74,6 +74,62 @@ def get_user_by_id(user_id):
         return None
 
 
+# ========== 用户自带 DeepSeek API Key（加密存储） ==========
+# 注意：Supabase anon键可读表，API Key绝不能明文入库！
+# 用 SESSION_SECRET 派生密钥做轻量混淆（XOR+SHA256流），非生产级加密，
+# 但对本工具场景足够（密钥不在前端/代码中）。持久化需 users 表含 api_key 列。
+def _cipher_key():
+    return hashlib.sha256(SESSION_SECRET.encode()).hexdigest().encode()[:32]
+
+
+def _encrypt_key(plain):
+    raw = plain.encode()
+    k = _cipher_key()
+    stream = b""
+    i = 0
+    while len(stream) < len(raw):
+        stream += hashlib.sha256(k + i.to_bytes(4, "big")).digest()
+        i += 1
+    return bytes(a ^ b for a, b in zip(raw, stream)).hex()
+
+
+def _decrypt_key(hexed):
+    raw = bytes.fromhex(hexed)
+    k = _cipher_key()
+    stream = b""
+    i = 0
+    while len(stream) < len(raw):
+        stream += hashlib.sha256(k + i.to_bytes(4, "big")).digest()
+        i += 1
+    return bytes(a ^ b for a, b in zip(raw, stream)).decode()
+
+
+def save_api_key(user_id, api_key):
+    """保存用户自带Key（加密）。缺列时返回明确提示。"""
+    supabase = get_supabase()
+    try:
+        supabase.table("users").update({"api_key": _encrypt_key(api_key)}).eq("id", user_id).execute()
+        return True, "已加密保存到你的账号，下次登录自动启用"
+    except Exception as e:
+        msg = str(e)
+        if "api_key" in msg or "column" in msg.lower():
+            return False, ("持久化需要先建列：请在 Supabase SQL Editor 执行 "
+                           "`alter table public.users add column if not exists api_key text;` "
+                           "（本次会话内仍生效）")
+        return False, f"保存失败：{msg}"
+
+
+def get_api_key(user_id):
+    """读取用户自带Key（解密）；无列/无值返回None"""
+    try:
+        r = get_supabase().table("users").select("api_key").eq("id", user_id).limit(1).execute()
+        if r.data and r.data[0].get("api_key"):
+            return _decrypt_key(r.data[0]["api_key"])
+    except Exception:
+        pass
+    return None
+
+
 def get_supabase() -> Client:
     """获取 Supabase 客户端"""
     return create_client(SUPABASE_URL, SUPABASE_KEY)

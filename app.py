@@ -11,7 +11,7 @@ import sys
 from io import BytesIO
 
 # ========== 调试：强制打印，确认 app.py 已加载 ==========
-print("=== app.py 已加载（v3.4.0）===", flush=True)
+print("=== app.py 已加载（v3.5.0）===", flush=True)
 sys.stdout.flush()
 
 # ========== 导入核心模块（加异常捕获） ==========
@@ -152,6 +152,13 @@ def _set_login(user):
     st.session_state.logged_in = True
     st.session_state.user = user["username"]
     st.session_state.user_id = user["id"]
+    # 恢复该账号自带的API Key（若持久化过）
+    try:
+        saved = db.get_api_key(user["id"])
+        if saved:
+            st.session_state.user_api_key = saved
+    except Exception:
+        pass
 
 # 从URL参数恢复登录（刷新/重开网址时）
 if not st.session_state.logged_in:
@@ -263,6 +270,40 @@ document.cookie='dsh_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
         book_name = st.text_input("📖 文献名称", value=DEFAULT_BOOK_NAME)
         uploaded_files = st.file_uploader("📄 上传PDF或Word文件", type=['pdf', 'docx'], accept_multiple_files=True)
         st.caption("💡 扫描件建议先用WPS转成Word并让AI修正错字后上传，识别零误差、效果最佳")
+
+        # ----- 用户自带API Key -----
+        with st.expander("🔑 使用自己的API Key（可选）", expanded=False):
+            st.caption("用自己的 DeepSeek Key 提取，不占用作者额度；留空则用作者默认Key")
+            user_key_input = st.text_input("DeepSeek API Key（sk-…）", type="password",
+                                           key="user_api_key_input", placeholder="输入你自己的 Key 并保存")
+            if st.button("💾 保存并启用", key="save_user_key"):
+                k = (user_key_input or "").strip()
+                if not k:
+                    st.error("❌ 请输入 Key")
+                else:
+                    # 轻量验证（DeepSeek余额接口）
+                    valid = None
+                    try:
+                        import requests as _rq
+                        resp = _rq.get("https://api.deepseek.com/user/balance",
+                                       headers={"Authorization": f"Bearer {k}"}, timeout=10)
+                        valid = resp.status_code == 200
+                    except Exception:
+                        valid = None
+                    if valid is False:
+                        st.error("❌ Key 无效（DeepSeek 返回未授权），请检查后重试")
+                    else:
+                        st.session_state.user_api_key = k
+                        ok, msg = db.save_api_key(st.session_state.user_id, k)
+                        tip = "" if ok else f"（{msg}）"
+                        st.success(f"✅ 已启用你的 Key，本次及后续提取将使用它 {tip}")
+                        st.rerun()
+            if st.session_state.get("user_api_key"):
+                st.info(f"👤 当前提取将使用：你的 Key（{st.session_state.user_api_key[:8]}…）")
+                if st.button("↩️ 恢复默认（作者 Key）", key="reset_user_key"):
+                    st.session_state.pop("user_api_key", None)
+                    st.rerun()
+
         start_btn = st.button("🚀 开始智能提取", type="primary", use_container_width=True)
     else:
         st.info("🔒 请先登录后再使用提取功能")
@@ -382,6 +423,12 @@ document.cookie='dsh_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
     # ----- 更新日志 -----
     with st.expander("📝 更新日志", expanded=False):
         st.markdown("""
+        **v3.5.0** (2026-08-16)
+        - 🔑 用户自带API Key：登录后可在侧边栏填入自己的DeepSeek Key，
+          提取时自动使用（不占用作者额度）；保存时轻量验证、加密持久化
+          （下次登录自动启用，可选）；随时可恢复作者默认Key
+        - 🔒 防串用：每次处理前显式重置Key来源（用户自带/作者默认）
+
         **v3.4.0** (2026-08-16)
         - 🧩 模块化重构：拆分为 prompts/ocr_engine/postprocess/shared 四模块，
           核心调度只留职责（回归测试验证行为完全一致）
@@ -509,11 +556,14 @@ if start_btn and uploaded_files and st.session_state.logged_in:
 
     status_text.info(f"📄 正在并行处理 {total} 个文件（并行数：{max_workers}）...")
     
-    # 运行期覆盖模块级参数（OCR分辨率/抽取轮数）
+    # 运行期覆盖模块级参数（OCR分辨率/抽取轮数/API Key）
     import config as app_config
     app_config.OCR_DPI = ocr_dpi       # ocr_engine 动态读 config，此设置全局生效
     extract_mod.OCR_DPI = ocr_dpi      # 兼容旧引用
-    print(f"📄 开始并行处理 {total} 个文件（OCR:{ocr_dpi}dpi, 每块{extract_passes}轮）...", flush=True)
+    # 每次处理前显式设置API Key（用户自带优先，否则回退作者Key；防止跨用户串用）
+    extract_mod.ACTIVE_API_KEY = st.session_state.get("user_api_key") or None
+    key_note = "用户自带Key" if extract_mod.ACTIVE_API_KEY else "作者默认Key"
+    print(f"📄 开始并行处理 {total} 个文件（OCR:{ocr_dpi}dpi, 每块{extract_passes}轮, {key_note}）...", flush=True)
     try:
         all_entries = process_pdfs_parallel(
             pdf_paths, book_name,
