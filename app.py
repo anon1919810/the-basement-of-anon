@@ -11,7 +11,7 @@ import sys
 from io import BytesIO
 
 # ========== 调试：强制打印，确认 app.py 已加载 ==========
-print("=== app.py 已加载（v4.3.1）===", flush=True)
+print("=== app.py 已加载（v4.4.0）===", flush=True)
 sys.stdout.flush()
 
 # ========== 导入核心模块（加异常捕获） ==========
@@ -63,79 +63,129 @@ REQUIRE_KEY_OR_INVITE = os.getenv("REQUIRE_KEY_OR_INVITE", "true").lower() != "f
 # ========== 页面配置 ==========
 st.set_page_config(page_title=APP_NAME, layout="wide", page_icon="📚")
 
-# ========== UI 美化样式（直接内联注入） ==========
+# ========== UI 美化样式（Supabase 风格：白底 / 直角边框 / 简约细线条） ==========
 st.markdown("""
 <style>
-    body {
-        background-color: #f8f9fa !important;
-        color: #1a202c !important;
+    /* ---------- 全局 ---------- */
+    html, body, [data-testid="stAppViewContainer"] {
+        background-color: #fbfbfb !important;
+        color: #1c1c1c !important;
+        font-family: -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif !important;
     }
+    .block-container { max-width: 1100px !important; padding-top: 1.6rem !important; }
+
+    /* ---------- 标题：紧凑、细字重 ---------- */
+    h1 { font-size: 1.5rem !important; font-weight: 600 !important; color: #1c1c1c !important; letter-spacing: 0 !important; }
+    h2, h3 { font-size: 1.08rem !important; font-weight: 600 !important; color: #1c1c1c !important; }
+    .stCaption { color: #8a8f98 !important; font-size: 0.82rem !important; }
+
+    /* ---------- 侧边栏：纯白 + 右侧1px细线 ---------- */
     section[data-testid="stSidebar"] {
         background-color: #ffffff !important;
-        border-right: 1px solid #e9ecef !important;
+        border-right: 1px solid #e8e8e8 !important;
     }
-    h1, h2, h3 {
-        color: #1a202c !important;
-        font-weight: 600 !important;
+    section[data-testid="stSidebar"] hr { border-color: #f0f0f0 !important; }
+
+    /* ---------- 折叠面板（Expander）：直角、细边框、可折叠 ---------- */
+    [data-testid="stExpander"] {
+        border: 1px solid #e6e6e6 !important;
+        border-radius: 0px !important;
+        background: #ffffff !important;
+        box-shadow: none !important;
     }
-    .stButton > button {
-        background-color: #3b82f6 !important;
-        color: white !important;
-        border-radius: 8px !important;
-        border: none !important;
+    [data-testid="stExpander"] summary {
+        border-radius: 0px !important;
         font-weight: 500 !important;
-        padding: 0.5rem 1rem !important;
-        transition: all 0.2s ease !important;
+        color: #1c1c1c !important;
     }
-    .stButton > button:hover {
-        background-color: #2563eb !important;
-        box-shadow: 0 4px 12px rgba(59,130,246,0.4) !important;
-    }
-    .stTextInput input, .stTextArea textarea {
-        border-radius: 8px !important;
-        border: 1px solid #d1d5db !important;
-        padding: 8px 12px !important;
+    [data-testid="stExpander"] summary:hover { background: #f6f6f6 !important; }
+
+    /* ---------- 按钮：白底细边框直角，主按钮用 Supabase 绿 ---------- */
+    .stButton > button, .stDownloadButton > button, [data-testid="stFormSubmitButton"] button {
         background-color: #ffffff !important;
+        color: #1c1c1c !important;
+        border: 1px solid #d9d9d9 !important;
+        border-radius: 0px !important;
+        font-weight: 500 !important;
+        padding: 0.4rem 0.9rem !important;
+        transition: all 0.12s ease !important;
+    }
+    .stButton > button:hover, [data-testid="stFormSubmitButton"] button:hover {
+        background-color: #f4f4f4 !important;
+        border-color: #3ecf8e !important;
+    }
+    .stButton > button[kind="primary"], .stDownloadButton > button[kind="primary"] {
+        background-color: #3ecf8e !important;
+        color: #ffffff !important;
+        border: 1px solid #3ecf8e !important;
+    }
+    .stButton > button[kind="primary"]:hover {
+        background-color: #33b87e !important;
+        border-color: #33b87e !important;
+    }
+
+    /* ---------- 输入框：直角、细边框、绿聚焦 ---------- */
+    .stTextInput input, .stTextArea textarea {
+        border: 1px solid #d9d9d9 !important;
+        border-radius: 0px !important;
+        background: #ffffff !important;
+        padding: 0.42rem 0.7rem !important;
+        color: #1c1c1c !important;
     }
     .stTextInput input:focus, .stTextArea textarea:focus {
-        border-color: #3b82f6 !important;
-        box-shadow: 0 0 0 3px rgba(59,130,246,0.2) !important;
+        border-color: #3ecf8e !important;
+        box-shadow: 0 0 0 1px #3ecf8e !important;
     }
-    .stAlert {
-        border-radius: 8px !important;
+    [data-testid="stSelectbox"] > div > div,
+    [data-testid="stMultiSelect"] > div > div,
+    [data-testid="stNumberInput"] > div > div > input {
+        border-radius: 0px !important;
+        border-color: #d9d9d9 !important;
     }
-    [data-testid="stMetricValue"] {
-        color: #1a202c !important;
-        font-weight: 600 !important;
-        font-size: 2rem !important;
+
+    /* ---------- 数据表：细线直角 ---------- */
+    [data-testid="stDataFrame"], .stDataFrame {
+        border: 1px solid #e6e6e6 !important;
+        border-radius: 0px !important;
     }
-    .stDownloadButton > button {
-        background-color: #10b981 !important;
-        color: white !important;
-        border-radius: 8px !important;
-        border: none !important;
-        font-weight: 500 !important;
+
+    /* ---------- 指标卡：白底细边框直角 ---------- */
+    [data-testid="stMetric"] {
+        background: #ffffff !important;
+        border: 1px solid #e6e6e6 !important;
+        border-radius: 0px !important;
+        padding: 0.7rem 1rem !important;
     }
-    .stDownloadButton > button:hover {
-        background-color: #059669 !important;
+    [data-testid="stMetricValue"] { color: #1c1c1c !important; font-weight: 600 !important; }
+
+    /* ---------- 提示框：细线直角，左侧绿条 ---------- */
+    .stAlert { border-radius: 0px !important; border: 1px solid #e6e6e6 !important; border-left: 2px solid #3ecf8e !important; }
+
+    /* ---------- 文件上传：虚细线直角 ---------- */
+    [data-testid="stFileUploader"] > div {
+        border: 1px dashed #d9d9d9 !important;
+        border-radius: 0px !important;
+        background: #fafafa !important;
     }
-    .stCaption {
-        color: #6b7280 !important;
-        font-size: 0.9rem !important;
+    [data-testid="stFileUploader"] > div:hover {
+        border-color: #3ecf8e !important;
+        background: #f3fdf7 !important;
     }
-    .streamlit-expanderHeader {
-        font-weight: 500 !important;
-        color: #1a202c !important;
+
+    /* ---------- 标签页：底部细线 + 选中绿下划线 ---------- */
+    .stTabs [data-baseweb="tab-list"] { border-bottom: 1px solid #e6e6e6 !important; gap: 0 !important; }
+    .stTabs [data-baseweb="tab"] { border-radius: 0px !important; }
+    .stTabs [aria-selected="true"] { border-bottom: 2px solid #3ecf8e !important; }
+
+    /* ---------- 链接按钮：去圆角 ---------- */
+    [data-testid="stLinkButton"] a {
+        border-radius: 0px !important;
+        border: 1px solid #d9d9d9 !important;
     }
-    .stFileUploader > div {
-        border-radius: 8px !important;
-        border: 2px dashed #d1d5db !important;
-        background-color: #fafafa !important;
-    }
-    .stFileUploader > div:hover {
-        border-color: #3b82f6 !important;
-        background-color: #f0f7ff !important;
-    }
+    [data-testid="stLinkButton"] a:hover { border-color: #3ecf8e !important; }
+
+    /* ---------- 侧边栏 logo 文字微调 ---------- */
+    section[data-testid="stSidebar"] .stMarkdown p { font-size: 0.9rem !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -487,6 +537,9 @@ document.cookie='dsh_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
     # ----- 更新日志 -----
     with st.expander("📝 更新日志", expanded=False):
         st.markdown("""
+        **v4.4.0** (2026-08-16)
+        - 🎨 界面全新升级：Supabase 风格（白底、直角边框、简约细线条）
+
         **v4.3.1** (2026-08-16)
         - 🐛 修复 AI 补充时偶发的页面报错
 
