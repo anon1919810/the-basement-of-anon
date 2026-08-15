@@ -212,6 +212,34 @@ def _call_deepseek(prompt):
     return None
 
 
+def chat_completion(messages, max_tokens=2048, temperature=0.3):
+    """通用对话调用（供AI工作台补充基础信息/自由问答使用）。
+
+    使用当前有效Key（用户自带 Key > 管理员/邀请码的作者 Key）。
+    返回回复文本；失败返回 None。
+    """
+    key = ACTIVE_API_KEY or API_KEY
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": MODEL_NAME,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    try:
+        resp = _http.post(API_URL, headers=headers, json=payload, timeout=API_TIMEOUT)
+        if resp.status_code == 200:
+            return resp.json()["choices"][0]["message"]["content"]
+        log_message(f"  对话调用失败：{resp.status_code} {resp.text[:150]}", "ERROR")
+        return None
+    except Exception as e:
+        log_message(f"  对话调用异常：{e}", "ERROR")
+        return None
+
+
 # ---------- 核心提取函数（支持拆分+缓存） ----------
 def _extract_single_chunk(text, book_name, chunk_index=1, chunk_total=1, is_ocr=False, is_toc=False,
                           extraction_passes=None):

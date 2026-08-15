@@ -11,7 +11,7 @@ import sys
 from io import BytesIO
 
 # ========== 调试：强制打印，确认 app.py 已加载 ==========
-print("=== app.py 已加载（v4.2.0）===", flush=True)
+print("=== app.py 已加载（v4.3.0）===", flush=True)
 sys.stdout.flush()
 
 # ========== 导入核心模块（加异常捕获） ==========
@@ -187,6 +187,15 @@ def resolve_key_source():
         except Exception:
             pass
     return None, None
+
+
+def _ai_ready():
+    """AI工作台权限检查：返回 (是否可用, 提示)"""
+    src, k = resolve_key_source()
+    if src is None and REQUIRE_KEY_OR_INVITE:
+        return False, "无 AI 使用权限：请设置自己的 Key 或填写邀请码"
+    extract_mod.ACTIVE_API_KEY = k if src == "user" else None
+    return True, ""
 
 # 从URL参数恢复登录（刷新/重开网址时）
 if not st.session_state.logged_in:
@@ -478,6 +487,11 @@ document.cookie='dsh_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
     # ----- 更新日志 -----
     with st.expander("📝 更新日志", expanded=False):
         st.markdown("""
+        **v4.3.0** (2026-08-16)
+        - 🤖 AI 工作台：提取后选中条目一键"AI补充基础信息"，可写入表格；
+          自由对话向AI提问查证；一键打开DeepSeek网页版继续深入搜索
+        - 💡 说明：网页版不支持嵌入（官方安全策略），故内置API对话 + 外链按钮
+
         **v4.2.0** (2026-08-16)
         - 🗄️ 提取结果入库：每次提取自动保存（用户/文献/文件/条数/原文/结果JSON）
         - ⭐ 评分系统：提取后可打1-10分+意见；高分结果自动沉淀为回归基准
@@ -704,6 +718,66 @@ if st.session_state.get("last_extraction_id"):
             st.success("✅ 感谢评价！高分提取将用于训练回归基准")
         else:
             st.error("❌ 提交失败：请确认已执行最新 db_schema.sql（需 extraction_results 表）")
+
+# ======================== AI 工作台（提取后补充/深化） ========================
+if st.session_state.logged_in and st.session_state.df is not None and not st.session_state.df.empty:
+    st.markdown("---")
+    st.subheader("🤖 AI 工作台")
+    st.caption("提取后用 AI 补充基础信息，然后在线编辑表格；也可打开 DeepSeek 网页版继续深入搜索")
+    st.link_button("🌐 打开 DeepSeek 网页版（搜索模式）", "https://chat.deepseek.com/")
+
+    # 条目级补充
+    df_now = st.session_state.df
+    names_list = df_now["名称"].astype(str).tolist()
+    sel_name = st.selectbox("选择要补充的条目", names_list, key="ai_sel")
+    if st.button("🧠 AI 补充该条目的基础信息", key="ai_supplement"):
+        ok, tip = _ai_ready()
+        if not ok:
+            st.error(f"🔒 {tip}")
+        else:
+            row = df_now[df_now["名称"] == sel_name].iloc[0]
+            ctx = (f"名称：{row['名称']}\n类别：{row['类别']}\n时间：{row['时间']}\n"
+                   f"空间：{row['空间']}\n基础信息：{row['基础信息']}\n"
+                   f"历史文献：{str(row['历史文献'])[:200]}")
+            msgs = [
+                {"role": "system", "content": "你是文史研究助手。请基于条目信息和你的知识，"
+                                              "补充更详实的基础信息（史实、背景、意义等），"
+                                              "用简洁中文，不超过150字，只输出补充后的基础信息全文。"},
+                {"role": "user", "content": ctx},
+            ]
+            reply = extract_mod.chat_completion(msgs)
+            if reply:
+                st.session_state.ai_supplement = reply
+            else:
+                st.error("❌ AI 调用失败（请检查你的 API Key 是否有效/有余额）")
+    if st.session_state.get("ai_supplement"):
+        st.markdown(f"**🤖 AI 建议补充：**\n\n{st.session_state.ai_supplement}")
+        if st.button("📥 写入该条目的基础信息", key="ai_write"):
+            df_now.loc[df_now["名称"] == sel_name, "基础信息"] = st.session_state.ai_supplement
+            st.session_state.df = df_now
+            st.session_state.ai_supplement = None
+            st.success("✅ 已写入，可继续在线编辑或下载")
+            st.rerun()
+
+    # 自由对话（保留最近几轮）
+    with st.expander("💬 自由对话（向 AI 提问/查证）", expanded=False):
+        q = st.text_input("你的问题（如：盘龙城遗址的发现过程是怎样的？）", key="ai_q")
+        if st.button("发送", key="ai_send"):
+            ok, tip = _ai_ready()
+            if not ok:
+                st.error(f"🔒 {tip}")
+            elif q.strip():
+                hist = st.session_state.get("ai_history", [])
+                hist.append({"role": "user", "content": q.strip()})
+                reply = extract_mod.chat_completion(hist[-6:])
+                if reply:
+                    hist.append({"role": "assistant", "content": reply})
+                    st.session_state.ai_history = hist
+                else:
+                    st.error("❌ AI 调用失败")
+        for m in st.session_state.get("ai_history", [])[-8:]:
+            role = "🧑" if m["role"] == "user" else "🤖"
+            st.markdown(f"{role} **{m['content'][:200] if m['role']=='user' else m['content']}**")
 
 # ======================== 留言板 ========================
 if st.session_state.logged_in:
