@@ -1,33 +1,128 @@
-"""后端配置：从仓库根目录 .env 加载环境变量（与 Streamlit 版共用一份 .env）。"""
+# -*- coding: utf-8 -*-
+"""
+配置文件 - 所有可调参数集中管理
+v2.5.0 新增：API重试、输出Token上限、缓存目录、Prompt模板版本、提取策略
+"""
 
-import os
-from pathlib import Path
+# ---------- 模型参数 ----------
+MODEL_NAME = "deepseek-chat"
+TEMPERATURE = 0.1               # 越低越稳定（提取类任务建议 0.1 以下）
+MAX_TEXT_LENGTH = 5000          # 单次提取最大字符数（拆分时每块上限，可调大至8000省调用）
+API_TIMEOUT = 60                # 单次请求超时（秒）
 
-from dotenv import load_dotenv
+# ---------- API 调用配置 ----------
+API_URL = "https://api.deepseek.com/chat/completions"
+MAX_API_RETRIES = 3             # 单块调用失败最大重试次数（网络错误/429/5xx）
+RETRY_BACKOFF_SECONDS = 2       # 重试退避基数（秒），第n次重试等待 基数 * 2^(n-1)
+MAX_OUTPUT_TOKENS = 8192        # 单次响应最大输出token（deepseek-chat上限8192）
+                                # 注意：默认4096可能截断长JSON导致解析失败，务必保持8192
+PROMPT_TEMPLATE_VERSION = "4.2" # Prompt模板/后处理管线版本号，行为变更后+1（自动使旧缓存失效）
 
-# backend/app/config.py -> backend -> 仓库根目录
-BASE_DIR = Path(__file__).resolve().parent.parent.parent
-load_dotenv(BASE_DIR / ".env")
+# ---------- 文献设置 ----------
+DEFAULT_BOOK_NAME = "武汉市志 文物志"
 
-APP_NAME = os.getenv("APP_NAME", "杨端明的撷菁轩")
-VERSION = os.getenv("VERSION", "4.7.0")
-VERSION_TAG = "车书万里"
+# ---------- 输出设置 ----------
+OUTPUT_BASE_NAME = "文化要素提取结果"
 
-SESSION_SECRET = os.getenv("SESSION_SECRET", "")
-SESSION_HOURS = int(os.getenv("SESSION_HOURS", "24"))
-INVITE_CODE = os.getenv("INVITE_CODE", "931226")
-ADMIN_USERNAMES = {u.strip() for u in os.getenv("ADMIN_USERNAMES", "").split(",") if u.strip()}
+# ---------- 类别与流域选项 ----------
+CATEGORY_OPTIONS = ["物质文化", "精神文化", "制度文化", "行为文化", "心理文化"]
+BASIN_OPTIONS = ["长江流域", "汉江流域", "不详"]
 
-SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
+# ---------- 提取策略 ----------
+# True  = 只提取原文中明确出现的内容，宁可少而准（防止AI编造，学术研究强烈推荐）
+# False = 宁可多提取，也不要遗漏（召回优先，默认推荐；每条仍必须有原文依据）
+STRICT_EXTRACTION = False
 
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+# 子目结构模式：
+#   auto = 检测到【】子目（或加粗/大字提行标题）即用"子目模式"（每个子目一条，
+#          不在子目内细分）；否则用全文提取模式
+#   zimu = 强制子目模式；full = 强制全文模式
+STRUCTURE_MODE = "auto"
 
-CORS_ORIGINS = [
-    o.strip()
-    for o in os.getenv(
-        "CORS_ORIGINS",
-        "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000",
-    ).split(",")
-    if o.strip()
-]
+# 仅提取最大子目（默认开启，前端可切换）：
+#   True  = 优先按"最大子目"粒度提取——【】子目 / "名称：正文"式条目段落；
+#           无子目结构时回退全文提取
+#   False = 始终全文提取（子项也会被提取，粒度更细）
+EXTRACT_MAX_ONLY = True
+
+# 历史文献是否标注来源：《书名》："引文"（默认开启；仅影响输出展示，内部引文不变）
+QUOTE_WITH_SOURCE = True
+
+# 是否合并跨块产生的近似重复条目（如"汉阳旧城"与"汉阳城"为同一实体）
+MERGE_SIMILAR_ENTRIES = True
+
+# ---------- 性能与缓存配置 ----------
+ENABLE_CACHE = True              # 是否启用结果缓存
+CACHE_EXPIRE_DAYS = 7            # 缓存有效期（天）
+CACHE_DIR = "cache"              # 缓存目录（相对项目根目录）
+MAX_PARALLEL_WORKERS = 2         # 并行处理的最大线程数（建议2-3，避免API限流）
+ENABLE_OCR = True                # 是否启用OCR（扫描件识别）
+OCR_CORRECT = True               # 是否纠正OCR常见错字（"潮北省"->"湖北省"；仅作用于OCR文本）
+TESSERACT_PATH = r"C:\Program Files\Tesseract-OCR\tesseract.exe"  # 你的Tesseract安装路径（云端留空走PATH）
+OCR_ENGINE = "auto"              # OCR引擎：auto=本地优先RapidOCR(中文更准)，未安装自动回退Tesseract；
+                                 # 云端默认Tesseract（RapidOCR为本地可选，见requirements.txt注释）
+OCR_DPI = 300                    # OCR分辨率（志书小字号建议200-300；越大越准但越慢）
+
+# ---------- 智能拆分配置 ----------
+ENABLE_SPLIT = True              # 是否启用长文本智能拆分
+CHUNK_OVERLAP = 200              # 拆分时上下文重叠字符数（防止信息断裂）
+
+# ---------- 多轮抽取（应对模型输出不稳定） ----------
+# 实测同一块多次调用结果在 1条 ~ 45条 间波动，且每次覆盖的子集互不相同。
+# EXTRACTION_PASSES 表示每块最多调用次数并合并去重。
+# ADAPTIVE_PASSES=True 时：前两轮后若新增条目<25%则提前收敛（省Token，默认推荐）
+EXTRACTION_PASSES = 3
+ADAPTIVE_PASSES = True
+LOW_YIELD_THRESHOLD = 3          # 块提取条数低于该值时触发重试（仅单轮模式）
+LOW_YIELD_MIN_CHARS = 1500       # 仅对内容较多的块重试（避免空白/版权页空转）
+MAX_LOW_YIELD_RETRIES = 2        # 最多重试次数
+
+# ---------- Few-shot 样本示例 ----------
+FEW_SHOT_EXAMPLES = """
+以下是一些文化要素的分类示例，请严格参照此逻辑进行分类：
+
+1. 示例1：
+   - 名称：盘龙城遗址
+   - 类别：物质文化
+   - 原因：考古遗址，实物遗存
+
+2. 示例2：
+   - 名称：荆州抗洪精神
+   - 类别：精神文化
+   - 原因：从抗洪实践中凝练出的精神价值
+
+3. 示例3：
+   - 名称：单刀会
+   - 类别：行为文化
+   - 原因：民俗活动/仪式行为
+
+4. 示例4：
+   - 名称：科举制度
+   - 类别：制度文化
+   - 原因：社会组织/制度规范
+
+5. 示例5：
+   - 名称：图腾崇拜
+   - 类别：心理文化
+   - 原因：信仰/心理层面的文化现象
+
+6. 示例6：
+   - 名称：黄鹤楼
+   - 类别：物质文化
+   - 原因：历史建筑，实物遗存
+
+7. 示例7：
+   - 名称：黄鹤楼传说
+   - 类别：精神文化
+   - 原因：民间口头传说，非物质形态（注意与同名建筑区分）
+
+8. 示例8：
+   - 名称：武汉方言语法特征
+   - 类别：精神文化
+   - 原因：方言及语言文化现象，地域精神文化的载体
+"""
+
+# ---------- 版本信息 ----------
+VERSION = "4.7.0"
+VERSION_TAG = "车书万里"          # 版本名：寓意"一切从今始"（整个v4.0系列 = 车书万里版本）
+APP_NAME = "杨端明的撷菁轩"
