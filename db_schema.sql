@@ -57,28 +57,17 @@ ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
 
 -- users：注册(INSERT)/登录(SELECT)/更新Key与邀请码(UPDATE) 均允许
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename='users' AND policyname='anon all users') THEN
-    CREATE POLICY "anon all users" ON users FOR ALL USING (true) WITH CHECK (true);
-  END IF;
-END $$;
+-- 说明：CREATE POLICY 不支持 IF NOT EXISTS，故用"先删后建"保证任意次数执行不报错
+DROP POLICY IF EXISTS "anon all users" ON users;
+CREATE POLICY "anon all users" ON users FOR ALL USING (true) WITH CHECK (true);
 
 -- messages：读写删均允许（删除时应用层已按 user_id 约束；管理员可删任意）
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename='messages' AND policyname='anon all messages') THEN
-    CREATE POLICY "anon all messages" ON messages FOR ALL USING (true) WITH CHECK (true);
-  END IF;
-END $$;
+DROP POLICY IF EXISTS "anon all messages" ON messages;
+CREATE POLICY "anon all messages" ON messages FOR ALL USING (true) WITH CHECK (true);
 
 -- extraction_results：读写均允许（访问控制由应用层负责）
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename='extraction_results' AND policyname='anon all extraction_results') THEN
-    CREATE POLICY "anon all extraction_results" ON extraction_results FOR ALL USING (true) WITH CHECK (true);
-  END IF;
-END $$;
+DROP POLICY IF EXISTS "anon all extraction_results" ON extraction_results;
+CREATE POLICY "anon all extraction_results" ON extraction_results FOR ALL USING (true) WITH CHECK (true);
 
 -- 提示：若你之前执行过旧版脚本，重复执行本脚本即可（旧的窄策略会被新策略覆盖/共存，
 -- 操作权限取并集，不会冲突）。
