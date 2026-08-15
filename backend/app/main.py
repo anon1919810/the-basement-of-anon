@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import config, env
 from .logger import get_logger
-from .routers import auth, chat, extract
+from .routers import admin, auth, chat, extract, social
 
 logger = get_logger("main")
 
@@ -23,6 +23,8 @@ app = FastAPI(
 app.include_router(auth.router)
 app.include_router(extract.router)
 app.include_router(chat.router)
+app.include_router(social.router)
+app.include_router(admin.router)
 
 app.add_middleware(
     CORSMiddleware,
