@@ -45,9 +45,9 @@ echo "=== 4/4 写入 WSGI 入口（用 a2wsgi 把 FastAPI 包装成 WSGI） ==="
 cat > ~/dsh_wsgi.py << EOF
 import sys
 sys.path.insert(0, "/home/$(whoami)/the-basement-of-anon/backend")
-from a2wsgi import WSGIMiddleware
+from a2wsgi import ASGIMiddleware
 from app.main import app
-application = WSGIMiddleware(app)
+application = ASGIMiddleware(app)
 EOF
 
 echo ""
