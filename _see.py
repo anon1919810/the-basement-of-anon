@@ -9,17 +9,31 @@
     python _see.py 截图.png "图里有哪些文字？"
 """
 import base64
+import io
 import json
 import sys
 import urllib.request
 
 OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
 MODEL = "qwen2.5vl:7b"
+MAX_DIM = 1280  # 超长截图压缩上限，避免超出视觉模型限制
+
+
+def _prepare(path):
+    """压缩图片：超大截图/长图缩小到 MAX_DIM 内，JPEG 压缩，返回 base64"""
+    from PIL import Image
+    img = Image.open(path).convert("RGB")
+    w, h = img.size
+    if max(w, h) > MAX_DIM:
+        scale = MAX_DIM / max(w, h)
+        img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=85)
+    return base64.b64encode(buf.getvalue()).decode()
 
 
 def see(path, prompt="请详细描述这张图片的内容，包括其中的文字信息。"):
-    with open(path, "rb") as f:
-        b64 = base64.b64encode(f.read()).decode()
+    b64 = _prepare(path)
     body = json.dumps({
         "model": MODEL,
         "prompt": prompt,
