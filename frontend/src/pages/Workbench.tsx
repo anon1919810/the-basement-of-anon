@@ -16,6 +16,7 @@ import {
 } from 'lucide-react'
 import { api, apiSSE } from '../lib/api'
 import { toast } from '../lib/toast'
+import StatsCharts from '../components/StatsCharts'
 
 interface Entry {
   名称: string
@@ -426,27 +427,7 @@ export default function Workbench() {
           <RefreshCw size={13} />
           加载统计
         </button>
-        {stats && (
-          <div className="mt-3 grid gap-4 text-sm md:grid-cols-3">
-            <div>
-              <div className="font-semibold">总览</div>
-              <div>提取记录：{stats.total_records} 次</div>
-              <div>总条目：{stats.total_entries} 条</div>
-            </div>
-            <div>
-              <div className="font-semibold">类别分布</div>
-              {Object.entries(stats.category_distribution).map(([k, v]) => (
-                <div key={k}>{k}：{String(v)}</div>
-              ))}
-            </div>
-            <div>
-              <div className="font-semibold">流域分布</div>
-              {Object.entries(stats.basin_distribution).map(([k, v]) => (
-                <div key={k}>{k}：{String(v)}</div>
-              ))}
-            </div>
-          </div>
-        )}
+        {stats && <StatsCharts stats={stats} />}
       </section>
 
       {/* ---------- 留言板 ---------- */}
