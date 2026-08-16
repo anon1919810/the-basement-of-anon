@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Database, Users } from 'lucide-react'
 import { api } from '../lib/api'
+import { toast } from '../lib/toast'
 
 export default function Admin() {
   const [users, setUsers] = useState<any>(null)
@@ -28,6 +29,17 @@ export default function Admin() {
   async function grantInvite(uid: string) {
     try {
       await api(`/api/admin/users/${uid}/grant-invite`, { method: 'POST' })
+      toast('已开通24小时邀请', 'success')
+      load()
+    } catch (e: any) {
+      setErr(e.message)
+    }
+  }
+
+  async function clearKey(uid: string) {
+    try {
+      await api(`/api/admin/users/${uid}/clear-key`, { method: 'POST' })
+      toast('已清空该用户的 Key', 'success')
       load()
     } catch (e: any) {
       setErr(e.message)
@@ -69,8 +81,11 @@ export default function Admin() {
                     <td>{s['平均评分'] ?? '-'}</td>
                     <td>{s['最近提取']}</td>
                     <td>
-                      <button className="btn !py-0 !px-2 text-xs" onClick={() => grantInvite(s.user_id)}>
+                      <button className="btn btn-sm" onClick={() => grantInvite(s.user_id)}>
                         开通邀请
+                      </button>{' '}
+                      <button className="btn btn-sm" onClick={() => clearKey(s.user_id)}>
+                        清空 Key
                       </button>
                     </td>
                   </tr>

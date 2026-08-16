@@ -3,7 +3,7 @@ import {
   BarChart3,
   Brain,
   Check,
-  Download,
+  FileSpreadsheet,
   FileText,
   MessageSquare,
   RefreshCw,
@@ -14,7 +14,7 @@ import {
   Upload,
   Wand2,
 } from 'lucide-react'
-import { api, apiSSE } from '../lib/api'
+import { api, apiBlob, apiSSE } from '../lib/api'
 import { toast } from '../lib/toast'
 import StatsCharts from '../components/StatsCharts'
 
@@ -39,6 +39,10 @@ export default function Workbench() {
   const [err, setErr] = useState('')
   const [entries, setEntries] = useState<Entry[] | null>(null)
   const [recordId, setRecordId] = useState<number | null>(null)
+
+  // ---- 表格在线编辑 ----
+  const [editing, setEditing] = useState<{ row: number; field: string } | null>(null)
+  const [draft, setDraft] = useState('')
 
   // ---- AI 工作台 ----
   const [selName, setSelName] = useState('')
@@ -206,17 +210,33 @@ export default function Workbench() {
     }
   }
 
-  function exportCsv() {
+  function exportExcel() {
     if (!entries || entries.length === 0) return
-    const cols = ['名称', '类别', '时间', '空间', '流域', '基础信息', '历史文献']
-    const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`
-    const rows = entries.map((e) => cols.map((c) => esc((e as any)[c])).join(','))
-    const csv = '\uFEFF' + cols.map(esc).join(',') + '\n' + rows.join('\n')
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = `${bookName || '文化要素提取结果'}.csv`
-    a.click()
+    apiBlob('/api/extract/export', { book_name: bookName, entries })
+      .then((blob) => {
+        const a = document.createElement('a')
+        a.href = URL.createObjectURL(blob)
+        a.download = `${bookName || '文化要素提取结果'}.xlsx`
+        a.click()
+        toast('已导出 Excel', 'success')
+      })
+      .catch((e: any) => toast(e.message || '导出失败', 'error'))
+  }
+
+  function startEdit(row: number, field: string, value: string) {
+    setEditing({ row, field })
+    setDraft(value ?? '')
+  }
+
+  function commitEdit() {
+    if (!editing || !entries) {
+      setEditing(null)
+      return
+    }
+    const { row, field } = editing
+    setEntries(entries.map((e, i) => (i === row ? { ...e, [field]: draft } : e)))
+    setEditing(null)
+    toast('已修改', 'success')
   }
 
   return (
@@ -234,12 +254,14 @@ export default function Workbench() {
         <div className="space-y-3">
           <input
             className="input"
+            data-tour="book"
             placeholder="书名（如：武汉市志 文物志）"
             value={bookName}
             onChange={(e) => setBookName(e.target.value)}
           />
           <div
             className={`dropzone ${dragOver ? 'over' : ''}`}
+            data-tour="upload"
             onDragOver={(e) => {
               e.preventDefault()
               setDragOver(true)
@@ -283,18 +305,30 @@ export default function Workbench() {
             )}
           </div>
         </div>
-        <label className="mt-3 flex items-center gap-2 text-sm text-neutral-600">
+        <label className="mt-3 flex items-center gap-2 text-sm text-neutral-600" data-tour="maxonly">
           <input type="checkbox" checked={maxOnly} onChange={(e) => setMaxOnly(e.target.checked)} />
           仅提取最大子目（推荐）
         </label>
         <div className="mt-3 flex items-center gap-3">
-          <button className="btn btn-accent btn-icon" disabled={busy} onClick={doExtract}>
+          <button className="btn btn-accent btn-icon" data-tour="extract" disabled={busy} onClick={doExtract}>
             <Sparkles size={14} />
             {busy ? '提取中…' : '开始提取'}
           </button>
           {stage && <span className="text-sm text-[#1f9d6c]">{stage}</span>}
         </div>
       </section>
+
+      {/* ---------- 提取中骨架屏 ---------- */}
+      {busy && (
+        <section className="card">
+          <div className="card-title">正在提取，请稍候…</div>
+          <div className="space-y-2">
+            {[0, 1, 2, 3, 4].map((i) => (
+              <div key={i} className="skeleton" style={{ height: 18 }} />
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* ---------- 空状态引导 ---------- */}
       {!entries && !busy && (
@@ -316,9 +350,9 @@ export default function Workbench() {
                 提取结果（{entries.length} 条）
               </span>
             </h2>
-            <button className="btn btn-icon btn-sm" onClick={exportCsv}>
-              <Download size={13} />
-              导出 CSV
+            <button className="btn btn-icon btn-sm" onClick={exportExcel}>
+              <FileSpreadsheet size={13} />
+              导出 Excel
             </button>
             {recordId && (
               <span className="flex items-center gap-2 text-sm">
@@ -347,11 +381,32 @@ export default function Workbench() {
                 {entries.map((e, i) => (
                   <tr key={i}>
                     <td className="font-medium">{e.名称}</td>
-                    <td>{e.类别}</td>
-                    <td>{e.时间 ?? ''}</td>
-                    <td>{e.空间 ?? ''}</td>
-                    <td>{e.流域 ?? ''}</td>
-                    <td>{e.基础信息 ?? ''}</td>
+                    {(['类别', '时间', '空间', '流域', '基础信息'] as const).map((f) => {
+                      const editingThis = editing && editing.row === i && editing.field === f
+                      return (
+                        <td
+                          key={f}
+                          onClick={() => !editingThis && startEdit(i, f, String((e as any)[f] ?? ''))}
+                          style={{ cursor: 'text', minWidth: f === '基础信息' ? 200 : undefined }}
+                        >
+                          {editingThis ? (
+                            <input
+                              className="input"
+                              autoFocus
+                              value={draft}
+                              onChange={(ev) => setDraft(ev.target.value)}
+                              onBlur={commitEdit}
+                              onKeyDown={(ev) => {
+                                if (ev.key === 'Enter') commitEdit()
+                                if (ev.key === 'Escape') setEditing(null)
+                              }}
+                            />
+                          ) : (
+                            <span title="点击编辑">{(e as any)[f] ?? '—'}</span>
+                          )}
+                        </td>
+                      )
+                    })}
                     <td>{e.历史文献 ?? ''}</td>
                   </tr>
                 ))}
@@ -362,7 +417,7 @@ export default function Workbench() {
       )}
 
       {/* ---------- AI 工作台 ---------- */}
-      <section className="card">
+      <section className="card" data-tour="ai">
         <h2 className="card-title">
           <span className="titled-icon">
             <Brain size={15} />
@@ -416,7 +471,7 @@ export default function Workbench() {
       </section>
 
       {/* ---------- 统计看板 ---------- */}
-      <section className="card">
+      <section className="card" data-tour="stats">
         <h2 className="card-title">
           <span className="titled-icon">
             <BarChart3 size={15} />
@@ -431,7 +486,7 @@ export default function Workbench() {
       </section>
 
       {/* ---------- 留言板 ---------- */}
-      <section className="card">
+      <section className="card" data-tour="msg">
         <h2 className="card-title">
           <span className="titled-icon">
             <MessageSquare size={15} />

@@ -10,9 +10,11 @@ function cssVar(name: string, fallback: string): string {
 export default function StatsCharts({ stats }: { stats: any }) {
   const catRef = useRef<HTMLDivElement>(null)
   const basinRef = useRef<HTMLDivElement>(null)
+  const mapRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const cleanups: Array<() => void> = []
+    let mapCleanup: (() => void) | null = null
 
     function renderChart(el: HTMLDivElement | null, labels: string[], values: number[]) {
       if (!el || labels.length === 0) return
@@ -55,7 +57,56 @@ export default function StatsCharts({ stats }: { stats: any }) {
     renderChart(catRef.current, cat.map((x) => x[0] as string), cat.map((x) => x[1] as number))
     renderChart(basinRef.current, basin.map((x) => x[0] as string), basin.map((x) => x[1] as number))
 
-    return () => cleanups.forEach((fn) => fn())
+    // 中国地图（P1-5）：GeoJSON 从 public 加载，注册后渲染省域分布
+    fetch('/china_provinces.json')
+      .then((r) => r.json())
+      .then((geo) => {
+        const el = mapRef.current
+        if (!el) return
+        echarts.registerMap('china', geo)
+        const chart = echarts.init(el)
+        const entries2 = Object.entries(stats.province_distribution || {}).filter(([k]) => k !== '不详')
+        const data = entries2.map(([k, v]) => ({ name: k, value: v as number }))
+        const max = Math.max(...data.map((d) => d.value), 1)
+        chart.setOption({
+          tooltip: { trigger: 'item', formatter: (p: any) => `${p.name}：${p.value ?? 0} 条` },
+          visualMap: {
+            min: 0,
+            max,
+            left: 8,
+            bottom: 8,
+            text: ['高', '低'],
+            calculable: true,
+            inRange: { color: ['#e6f7f0', '#3ecf8e', '#1f9d6c'] },
+            textStyle: { color: cssVar('--text-muted', '#6b7280') },
+          },
+          series: [
+            {
+              type: 'map',
+              map: 'china',
+              roam: false,
+              label: { show: false },
+              itemStyle: { areaColor: '#f1f5f9', borderColor: cssVar('--border', '#e6e8eb') },
+              emphasis: { label: { show: true }, itemStyle: { areaColor: '#2fbf83' } },
+              data,
+            },
+          ],
+        })
+        const onResize = () => chart.resize()
+        window.addEventListener('resize', onResize)
+        mapCleanup = () => {
+          window.removeEventListener('resize', onResize)
+          chart.dispose()
+        }
+      })
+      .catch(() => {
+        /* 地图加载失败时静默（其他图表不受影响） */
+      })
+
+    return () => {
+      cleanups.forEach((fn) => fn())
+      mapCleanup?.()
+    }
   }, [stats])
 
   const total = Number(stats.total_records) || 0
@@ -96,6 +147,11 @@ export default function StatsCharts({ stats }: { stats: any }) {
           <div className="card-title">流域分布</div>
           <div ref={basinRef} style={{ height: 220 }} />
         </div>
+      </div>
+
+      <div style={{ marginTop: 14 }}>
+        <div className="card-title">地域分布（按省级统计）</div>
+        <div ref={mapRef} style={{ height: 340 }} />
       </div>
 
       <div style={{ marginTop: 14 }}>

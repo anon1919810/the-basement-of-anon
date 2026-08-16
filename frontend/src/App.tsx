@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Route, Routes, useLocation } from 'react-router-dom'
-import { Moon, PanelLeftClose, PanelLeftOpen, Sun } from 'lucide-react'
+import { GraduationCap, Moon, PanelLeftClose, PanelLeftOpen, Sun } from 'lucide-react'
 import Login from './pages/Login'
 import Workbench from './pages/Workbench'
 import Admin from './pages/Admin'
 import Help from './pages/Help'
 import Sidebar from './components/Sidebar'
+import Tour from './components/Tour'
 import { clearToken, getToken } from './lib/api'
 
 const TITLES: Record<string, string> = {
@@ -18,6 +19,7 @@ export default function App() {
   const [logged, setLogged] = useState(!!getToken())
   const [collapsed, setCollapsed] = useState(false)
   const [theme, setTheme] = useState(() => localStorage.getItem('dsh_theme') || 'light')
+  const [tourOpen, setTourOpen] = useState(false)
   const loc = useLocation()
   const user = localStorage.getItem('dsh_username')
   const title = TITLES[loc.pathname] ?? '杨端明的撷菁轩'
@@ -26,6 +28,15 @@ export default function App() {
     document.documentElement.dataset.theme = theme
     localStorage.setItem('dsh_theme', theme)
   }, [theme])
+
+  // 新手引导：登录后进入工作台自动播放一次（本次登录可跳过）
+  useEffect(() => {
+    if (!logged) return
+    if (!loc.pathname.startsWith('/workbench')) return
+    if (sessionStorage.getItem('dsh_tour_skipped')) return
+    const t = window.setTimeout(() => setTourOpen(true), 700)
+    return () => window.clearTimeout(t)
+  }, [logged, loc.pathname])
 
   if (!logged) return <Login onLogin={() => setLogged(true)} />
 
@@ -49,6 +60,9 @@ export default function App() {
           </button>
           <span className="topbar-title">{title}</span>
           <span style={{ flex: 1 }} />
+          <button className="icon-btn" onClick={() => setTourOpen(true)} title="新手引导">
+            <GraduationCap size={15} />
+          </button>
           <button
             className="icon-btn"
             onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
@@ -75,6 +89,14 @@ export default function App() {
           </div>
         </main>
       </div>
+      <Tour
+        open={tourOpen}
+        onClose={() => setTourOpen(false)}
+        onSkipSession={() => {
+          sessionStorage.setItem('dsh_tour_skipped', '1')
+          setTourOpen(false)
+        }}
+      />
     </div>
   )
 }

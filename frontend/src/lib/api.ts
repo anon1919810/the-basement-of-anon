@@ -70,3 +70,22 @@ export async function apiSSE(
     }
   }
 }
+
+/** JSON POST 返回 Blob（导出 Excel 用） */
+export async function apiBlob(path: string, body: unknown): Promise<Blob> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const t = getToken()
+  if (t) headers.Authorization = `Bearer ${t}`
+  const res = await fetch(API_BASE + path, { method: 'POST', headers, body: JSON.stringify(body) })
+  if (!res.ok) {
+    let detail = '导出失败'
+    try {
+      const b = await res.json()
+      if (b && b.detail) detail = b.detail
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail)
+  }
+  return res.blob()
+}
