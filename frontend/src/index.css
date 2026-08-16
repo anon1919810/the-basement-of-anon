@@ -304,3 +304,65 @@ table.data tbody tr:hover {
   align-items: center;
   gap: 6px;
 }
+
+/* ---------- 第三轮：深色模式 ---------- */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+:root[data-theme="dark"] {
+  --bg: #16181d;
+  --bg-subtle: #1c1f26;
+  --bg-hover: #232730;
+  --border: #2a2e37;
+  --border-strong: #3b4150;
+  --text: #e6e8ec;
+  --text-muted: #9aa3b2;
+  --text-faint: #6b7280;
+  --accent: #3ecf8e;
+  --accent-dark: #4ade9b;
+  --accent-soft: rgba(62, 207, 142, 0.16);
+}
+:root[data-theme="dark"] .notice-error {
+  background: rgba(185, 28, 28, 0.14);
+  border-color: #7f1d1d;
+  color: #fca5a5;
+}
+:root[data-theme="dark"] .notice-success {
+  background: rgba(62, 207, 142, 0.12);
+  border-color: #1f9d6c;
+  color: #6ee7b7;
+}
+
+/* 页面中少量硬编码浅色元素 → token 类（深浅色自适应） */
+.bubble-assistant {
+  border: 1px solid var(--border);
+  background: var(--bg-subtle);
+}
+.msg-row {
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+.supplement-box {
+  border: 1px solid var(--border);
+  background: var(--bg-subtle);
+}
+.page-login {
+  background: var(--bg);
+}
+
+/* ---------- 拖拽上传 ---------- */
+.dropzone {
+  border: 1px dashed var(--border-strong);
+  padding: 24px 14px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  background: var(--bg-subtle);
+  transition: border-color 0.12s, background 0.12s;
+}
+.dropzone:hover,
+.dropzone.over {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+}

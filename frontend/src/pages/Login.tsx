@@ -59,7 +59,7 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-white px-4">
+    <div className="page-login flex min-h-screen items-center justify-center px-4">
       <div className="card w-full max-w-sm">
         <div className="mb-4 text-center">
           <div
@@ -81,7 +81,7 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
                 setErr('')
               }}
               className={`flex-1 py-2 text-sm ${
-                tab === t ? 'bg-[#3ecf8e] font-medium text-white' : 'text-neutral-500'
+                tab === t ? 'bg-[#3ecf8e] font-medium text-white' : 'muted'
               }`}
             >
               {t === 'login' ? '登录' : '注册'}

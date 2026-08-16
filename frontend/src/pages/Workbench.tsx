@@ -4,6 +4,7 @@ import {
   Brain,
   Check,
   Download,
+  FileText,
   MessageSquare,
   RefreshCw,
   Send,
@@ -14,6 +15,7 @@ import {
   Wand2,
 } from 'lucide-react'
 import { api, apiSSE } from '../lib/api'
+import { toast } from '../lib/toast'
 
 interface Entry {
   名称: string
@@ -28,6 +30,7 @@ interface Entry {
 export default function Workbench() {
   // ---- 上传提取 ----
   const [file, setFile] = useState<File | null>(null)
+  const [dragOver, setDragOver] = useState(false)
   const [bookName, setBookName] = useState('')
   const [maxOnly, setMaxOnly] = useState(true)
   const [stage, setStage] = useState('')
@@ -75,6 +78,7 @@ export default function Workbench() {
           setEntries(e.entries)
           setRecordId(e.record_id)
           setStage(`完成：共 ${e.entry_count} 条`)
+          toast(`提取完成：共 ${e.entry_count} 条`, 'success')
         } else if (e.type === 'error') {
           setErr(e.detail || '提取失败')
           setStage('')
@@ -115,6 +119,7 @@ export default function Workbench() {
     if (!entries || !selName || !supplement) return
     setEntries(entries.map((e) => (e.名称 === selName ? { ...e, 基础信息: supplement } : e)))
     setSupplement('')
+    toast('已写入该条目的基础信息', 'success')
   }
 
   async function sendChat() {
@@ -154,6 +159,7 @@ export default function Workbench() {
         body: JSON.stringify({ record_id: recordId, rating, feedback: '' }),
       })
       setRatingMsg('评分已保存 ✅')
+      toast('评分已保存', 'success')
     } catch (e: any) {
       setRatingMsg(e.message || '评分失败')
     }
@@ -174,6 +180,7 @@ export default function Workbench() {
     try {
       await api('/api/messages', { method: 'POST', body: JSON.stringify({ content: c }) })
       setMsgText('')
+      toast('留言成功', 'success')
       loadMessages()
     } catch (e: any) {
       setErr(e.message)
@@ -223,20 +230,57 @@ export default function Workbench() {
             上传文献提取
           </span>
         </h2>
-        <div className="grid gap-3 md:grid-cols-2">
+        <div className="space-y-3">
           <input
             className="input"
             placeholder="书名（如：武汉市志 文物志）"
             value={bookName}
             onChange={(e) => setBookName(e.target.value)}
           />
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".pdf,.docx,.doc"
-            className="input"
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-          />
+          <div
+            className={`dropzone ${dragOver ? 'over' : ''}`}
+            onDragOver={(e) => {
+              e.preventDefault()
+              setDragOver(true)
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault()
+              setDragOver(false)
+              const f = e.dataTransfer.files?.[0]
+              if (f) setFile(f)
+            }}
+            onClick={() => fileRef.current?.click()}
+          >
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".pdf,.docx,.doc"
+              hidden
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            />
+            {file ? (
+              <span className="btn-icon" style={{ justifyContent: 'center' }}>
+                <FileText size={15} />
+                {file.name}（{(file.size / 1024 / 1024).toFixed(1)} MB）
+                <button
+                  className="btn btn-sm"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setFile(null)
+                    if (fileRef.current) fileRef.current.value = ''
+                  }}
+                >
+                  清除
+                </button>
+              </span>
+            ) : (
+              <span className="btn-icon" style={{ justifyContent: 'center' }}>
+                <Upload size={16} />
+                拖拽 PDF / Word 到这里，或点击选择
+              </span>
+            )}
+          </div>
         </div>
         <label className="mt-3 flex items-center gap-2 text-sm text-neutral-600">
           <input type="checkbox" checked={maxOnly} onChange={(e) => setMaxOnly(e.target.checked)} />
@@ -337,7 +381,7 @@ export default function Workbench() {
             </button>
             {supplement && (
               <>
-                <div className="w-full border border-neutral-100 bg-neutral-50 p-3 text-sm">
+                <div className="w-full supplement-box p-3 text-sm">
                   {supplement}
                 </div>
                 <button className="btn btn-accent btn-icon" onClick={applySupplement}>
@@ -351,8 +395,8 @@ export default function Workbench() {
         <div className="space-y-2">
           {chatLog.map((m, i) => (
             <div key={i} className={`text-sm ${m.role === 'user' ? 'text-right' : ''}`}>
-              <span className={`inline-block max-w-[80%] border px-3 py-2 ${
-                m.role === 'user' ? 'border-[#3ecf8e] bg-[#3ecf8e]/10' : 'border-neutral-200'
+              <span className={`inline-block max-w-[80%] px-3 py-2 ${
+                m.role === 'user' ? 'border border-[#3ecf8e] bg-[#3ecf8e]/10' : 'bubble-assistant'
               }`}>
                 {m.content || '…'}
               </span>
@@ -427,7 +471,7 @@ export default function Workbench() {
         </div>
         <div className="space-y-2">
           {messages.map((m) => (
-            <div key={m.id} className="flex items-start justify-between border border-neutral-100 p-2 text-sm">
+            <div key={m.id} className="msg-row flex items-start justify-between p-2 text-sm">
               <div>
                 <span className="font-medium">{m.username}</span>
                 <span className="ml-2 text-xs text-neutral-400">{m.created_at}</span>

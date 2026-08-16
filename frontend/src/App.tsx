@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Route, Routes, useLocation } from 'react-router-dom'
-import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { Moon, PanelLeftClose, PanelLeftOpen, Sun } from 'lucide-react'
 import Login from './pages/Login'
 import Workbench from './pages/Workbench'
 import Admin from './pages/Admin'
@@ -17,9 +17,15 @@ const TITLES: Record<string, string> = {
 export default function App() {
   const [logged, setLogged] = useState(!!getToken())
   const [collapsed, setCollapsed] = useState(false)
+  const [theme, setTheme] = useState(() => localStorage.getItem('dsh_theme') || 'light')
   const loc = useLocation()
   const user = localStorage.getItem('dsh_username')
   const title = TITLES[loc.pathname] ?? '杨端明的撷菁轩'
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    localStorage.setItem('dsh_theme', theme)
+  }, [theme])
 
   if (!logged) return <Login onLogin={() => setLogged(true)} />
 
@@ -42,9 +48,15 @@ export default function App() {
             {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
           </button>
           <span className="topbar-title">{title}</span>
-          <span className="chip chip-green" style={{ marginLeft: 'auto' }}>
-            v5.0 撷菁新篇
-          </span>
+          <span style={{ flex: 1 }} />
+          <button
+            className="icon-btn"
+            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+            title={theme === 'dark' ? '切换到浅色模式' : '切换到深色模式'}
+          >
+            {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+          </button>
+          <span className="chip chip-green">v5.0 撷菁新篇</span>
         </header>
         <main className="flex-1" style={{ overflowY: 'auto', padding: 20 }}>
           <div style={{ maxWidth: 980, margin: '0 auto' }}>
