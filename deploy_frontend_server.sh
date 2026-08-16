@@ -37,12 +37,17 @@ npm run build
 echo "前端构建完成"
 
 echo "=== 5/5 配置 nginx（静态托管 + /api 代理到 8000，SSE 关闭缓冲） ==="
+# 前端文件放到 /var/www/dsh（/root 权限 700，nginx 的 www-data 读不到，会 500）
+mkdir -p /var/www/dsh
+cp -r /root/the-basement-of-anon/frontend/dist/. /var/www/dsh/
+chown -R www-data:www-data /var/www/dsh
+
 cat > /etc/nginx/sites-available/dsh << 'EOF'
 server {
     listen 80 default_server;
     server_name _;
 
-    root /root/the-basement-of-anon/frontend/dist;
+    root /var/www/dsh;
     index index.html;
 
     location /api/ {
