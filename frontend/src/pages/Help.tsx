@@ -13,10 +13,23 @@ export default function Help() {
       </section>
 
       <section className="card">
+        <h2 className="mb-2 text-lg font-semibold">🌐 访问方式</h2>
+        <ul className="list-disc space-y-1 pl-5 text-sm leading-6 text-neutral-700">
+          <li><b>新地址（推荐）</b>：http://119.91.211.156/ —— 全新界面，速度更快更稳</li>
+          <li>旧地址（streamlit.app）仍可访问，作为旧版保留，欢迎随时迁移到新地址</li>
+          <li>HTTPS 加密与自定义域名正在安排中</li>
+        </ul>
+      </section>
+
+      <section className="card">
         <h2 className="mb-2 text-lg font-semibold">📝 版本日志</h2>
         <ul className="space-y-2 text-sm leading-6 text-neutral-700">
           <li>
-            <b>v4.7.0 车书万里</b>：提取更准、界面更顺（当前在线版）
+            <b>v5.0 撷菁新篇</b>：全新界面（React）上线，服务搬到自建服务器，更快更稳；
+            支持注册登录、AI 工作台、统计看板、留言板
+          </li>
+          <li>
+            <b>v4.7.0 车书万里</b>：提取更准、界面更顺（旧版）
           </li>
           <li>
             <b>v4.5.0 车书万里</b>：「一切从今始」——OCR 大升级，扫描版地方志也能稳稳提取
