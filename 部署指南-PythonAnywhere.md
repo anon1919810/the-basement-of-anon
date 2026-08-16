@@ -45,3 +45,14 @@
 - 免费档磁盘 512MB：现在刚好够；**OCR 大依赖先不上**（坚持 Word/文字版 PDF 流程即可，反正这也是推荐流程）
 - 免费档 CPU 有限：适合"文本提取 + 等 DeepSeek 回话"，别做大批量扫描 OCR
 - 以后想要更宽松：**国内轻量服务器**（腾讯云/阿里云，支付宝支付，¥100-200/年）一劳永逸，前端也能放
+
+## 更新（2026-08-16）：改用原生 ASGI 部署
+
+**a2wsgi + uWSGI 方案在 PythonAnywhere 上会卡死**（请求 40 秒超时、页面转圈），
+已切换到官方**原生 ASGI beta**（uvicorn 直接托管 FastAPI，稳定）。
+
+步骤：
+1. pythonanywhere.com → 右上角 **Account（账户）** → 找到 **API token** → 点 **Create（生成）**
+2. 控制台粘贴 **`backend/deploy_pythonanywhere_asgi.sh`** 的内容执行
+3. 若提示域名被占用：Web 页面删掉旧 WSGI app → 重跑脚本
+4. 访问 `https://你的用户名.pythonanywhere.com/api/health`
