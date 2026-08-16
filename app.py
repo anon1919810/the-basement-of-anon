@@ -1025,7 +1025,7 @@ if st.session_state.df is not None and not st.session_state.df.empty:
     # ---------- 地域分布地图（省级） ----------
     st.caption("🌍 地域分布（按空间字段省级统计）")
     prov_counts = (df["空间"].astype(str)
-                   .str.extract(r"^(?:.*?省|重庆市|上海市)")[0]
+                   .str.extract(r"^(.*?省|重庆市|上海市)")[0]
                    .replace("", "不详")
                    .value_counts())
     if not prov_counts.empty:
