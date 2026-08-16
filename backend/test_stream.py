@@ -38,8 +38,8 @@ buf.seek(0)
 r = client.post(
     "/api/extract/stream",
     headers=headers,
-    files={"file": ("测试文献.docx", buf,
-                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+    files=[("files", ("测试文献.docx", buf,
+                      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"))],
     data={"book_name": "测试文献"},
 )
 assert r.status_code == 200, r.text
@@ -49,7 +49,7 @@ for line in r.text.splitlines():
         events.append(json.loads(line[6:]))
 
 stages = [e.get("stage") for e in events if e.get("type") == "stage"]
-assert "saving" in stages and "extracting" in stages, f"应有阶段事件，实际 {stages}"
+assert "extracting" in stages and "merging" in stages, f"应有阶段事件，实际 {stages}"
 done = [e for e in events if e.get("type") == "done"]
 assert done, "应有 done 事件"
 assert done[0]["entry_count"] >= 1, "应至少提取1条"

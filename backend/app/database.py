@@ -418,3 +418,25 @@ def delete_message(message_id, user_id):
     except Exception as e:
         print(f"删除留言失败：{e}")
         return False
+
+
+def get_extraction_by_id(record_id):
+    """按ID查一条提取记录（含 result_json）"""
+    supabase = get_supabase()
+    try:
+        r = supabase.table("extraction_results").select("*").eq("id", record_id).limit(1).execute()
+        return r.data[0] if r.data else None
+    except Exception as e:
+        print(f"查询提取记录失败：{e}")
+        return None
+
+
+def delete_own_extraction(record_id, user_id):
+    """用户删除自己的提取记录（管理员走 delete_extraction）"""
+    supabase = get_supabase()
+    try:
+        r = supabase.table("extraction_results").delete().eq("id", record_id).eq("user_id", user_id).execute()
+        return len(r.data) > 0
+    except Exception as e:
+        print(f"删除自己的提取记录失败：{e}")
+        return False

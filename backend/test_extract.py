@@ -32,7 +32,7 @@ headers = {"Authorization": f"Bearer {token}"}
 
 # ---------- 文件类型校验 ----------
 r = client.post("/api/extract", headers=headers,
-                files={"file": ("a.txt", io.BytesIO(b"hello"), "text/plain")},
+                files=[("files", ("a.txt", io.BytesIO(b"hello"), "text/plain"))],
                 data={"book_name": "测试"})
 assert r.status_code == 400, f"非 PDF/Word 应 400，实际 {r.status_code}"
 
@@ -49,8 +49,8 @@ buf.seek(0)
 r = client.post(
     "/api/extract",
     headers=headers,
-    files={"file": ("测试文献.docx", buf,
-                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+    files=[("files", ("测试文献.docx", buf,
+                      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"))],
     data={"book_name": "测试文献", "extract_max_only": "true"},
 )
 assert r.status_code == 200, r.text

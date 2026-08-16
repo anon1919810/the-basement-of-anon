@@ -33,6 +33,57 @@ def _province_distribution(rows: list) -> dict:
     return dict(c)
 
 
+def _trend(rows: list) -> dict:
+    """按 YYYY-MM 统计提取次数（时间趋势）"""
+    c = Counter()
+    for r in rows:
+        t = str(r.get("created_at") or "")[:7]
+        if t:
+            c[t] += 1
+    return dict(sorted(c.items()))
+
+
+def _hot_entries(rows: list, top: int = 10) -> dict:
+    """条目名称出现频率（热度榜）"""
+    c = Counter()
+    for row in rows:
+        try:
+            entries = json.loads(row.get("result_json") or "[]")
+        except Exception:
+            continue
+        for e in entries:
+            n = str(e.get("名称") or "").strip()
+            if n:
+                c[n] += 1
+    return dict(c.most_common(top))
+
+
+_CITY_PROV = ("重庆市", "上海市", "北京市", "天津市")
+
+
+def _city_distribution(rows: list) -> dict:
+    """空间字段 → 省级 → 市级 统计（地图下钻数据）"""
+    out: dict = {}
+    for row in rows:
+        try:
+            entries = json.loads(row.get("result_json") or "[]")
+        except Exception:
+            continue
+        for e in entries:
+            sp = str(e.get("空间") or "")
+            m = _PROV_RE.match(sp)
+            prov = m.group(1) if m else "不详"
+            if prov == "不详":
+                continue
+            if prov in _CITY_PROV:
+                cm = re.search(r"([\u4e00-\u9fff]{2,4}区)", sp)
+            else:
+                cm = re.search(r"([\u4e00-\u9fff]+?市)", sp)
+            city = cm.group(1) if cm else prov
+            out.setdefault(prov, Counter())[city] += 1
+    return {k: dict(v) for k, v in out.items()}
+
+
 class RatingIn(BaseModel):
     record_id: int
     rating: int
@@ -78,6 +129,9 @@ def stats(user: dict = Depends(get_current_user)):
         "category_distribution": cat_dist,
         "basin_distribution": basin_dist,
         "province_distribution": _province_distribution(recent),
+        "trend": _trend(recent),
+        "hot_entries": _hot_entries(recent),
+        "city_distribution": _city_distribution(recent),
         "total_records": len(recent),
         "total_entries": sum(int(r.get("entry_count") or 0) for r in recent),
     }
