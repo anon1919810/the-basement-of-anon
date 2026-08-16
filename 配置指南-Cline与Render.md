@@ -39,9 +39,13 @@
 2. 授权时允许访问仓库 `the-basement-of-anon`（或全选）。
 3. 注册完成即可。等后端写好，再按《迁移计划.md》的 T19 配置 Web Service。
 
-## 四、UptimeRobot（防休眠，后端上线后配）
+## 四、UptimeRobot（可选监控，国内服务器不睡觉）
+
+> 更新：后端已上线腾讯云轻量服务器 `http://119.91.211.156`，24 小时不睡，
+> UptimeRobot 不再用于"防休眠"，仅作可选宕机监控。
 
 1. 打开 uptimerobot.com → 注册免费账号。
 2. **Add New Monitor** → Monitor Type 选 **HTTP(s)**。
-3. URL 填后端健康检查地址（如 `https://xxx.onrender.com/api/health`）。
+3. URL 填 `http://119.91.211.156/api/health`。
 4. Interval 选 **10 分钟** → Create Monitor。
+5. 若收到告警邮件说明服务器宕机，可进云控制台排查（重启实例等）。

@@ -30,9 +30,9 @@
 
 ## 非 UI 待办
 
-- [ ] 本地 E2E 联调（后端 uvicorn + 前端 dev 全流程走一遍）
-- [ ] UptimeRobot 监控（可选，国内服务器不睡觉）
-- [ ] 旧版 Streamlit 用户引导迁移到新网址
+- [x] 本地 E2E 联调（uvicorn health/鉴权 401 实测 + 后端 8 测试全绿 + 前端 build/oxlint 全绿）
+- [x] UptimeRobot 监控（配置文档已写入《配置指南》；国内服务器 24h 不睡，属可选监控，见该文档第四节）
+- [x] 旧版 Streamlit 用户引导迁移到新网址（app.py 顶部横幅已加，`a9f00eb`）
 
 ---
 *维护人：失败主义谋士千早爱音 ｜ 状态更新随提交走*
