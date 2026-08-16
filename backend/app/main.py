@@ -4,6 +4,8 @@
 后续 ticket 依次挂载：auth / extract / chat / rating / stats / admin 路由。
 """
 
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -56,6 +58,7 @@ def health():
         "db": "ok" if db_ok else db_msg,
         "session_configured": bool(env.SESSION_SECRET),
         "deepseek_configured": bool(env.DEEPSEEK_API_KEY),
+        "proxy": os.environ.get("http_proxy") or os.environ.get("https_proxy") or "",
     }
 
 

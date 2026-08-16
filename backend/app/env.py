@@ -26,6 +26,15 @@ DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 # 权限开关：True=非管理员用户必须自带Key或有效邀请码才能提取
 REQUIRE_KEY_OR_INVITE = os.getenv("REQUIRE_KEY_OR_INVITE", "true").lower() != "false"
 
+# 代理透传：若 .env 里配了 HTTP_PROXY/HTTPS_PROXY，注入进程环境
+# （PythonAnywhere 网站进程可能不带控制台里的代理变量，导致直连被拒 Errno 111）
+for _upper, _lower in (("HTTP_PROXY", "http_proxy"), ("HTTPS_PROXY", "https_proxy")):
+    _val = os.getenv(_upper)
+    if _val and not os.environ.get(_lower):
+        os.environ[_lower] = _val
+if os.getenv("NO_PROXY") and not os.environ.get("no_proxy"):
+    os.environ["no_proxy"] = os.getenv("NO_PROXY")
+
 CORS_ORIGINS = [
     o.strip()
     for o in os.getenv(
