@@ -7,6 +7,7 @@
 - /stream：SSE 推送阶段进度（saving → extracting → done / error），供前端进度条
 """
 
+import io
 import json
 import os
 import queue
@@ -14,9 +15,12 @@ import shutil
 import tempfile
 import threading
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
+from openpyxl import Workbook
+from pydantic import BaseModel
 
 from .. import config as app_config
 from .. import database as db
@@ -126,3 +130,29 @@ async def extract_stream(
 
     return StreamingResponse(gen(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+class ExportIn(BaseModel):
+    book_name: str = ""
+    entries: list[dict] = []
+
+
+@router.post("/export")
+def export_excel(body: ExportIn, user: dict = Depends(get_current_user)):
+    """把条目导出为 Excel（openpyxl），前端直接下载。"""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "文化要素"
+    ws.append(["名称", "类别", "时间", "空间", "流域", "基础信息", "历史文献"])
+    for e in body.entries:
+        ws.append([e.get("名称"), e.get("类别"), e.get("时间"), e.get("空间"),
+                   e.get("流域"), e.get("基础信息"), e.get("历史文献")])
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    filename = (body.book_name or "文化要素提取结果") + ".xlsx"
+    return Response(
+        buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
+    )

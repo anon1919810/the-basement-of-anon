@@ -4,6 +4,7 @@
 """
 
 import json
+import re
 from collections import Counter
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,6 +14,23 @@ from .. import database as db
 from .auth import get_current_user
 
 router = APIRouter(prefix="/api", tags=["social"])
+
+# 空间字段 → 省级（与旧版 app.py 一致：省/重庆市/上海市）
+_PROV_RE = re.compile(r"^(.*?省|重庆市|上海市)")
+
+
+def _province_distribution(rows: list) -> dict:
+    c = Counter()
+    for row in rows:
+        try:
+            entries = json.loads(row.get("result_json") or "[]")
+        except Exception:
+            continue
+        for e in entries:
+            sp = str(e.get("空间") or "")
+            m = _PROV_RE.match(sp)
+            c[m.group(1) if m else "不详"] += 1
+    return dict(c)
 
 
 class RatingIn(BaseModel):
@@ -59,6 +77,7 @@ def stats(user: dict = Depends(get_current_user)):
         "high_rated": db.get_high_rated_extractions(min_rating=8, limit=50),
         "category_distribution": cat_dist,
         "basin_distribution": basin_dist,
+        "province_distribution": _province_distribution(recent),
         "total_records": len(recent),
         "total_entries": sum(int(r.get("entry_count") or 0) for r in recent),
     }
