@@ -47,7 +47,7 @@ export default function Admin() {
       {err && <div className="card !border-red-200 text-sm text-red-500">{err}</div>}
 
       <section className="card">
-        <h2 className="mb-3 text-base font-semibold">👥 用户统计</h2>
+        <h2 className="card-title">👥 用户统计</h2>
         {users && (
           <div className="overflow-x-auto">
             <table className="data">
@@ -76,7 +76,7 @@ export default function Admin() {
       </section>
 
       <section className="card">
-        <h2 className="mb-3 text-base font-semibold">🗃️ 提取记录（{extractions.length}）</h2>
+        <h2 className="card-title">🗃️ 提取记录（{extractions.length}）</h2>
         <div className="overflow-x-auto">
           <table className="data">
             <thead>

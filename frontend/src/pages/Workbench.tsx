@@ -203,7 +203,7 @@ export default function Workbench() {
 
       {/* ---------- 上传提取 ---------- */}
       <section className="card">
-        <h2 className="mb-3 text-base font-semibold">📄 上传文献提取</h2>
+        <h2 className="card-title">📄 上传文献提取</h2>
         <div className="grid gap-3 md:grid-cols-2">
           <input
             className="input"
@@ -277,7 +277,7 @@ export default function Workbench() {
 
       {/* ---------- AI 工作台 ---------- */}
       <section className="card">
-        <h2 className="mb-3 text-base font-semibold">🤖 AI 工作台</h2>
+        <h2 className="card-title">🤖 AI 工作台</h2>
         {entries && entries.length > 0 && (
           <div className="mb-4 flex flex-wrap items-center gap-2">
             <select className="input !w-56" value={selName}
@@ -317,7 +317,7 @@ export default function Workbench() {
 
       {/* ---------- 统计看板 ---------- */}
       <section className="card">
-        <h2 className="mb-3 text-base font-semibold">📈 统计看板</h2>
+        <h2 className="card-title">📈 统计看板</h2>
         <button className="btn !py-1" onClick={loadStats}>加载统计</button>
         {stats && (
           <div className="mt-3 grid gap-4 text-sm md:grid-cols-3">
@@ -344,7 +344,7 @@ export default function Workbench() {
 
       {/* ---------- 留言板 ---------- */}
       <section className="card">
-        <h2 className="mb-3 text-base font-semibold">💬 留言板</h2>
+        <h2 className="card-title">💬 留言板</h2>
         <div className="mb-3 flex gap-2">
           <input className="input" placeholder="写下你的想法…" value={msgText}
                  onChange={(e) => setMsgText(e.target.value)} />
