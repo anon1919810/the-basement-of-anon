@@ -3,6 +3,7 @@ import { BookOpen, Library, LogOut, Shield, User } from 'lucide-react'
 
 const NAV = [
   { to: '/workbench', icon: Library, label: '提取工作台' },
+  { to: '/profile', icon: User, label: '我的资料' },
   { to: '/admin', icon: Shield, label: '管理后台' },
   { to: '/help', icon: BookOpen, label: '使用帮助' },
 ]

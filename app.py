@@ -193,6 +193,7 @@ st.markdown("""
 # ========== 标题 ==========
 st.title(f"📚 {APP_NAME}")
 st.markdown(f"版本 v{VERSION} {VERSION_TAG}")
+st.info("🎉 **新版已上线**：http://119.91.211.156/ —— 全新界面、更快更稳，支持注册登录、AI 工作台、统计看板、留言板。本页为旧版，功能保留但不再更新，欢迎前往新址体验！")
 
 # ========== 初始化 session_state ==========
 if 'df' not in st.session_state:

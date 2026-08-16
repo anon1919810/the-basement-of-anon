@@ -5,12 +5,14 @@ import Login from './pages/Login'
 import Workbench from './pages/Workbench'
 import Admin from './pages/Admin'
 import Help from './pages/Help'
+import Profile from './pages/Profile'
 import Sidebar from './components/Sidebar'
 import Tour from './components/Tour'
 import { clearToken, getToken } from './lib/api'
 
 const TITLES: Record<string, string> = {
   '/workbench': '提取工作台',
+  '/profile': '我的资料',
   '/admin': '管理后台',
   '/help': '使用帮助',
 }
@@ -77,6 +79,7 @@ export default function App() {
             <Routes>
               <Route path="/" element={<Workbench />} />
               <Route path="/workbench" element={<Workbench />} />
+              <Route path="/profile" element={<Profile />} />
               <Route path="/admin" element={<Admin />} />
               <Route path="/help" element={<Help />} />
             </Routes>

@@ -5,6 +5,7 @@ import {
   Check,
   FileSpreadsheet,
   FileText,
+  History as HistoryIcon,
   MessageSquare,
   RefreshCw,
   Send,
@@ -29,8 +30,8 @@ interface Entry {
 }
 
 export default function Workbench() {
-  // ---- 上传提取 ----
-  const [file, setFile] = useState<File | null>(null)
+  // ---- 上传提取（支持多文件） ----
+  const [files, setFiles] = useState<File[]>([])
   const [dragOver, setDragOver] = useState(false)
   const [bookName, setBookName] = useState('')
   const [maxOnly, setMaxOnly] = useState(true)
@@ -60,11 +61,14 @@ export default function Workbench() {
   const [msgText, setMsgText] = useState('')
   const [stats, setStats] = useState<any>(null)
 
+  // ---- 提取历史 ----
+  const [history, setHistory] = useState<any[]>([])
+
   const fileRef = useRef<HTMLInputElement>(null)
 
   async function doExtract() {
     setErr('')
-    if (!file) {
+    if (!files.length) {
       setErr('请先选择 PDF 或 Word 文件')
       return
     }
@@ -75,7 +79,7 @@ export default function Workbench() {
     const fd = new FormData()
     fd.append('book_name', bookName)
     fd.append('extract_max_only', maxOnly ? 'true' : 'false')
-    fd.append('file', file)
+    files.forEach((f) => fd.append('files', f))
     try {
       await apiSSE('/api/extract/stream', fd, false, (e) => {
         if (e.type === 'stage') setStage(e.message || e.stage)
@@ -223,6 +227,68 @@ export default function Workbench() {
       .catch((e: any) => toast(e.message || '导出失败', 'error'))
   }
 
+  function downloadText(name: string, content: string) {
+    const blob = new Blob(['\uFEFF' + content], { type: 'text/plain;charset=utf-8' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = name
+    a.click()
+  }
+
+  // GB/T 7714 参考文献格式
+  function exportGbt() {
+    if (!entries || !entries.length) return
+    const lines = entries.map(
+      (e, i) =>
+        `${i + 1}. ${e.名称}[M]//${bookName || '地方志'}．${e.时间 || ''}．${e.空间 || ''}．${e.基础信息 || ''}`,
+    )
+    downloadText(`${bookName || '引用'}-GB-T7714.txt`, lines.join('\n'))
+    toast('已导出 GB/T 7714 引用', 'success')
+  }
+
+  // RIS（可导入 Zotero / EndNote）
+  function exportRis() {
+    if (!entries || !entries.length) return
+    const lines = ['TY - GEN', `T1 - ${bookName || '地方志'} 文化要素`]
+    entries.forEach((e) => {
+      lines.push(`N1 - ${e.名称}：${e.基础信息 || ''}（${e.时间 || ''}；${e.空间 || ''}）`)
+    })
+    lines.push('ER - ')
+    downloadText(`${bookName || '引用'}.ris`, lines.join('\n'))
+    toast('已导出 RIS（可导入 Zotero/EndNote）', 'success')
+  }
+
+  async function loadHistory() {
+    try {
+      const r = await api('/api/extract/history')
+      setHistory(r.items)
+    } catch (e: any) {
+      toast(e.message || '加载历史失败', 'error')
+    }
+  }
+
+  async function viewHistory(id: number) {
+    try {
+      const r = await api(`/api/extract/history/${id}`)
+      setEntries(r.entries)
+      setBookName(r.book_name || '')
+      setRecordId(id)
+      toast(`已载入 ${r.entries.length} 条（记录 #${id}）`, 'success')
+    } catch (e: any) {
+      toast(e.message, 'error')
+    }
+  }
+
+  async function delHistory(id: number) {
+    try {
+      await api(`/api/extract/history/${id}`, { method: 'DELETE' })
+      toast('已删除记录', 'success')
+      loadHistory()
+    } catch (e: any) {
+      toast(e.message, 'error')
+    }
+  }
+
   function startEdit(row: number, field: string, value: string) {
     setEditing({ row, field })
     setDraft(value ?? '')
@@ -270,8 +336,8 @@ export default function Workbench() {
             onDrop={(e) => {
               e.preventDefault()
               setDragOver(false)
-              const f = e.dataTransfer.files?.[0]
-              if (f) setFile(f)
+              const dropped = Array.from(e.dataTransfer.files ?? [])
+              if (dropped.length) setFiles(dropped)
             }}
             onClick={() => fileRef.current?.click()}
           >
@@ -279,18 +345,25 @@ export default function Workbench() {
               ref={fileRef}
               type="file"
               accept=".pdf,.docx,.doc"
+              multiple
               hidden
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
             />
-            {file ? (
-              <span className="btn-icon" style={{ justifyContent: 'center' }}>
+            {files.length ? (
+              <span className="btn-icon" style={{ justifyContent: 'center', flexWrap: 'wrap' }}>
                 <FileText size={15} />
-                {file.name}（{(file.size / 1024 / 1024).toFixed(1)} MB）
+                {files.length} 个文件：
+                {files.slice(0, 3).map((f) => (
+                  <span key={f.name} className="chip">
+                    {f.name}
+                  </span>
+                ))}
+                {files.length > 3 && <span className="chip">+{files.length - 3}</span>}
                 <button
                   className="btn btn-sm"
                   onClick={(e) => {
                     e.stopPropagation()
-                    setFile(null)
+                    setFiles([])
                     if (fileRef.current) fileRef.current.value = ''
                   }}
                 >
@@ -300,7 +373,7 @@ export default function Workbench() {
             ) : (
               <span className="btn-icon" style={{ justifyContent: 'center' }}>
                 <Upload size={16} />
-                拖拽 PDF / Word 到这里，或点击选择
+                拖拽 PDF / Word 到这里，或点击选择（支持多选）
               </span>
             )}
           </div>
@@ -353,6 +426,14 @@ export default function Workbench() {
             <button className="btn btn-icon btn-sm" onClick={exportExcel}>
               <FileSpreadsheet size={13} />
               导出 Excel
+            </button>
+            <button className="btn btn-icon btn-sm" onClick={exportGbt}>
+              <FileText size={13} />
+              GB/T 引用
+            </button>
+            <button className="btn btn-icon btn-sm" onClick={exportRis}>
+              <FileText size={13} />
+              RIS
             </button>
             {recordId && (
               <span className="flex items-center gap-2 text-sm">
@@ -518,6 +599,57 @@ export default function Workbench() {
             </div>
           ))}
         </div>
+      </section>
+
+      {/* ---------- 提取历史 ---------- */}
+      <section className="card">
+        <h2 className="card-title">
+          <span className="titled-icon">
+            <HistoryIcon size={15} />
+            提取历史
+          </span>
+        </h2>
+        <button className="btn btn-icon btn-sm" onClick={loadHistory}>
+          <RefreshCw size={13} />
+          加载我的历史
+        </button>
+        {history.length > 0 && (
+          <div className="overflow-x-auto" style={{ marginTop: 10 }}>
+            <table className="data">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>书名</th>
+                  <th>文件</th>
+                  <th>条数</th>
+                  <th>评分</th>
+                  <th>时间</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map((h) => (
+                  <tr key={h.id}>
+                    <td>{h.id}</td>
+                    <td>{h.book_name}</td>
+                    <td>{h.file_name}</td>
+                    <td>{h.entry_count}</td>
+                    <td>{h.rating ?? '-'}</td>
+                    <td>{String(h.created_at || '').slice(0, 16)}</td>
+                    <td>
+                      <button className="btn btn-sm" onClick={() => viewHistory(h.id)}>
+                        载入
+                      </button>{' '}
+                      <button className="btn btn-sm" onClick={() => delHistory(h.id)}>
+                        删除
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
     </div>
   )
