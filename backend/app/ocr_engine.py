@@ -4,10 +4,19 @@
 """
 import os
 
-import pymupdf as fitz
-
 from . import config
 from .shared import _ZIMU_RE
+
+
+# pymupdf 懒加载（大库，启动提速；仅在真正处理 PDF 时导入）
+_fitz = None
+
+
+def _get_fitz():
+    global _fitz
+    if _fitz is None:
+        import pymupdf as _fitz  # noqa
+    return _fitz
 
 
 def _clean_ocr_text(text):
@@ -48,7 +57,7 @@ def ocr_pdf(pdf_path):
                 return ""
             return "\n".join(line[1] for line in result)
 
-        with fitz.open(pdf_path) as doc:
+        with _get_fitz().open(pdf_path) as doc:
             n_pages = doc.page_count
 
         full_text = ""
@@ -116,7 +125,7 @@ def _extract_structured_text(pdf_path):
     返回带【】标记的结构化文本；无标题结构时返回空（调用方回退原文）。
     """
     try:
-        doc = fitz.open(pdf_path)
+        doc = _get_fitz().open(pdf_path)
         # 第一遍：统计字号，取中位数作为正文字号
         sizes = []
         for page in doc:
@@ -134,7 +143,7 @@ def _extract_structured_text(pdf_path):
         threshold = max(body_size * 1.35, body_size + 3.0)
 
         # 第二遍：重建文本，标题行加【】包裹
-        doc = fitz.open(pdf_path)
+        doc = _get_fitz().open(pdf_path)
         out_lines = []
         for page in doc:
             for b in page.get_text("dict").get("blocks", []):
@@ -170,7 +179,7 @@ def _extract_text_with_flag(file_path):
 
     used_ocr = False
     try:
-        doc = fitz.open(file_path)
+        doc = _get_fitz().open(file_path)
         full_text = ""
         for page in doc:
             # sort=True 按阅读顺序排序，改善多栏/表格版面

@@ -20,7 +20,6 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
-import pandas as pd
 from dotenv import load_dotenv
 
 from .config import (
@@ -549,6 +548,7 @@ def main():
     all_entries = process_pdfs_parallel(pdf_files, DEFAULT_BOOK_NAME)
 
     if all_entries:
+        import pandas as pd  # 懒加载（大库，仅命令行导出时使用）
         df = pd.DataFrame(all_entries)
         df["历史文献"] = df["历史文献"].map(lambda q: format_quote(q, DEFAULT_BOOK_NAME))
         output_file = f"{OUTPUT_BASE_NAME}.xlsx"
