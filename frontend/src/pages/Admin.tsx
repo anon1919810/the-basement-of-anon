@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Database, Users } from 'lucide-react'
 import { api } from '../lib/api'
 
 export default function Admin() {
@@ -47,7 +48,12 @@ export default function Admin() {
       {err && <div className="card !border-red-200 text-sm text-red-500">{err}</div>}
 
       <section className="card">
-        <h2 className="card-title">👥 用户统计</h2>
+        <h2 className="card-title">
+          <span className="titled-icon">
+            <Users size={15} />
+            用户统计
+          </span>
+        </h2>
         {users && (
           <div className="overflow-x-auto">
             <table className="data">
@@ -76,7 +82,12 @@ export default function Admin() {
       </section>
 
       <section className="card">
-        <h2 className="card-title">🗃️ 提取记录（{extractions.length}）</h2>
+        <h2 className="card-title">
+          <span className="titled-icon">
+            <Database size={15} />
+            提取记录（{extractions.length}）
+          </span>
+        </h2>
         <div className="overflow-x-auto">
           <table className="data">
             <thead>

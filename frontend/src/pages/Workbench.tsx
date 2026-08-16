@@ -1,4 +1,18 @@
 import { useRef, useState } from 'react'
+import {
+  BarChart3,
+  Brain,
+  Check,
+  Download,
+  MessageSquare,
+  RefreshCw,
+  Send,
+  Sparkles,
+  Star,
+  Table2,
+  Upload,
+  Wand2,
+} from 'lucide-react'
 import { api, apiSSE } from '../lib/api'
 
 interface Entry {
@@ -199,11 +213,16 @@ export default function Workbench() {
 
   return (
     <div className="space-y-6">
-      {err && <div className="card !border-red-200 text-sm text-red-500">{err}</div>}
+      {err && <div className="notice-error">{err}</div>}
 
       {/* ---------- 上传提取 ---------- */}
       <section className="card">
-        <h2 className="card-title">📄 上传文献提取</h2>
+        <h2 className="card-title">
+          <span className="titled-icon">
+            <Upload size={15} />
+            上传文献提取
+          </span>
+        </h2>
         <div className="grid gap-3 md:grid-cols-2">
           <input
             className="input"
@@ -224,19 +243,38 @@ export default function Workbench() {
           仅提取最大子目（推荐）
         </label>
         <div className="mt-3 flex items-center gap-3">
-          <button className="btn btn-accent" disabled={busy} onClick={doExtract}>
+          <button className="btn btn-accent btn-icon" disabled={busy} onClick={doExtract}>
+            <Sparkles size={14} />
             {busy ? '提取中…' : '开始提取'}
           </button>
-          {stage && <span className="text-sm text-[#3ecf8e]">{stage}</span>}
+          {stage && <span className="text-sm text-[#1f9d6c]">{stage}</span>}
         </div>
       </section>
+
+      {/* ---------- 空状态引导 ---------- */}
+      {!entries && !busy && (
+        <div className="empty-state">
+          <div className="empty-icon">📄</div>
+          上传 PDF / Word 文献，填写书名后点击「开始提取」
+          <br />
+          AI 将为你梳理物质 / 精神 / 制度 / 行为 / 心理五类文化要素
+        </div>
+      )}
 
       {/* ---------- 结果 ---------- */}
       {entries && (
         <section className="card">
           <div className="mb-3 flex flex-wrap items-center gap-3">
-            <h2 className="text-base font-semibold">📊 提取结果（{entries.length} 条）</h2>
-            <button className="btn !py-1" onClick={exportCsv}>⬇️ 导出 CSV</button>
+            <h2 className="card-title" style={{ marginBottom: 0 }}>
+              <span className="titled-icon">
+                <Table2 size={15} />
+                提取结果（{entries.length} 条）
+              </span>
+            </h2>
+            <button className="btn btn-icon btn-sm" onClick={exportCsv}>
+              <Download size={13} />
+              导出 CSV
+            </button>
             {recordId && (
               <span className="flex items-center gap-2 text-sm">
                 评分：
@@ -244,7 +282,10 @@ export default function Workbench() {
                         onChange={(e) => setRating(Number(e.target.value))}>
                   {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => <option key={n} value={n}>{n}</option>)}
                 </select>
-                <button className="btn !py-1" onClick={doRate}>保存评分</button>
+                <button className="btn btn-icon btn-sm" onClick={doRate}>
+                  <Star size={13} />
+                  保存评分
+                </button>
                 {ratingMsg && <span className="text-xs text-neutral-400">{ratingMsg}</span>}
               </span>
             )}
@@ -277,7 +318,12 @@ export default function Workbench() {
 
       {/* ---------- AI 工作台 ---------- */}
       <section className="card">
-        <h2 className="card-title">🤖 AI 工作台</h2>
+        <h2 className="card-title">
+          <span className="titled-icon">
+            <Brain size={15} />
+            AI 工作台
+          </span>
+        </h2>
         {entries && entries.length > 0 && (
           <div className="mb-4 flex flex-wrap items-center gap-2">
             <select className="input !w-56" value={selName}
@@ -285,13 +331,19 @@ export default function Workbench() {
               <option value="">选择要补充的条目</option>
               {entries.map((e) => <option key={e.名称} value={e.名称}>{e.名称}</option>)}
             </select>
-            <button className="btn" onClick={doSupplement}>🧠 AI 补充基础信息</button>
+            <button className="btn btn-icon" onClick={doSupplement}>
+              <Wand2 size={14} />
+              AI 补充基础信息
+            </button>
             {supplement && (
               <>
                 <div className="w-full border border-neutral-100 bg-neutral-50 p-3 text-sm">
                   {supplement}
                 </div>
-                <button className="btn btn-accent" onClick={applySupplement}>📥 写入该条目</button>
+                <button className="btn btn-accent btn-icon" onClick={applySupplement}>
+                  <Check size={14} />
+                  写入该条目
+                </button>
               </>
             )}
           </div>
@@ -310,15 +362,26 @@ export default function Workbench() {
             <input className="input" placeholder="向 AI 提问（如：盘龙城遗址的发现过程？）"
                    value={chatQ} onChange={(e) => setChatQ(e.target.value)}
                    onKeyDown={(e) => e.key === 'Enter' && sendChat()} />
-            <button className="btn" disabled={chatBusy} onClick={sendChat}>发送</button>
+            <button className="btn btn-icon" disabled={chatBusy} onClick={sendChat}>
+              <Send size={14} />
+              发送
+            </button>
           </div>
         </div>
       </section>
 
       {/* ---------- 统计看板 ---------- */}
       <section className="card">
-        <h2 className="card-title">📈 统计看板</h2>
-        <button className="btn !py-1" onClick={loadStats}>加载统计</button>
+        <h2 className="card-title">
+          <span className="titled-icon">
+            <BarChart3 size={15} />
+            统计看板
+          </span>
+        </h2>
+        <button className="btn btn-icon btn-sm" onClick={loadStats}>
+          <RefreshCw size={13} />
+          加载统计
+        </button>
         {stats && (
           <div className="mt-3 grid gap-4 text-sm md:grid-cols-3">
             <div>
@@ -344,12 +407,23 @@ export default function Workbench() {
 
       {/* ---------- 留言板 ---------- */}
       <section className="card">
-        <h2 className="card-title">💬 留言板</h2>
+        <h2 className="card-title">
+          <span className="titled-icon">
+            <MessageSquare size={15} />
+            留言板
+          </span>
+        </h2>
         <div className="mb-3 flex gap-2">
           <input className="input" placeholder="写下你的想法…" value={msgText}
                  onChange={(e) => setMsgText(e.target.value)} />
-          <button className="btn" onClick={postMessage}>发布</button>
-          <button className="btn !py-1 text-xs" onClick={loadMessages}>刷新</button>
+          <button className="btn btn-icon" onClick={postMessage}>
+            <Send size={14} />
+            发布
+          </button>
+          <button className="btn btn-icon btn-sm" onClick={loadMessages}>
+            <RefreshCw size={13} />
+            刷新
+          </button>
         </div>
         <div className="space-y-2">
           {messages.map((m) => (

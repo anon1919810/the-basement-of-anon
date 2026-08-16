@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Library } from 'lucide-react'
 import { api, setToken } from '../lib/api'
 
 export default function Login({ onLogin }: { onLogin: () => void }) {
@@ -61,7 +62,13 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
     <div className="flex min-h-screen items-center justify-center bg-white px-4">
       <div className="card w-full max-w-sm">
         <div className="mb-4 text-center">
-          <div className="text-xl font-bold">📚 杨端明的撷菁轩</div>
+          <div
+            className="text-xl font-bold"
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+          >
+            <Library size={20} color="#1f9d6c" />
+            杨端明的撷菁轩
+          </div>
           <div className="mt-1 text-xs text-neutral-400">地方志文化要素提取工具</div>
         </div>
 

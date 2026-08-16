@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Route, Routes, useLocation } from 'react-router-dom'
+import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import Login from './pages/Login'
 import Workbench from './pages/Workbench'
 import Admin from './pages/Admin'
@@ -38,10 +39,10 @@ export default function App() {
             onClick={() => setCollapsed(!collapsed)}
             title={collapsed ? '展开侧边栏' : '折叠侧边栏'}
           >
-            {collapsed ? '»' : '«'}
+            {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
           </button>
           <span className="topbar-title">{title}</span>
-          <span className="muted" style={{ marginLeft: 'auto', fontSize: 12 }}>
+          <span className="chip chip-green" style={{ marginLeft: 'auto' }}>
             v5.0 撷菁新篇
           </span>
         </header>
