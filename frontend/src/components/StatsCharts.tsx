@@ -1,6 +1,20 @@
 import { useEffect, useRef } from 'react'
-import * as echarts from 'echarts'
+import * as echarts from 'echarts/core'
+import { BarChart, MapChart } from 'echarts/charts'
+import { GeoComponent, GridComponent, TooltipComponent, VisualMapComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
 import { Star } from 'lucide-react'
+
+// 按需注册（P2-15：整包 1.4MB → 核心+柱状图+地图 ≈ 400KB）
+echarts.use([
+  BarChart,
+  MapChart,
+  GridComponent,
+  GeoComponent,
+  TooltipComponent,
+  VisualMapComponent,
+  CanvasRenderer,
+])
 
 function cssVar(name: string, fallback: string): string {
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()

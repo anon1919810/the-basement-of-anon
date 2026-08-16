@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, X } from 'lucide-react'
 
 interface Step {
@@ -56,6 +56,7 @@ export default function Tour({
 }) {
   const [step, setStep] = useState(0)
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+  const bubbleRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!open) return
@@ -69,10 +70,14 @@ export default function Tour({
     const apply = () => {
       const r = el.getBoundingClientRect()
       const bw = 300
+      const bh = bubbleRef.current?.offsetHeight ?? 230
       let left = r.left
       if (left + bw > window.innerWidth - 12) left = window.innerWidth - bw - 12
       if (left < 12) left = 12
-      setPos({ top: r.bottom + 12, left })
+      // 下方空间不足时改为向上展示（修复底部气泡点不到的问题）
+      const below = r.bottom + bh + 12 <= window.innerHeight - 12
+      const top = below ? r.bottom + 12 : Math.max(12, r.top - bh - 12)
+      setPos({ top, left })
       el.style.outline = '2px solid var(--accent)'
       el.style.outlineOffset = '2px'
     }
@@ -97,6 +102,7 @@ export default function Tour({
       />
       {pos && (
         <div
+          ref={bubbleRef}
           style={{
             position: 'fixed',
             top: pos.top,
