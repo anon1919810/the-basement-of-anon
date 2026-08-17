@@ -5,6 +5,7 @@ import { cellIsBoundary, cellIsCountyBoundary, findCellAt, provOfCell } from '..
 import { CLIMATE_LABEL } from '../game/map';
 import type { GameState } from '../game/state';
 import { NATIONS, UNDISCOVERED_RGB } from '../game/nations';
+import { provinceLuxuryPotential } from '../game/pops';
 import type { ClimateId, TerrainKind } from '../game/types';
 
 interface View {
@@ -410,6 +411,8 @@ function HoverCard({ prov, game, pos }: { prov: Province; game: GameState; pos: 
             <dd>{happ.toFixed(0)} · 效率 ×{eff.toFixed(2)}</dd>
             <dt>粮产</dt>
             <dd>{foodOut.toFixed(2)} 万吨/月</dd>
+            <dt>奢侈品</dt>
+            <dd>潜力 ×{provinceLuxuryPotential(prov).toFixed(2)} · 产出 {(ps.output.luxury ?? 0).toFixed(3)}/月</dd>
           </>
         )}
       </dl>

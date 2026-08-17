@@ -10,7 +10,6 @@ interface Props {
   onNation: (id: NationId) => void;
   onSave: () => void;
   onNewGame: () => void;
-  onOpenQueue: () => void;
 }
 
 function fmt(n: number): string {
@@ -18,15 +17,14 @@ function fmt(n: number): string {
   return Math.round(n).toLocaleString('zh-CN');
 }
 
-export default function TopBar({ game, onSpeed, onNation, onSave, onNewGame, onOpenQueue }: Props) {
+export default function TopBar({ game, onSpeed, onNation, onSave, onNewGame }: Props) {
   const n = game.nations[game.playerNation];
   const def = NATIONS[game.playerNation];
-  const queued = game.eventQueue.length;
   return (
     <header className="topbar">
       <div className="brand">
         <span className="brand-mark">《卡尔特》</span>
-        <span className="brand-sub">v0.1.0 行政区三级制</span>
+        <span className="brand-sub">v0.2.0 三级市场 · 奢侈品 · 投资</span>
       </div>
 
       <div className="tb-clock">
@@ -70,11 +68,6 @@ export default function TopBar({ game, onSpeed, onNation, onSave, onNewGame, onO
       </div>
 
       <div className="tb-right">
-        {queued > 0 && game.speed > 0 && (
-          <button className="tb-btn queue-btn" onClick={onOpenQueue} title="稍后处理的事件">
-            事件 ×{queued}（待处理）
-          </button>
-        )}
         <label className="tb-nation">
           扮演
           <select

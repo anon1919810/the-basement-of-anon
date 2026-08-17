@@ -2,14 +2,15 @@ import { useEffect, useRef, useState } from 'react';
 import type { GameMap } from './game/map';
 import { loadMap } from './game/map';
 import type { GameState } from './game/state';
-import { loadGame, newGameState, tickDay, processEvent, deferEvent, saveGame, clearSave } from './game/state';
+import { loadGame, newGameState, tickDay, saveGame, clearSave } from './game/state';
 import type { NationId, Speed, TaxLevel } from './game/types';
 import { monthIndex, daysPerSecond } from './game/clock';
 import { retrainPop } from './game/labor';
+import { cancelInvestment, startInvestment } from './game/investment';
+import type { ProjectKind } from './game/investment';
 import WorldMap from './components/WorldMap';
 import TopBar from './components/TopBar';
 import NationPanel from './components/NationPanel';
-import EventModal from './components/EventModal';
 
 export default function App() {
   const mapRef = useRef<GameMap | null>(null);
@@ -88,14 +89,14 @@ export default function App() {
       retrainPop(g, map, provId, popIndex);
       setGame({ ...g });
     },
-    chooseEvent(optionIndex: number) {
+    invest(kind: ProjectKind, provId: number) {
       const g = gameRef.current;
-      processEvent(g, map, optionIndex);
+      startInvestment(g, map, kind, provId);
       setGame({ ...g });
     },
-    deferEventNow() {
+    cancelInvest(projectId: number) {
       const g = gameRef.current;
-      deferEvent(g);
+      cancelInvestment(g, projectId);
       setGame({ ...g });
     },
     save() {
@@ -118,7 +119,6 @@ export default function App() {
         onNation={actions.setNation}
         onSave={actions.save}
         onNewGame={actions.newGame}
-        onOpenQueue={() => actions.setSpeed(0)}
       />
       <main className="main">
         <WorldMap
@@ -134,9 +134,10 @@ export default function App() {
           onTax={actions.setTax}
           onSpending={actions.setSpending}
           onRetrain={actions.retrain}
+          onInvest={actions.invest}
+          onCancelInvest={actions.cancelInvest}
         />
       </main>
-      <EventModal game={game} onChoose={actions.chooseEvent} onDefer={actions.deferEventNow} />
       {savedFlash && <div className="toast">已保存到本机</div>}
     </div>
   );

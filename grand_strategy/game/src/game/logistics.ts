@@ -4,7 +4,7 @@
  *  - 基建（道路/港口）降运费：运费 /= (1 + roads*0.03 + ports*0.02)
  *  - 运费经「可负担系数」压低 POP 幸福度 → 效率 → 产能（基建 → 良性循环）
  */
-import type { GameMap, Province } from './map';
+import type { GameMap, County, Province } from './map';
 import type { NationState } from './state';
 import type { TerrainKind } from './types';
 
@@ -54,4 +54,23 @@ export function provinceFreightFactor(
   const geo = TERRAIN_FREIGHT[prov.terrain] * (coastal ? COASTAL_FREIGHT : INLAND_FREIGHT);
   const infraCut = 1 + infra.roads * 0.03 + infra.ports * 0.02;
   return ((0.6 + dist) * geo) / infraCut;
+}
+
+/**
+ * 县省内运费系数（v0.2 区域市场）：县质心 → 省质心距离 × 地形 × 海陆，除以基建减免。
+ * 用于县↔省调运定价（本地市场自身无运费）。
+ */
+export function countyFreightFactor(
+  map: GameMap,
+  county: County,
+  prov: Province,
+  infra: NationState['infra'],
+): number {
+  const dx = county.center.x - prov.centroid.x;
+  const dy = county.center.y - prov.centroid.y;
+  const dist = Math.sqrt(dx * dx + dy * dy) / 100;
+  const coastal = isCoastal(map, prov);
+  const geo = TERRAIN_FREIGHT[prov.terrain] * (coastal ? COASTAL_FREIGHT : INLAND_FREIGHT);
+  const infraCut = 1 + infra.roads * 0.03 + infra.ports * 0.02;
+  return ((0.3 + dist) * geo) / infraCut;
 }

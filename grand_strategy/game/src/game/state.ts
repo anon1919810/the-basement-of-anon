@@ -1,21 +1,17 @@
 /**
- * 游戏状态机（v0.1）：新游戏 / 日 tick / 月度结算（经济全循环）/ 事件生成与处理 / 存档。
+ * 游戏状态机（v0.2）：新游戏 / 日 tick / 月度结算（经济全循环：三级市场 + 奢侈品 + 投资回报）。
  * 纯逻辑、无 DOM 依赖，浏览器 UI 与无头模拟（scripts/sim.ts）共用。
- * 确定性：所有随机均来自 game.rngState 恢复的 Rng（mulberry32）；
- * 经济结算本身无随机（纯函数式演化），仅事件/起义/政策扰动经 Rng。
+ * 确定性：v0.2 移除自动事件后，月度结算完全无随机（纯函数式演化）；
+ * 仅玩家操作（sim 中的随机策略 / UI 的政令）经 game.rngState 恢复的 Rng（mulberry32）。
  */
 import { Rng } from './rng';
 import type { GameMap } from './map';
-import type { EventInstance, EventTemplate } from './events';
-import { EVENT_TEMPLATES, templateById } from './events';
 import type { GoodId, NationId, ProvinceOwner, Speed, TaxLevel } from './types';
 import { DAYS_PER_MONTH, monthIndex } from './clock';
 import { NATIONS } from './nations';
 import {
   BANKRUPTCY_COOLDOWN,
   BANKRUPTCY_THRESHOLD,
-  nationGrainConsumption,
-  nationMonthlyIncome,
   settleEconomyMonth,
   zeroLedger,
 } from './economy';
@@ -23,10 +19,12 @@ import type { MonthlyLedger } from './economy';
 import { initProvinceEcon } from './pops';
 import type { Pop } from './pops';
 import { newMarket } from './market';
-import type { MarketGood } from './market';
+import type { CountyMarket, MarketGood, ProvinceMarket } from './market';
+import type { InvestmentProject } from './investment';
+import { MANUAL_EVENTS } from './manualEvents';
 
-export const SAVE_VERSION = 2;
-export const SAVE_KEY = 'kalt-save-v2';
+export const SAVE_VERSION = 3;
+export const SAVE_KEY = 'kalt-save-v3';
 
 export interface NationState {
   popWan: number; // 人口（万人）
@@ -38,13 +36,20 @@ export interface NationState {
   taxLevel: TaxLevel;
   spending: { military: number; admin: number; infra: number; court: number; health: number }; // 万₭/月
   cells: number; // 所辖陆地格数（静态）
-  // ---- v0.1 经济 ----
+  // ---- 三级市场（v0.2） ----
   stocks: Record<GoodId, number>; // 国家市场库存（单位）
   market: Record<GoodId, MarketGood>; // 国家市场状态（价格/供需/趋势）
+  provinceMarkets: Record<number, Record<GoodId, ProvinceMarket>>; // 区域市场（省）
+  countyMarkets: Record<number, Record<GoodId, CountyMarket>>; // 本地市场（县）
+  // ---- 投资（v0.2） ----
+  projects: InvestmentProject[]; // 在建/已投产项目
+  nextProjectId: number;
+  investCostAcc: number; // 本月投资支出累计（结算时并入账本并清零）
+  investRefundAcc: number; // 本月取消退款累计
   infra: { roads: number; ports: number }; // 基建水平 0-100
   emigration: number; // 上月流亡人口（万人）
   monthly: MonthlyLedger; // 上月账本（UI/断言）
-  bankruptMonths: number; // 破产事件冷却（月）
+  bankruptMonths: number; // 破产冷却（月）
 }
 
 export interface ProvinceState {
@@ -60,11 +65,12 @@ export interface ProvinceState {
   freight: number; // 运费系数
 }
 
-export interface LogEntry {
+/** 大事记条目（v0.2：被动信息，非交互事件） */
+export interface ChronicleEntry {
   month: number;
   day: number;
   title: string;
-  choice: string;
+  detail?: string;
 }
 
 export interface GameState {
@@ -77,12 +83,14 @@ export interface GameState {
   rngState: number;
   nations: Record<NationId, NationState>;
   provinces: Record<number, ProvinceState>;
-  eventQueue: EventInstance[];
-  eventLog: LogEntry[];
-  nextEventMonth: number; // 计划事件触发月份（0 基）
-  uid: number;
+  chronicle: ChronicleEntry[];
   lastAutosaveMonth: number;
-  stats: { spawned: number; processed: number };
+}
+
+/** 追加一条大事记（破产/工厂落成等被动信息） */
+export function addChronicle(state: GameState, title: string, detail?: string): void {
+  state.chronicle.push({ month: monthIndex(state.day), day: state.day, title, detail });
+  if (state.chronicle.length > 500) state.chronicle.splice(0, state.chronicle.length - 500);
 }
 
 function nationCellCount(map: GameMap, id: NationId): number {
@@ -105,6 +113,7 @@ export function newGameState(playerNation: NationId, seed: number, map: GameMap)
       clothing: def.popWan * 0.006 * def.foodMonths,
       fuel: def.popWan * 0.005 * def.foodMonths,
       industrial: def.popWan * 0.0005 * def.foodMonths,
+      luxury: def.popWan * 0.0004 * def.foodMonths,
     };
     nations[id] = {
       popWan: def.popWan,
@@ -118,6 +127,12 @@ export function newGameState(playerNation: NationId, seed: number, map: GameMap)
       cells: nationCellCount(map, id),
       stocks,
       market,
+      provinceMarkets: {},
+      countyMarkets: {},
+      projects: [],
+      nextProjectId: 1,
+      investCostAcc: 0,
+      investRefundAcc: 0,
       infra: { roads: 10, ports: 10 },
       emigration: 0,
       monthly: zeroLedger(),
@@ -140,8 +155,8 @@ export function newGameState(playerNation: NationId, seed: number, map: GameMap)
         housingCap: 0,
         efficiency: 1,
         happiness: 50,
-        output: { food: 0, clothing: 0, fuel: 0, industrial: 0 },
-        demand: { food: 0, clothing: 0, fuel: 0, industrial: 0 },
+        output: { food: 0, clothing: 0, fuel: 0, industrial: 0, luxury: 0 },
+        demand: { food: 0, clothing: 0, fuel: 0, industrial: 0, luxury: 0 },
         freight: 1,
       };
     }
@@ -157,12 +172,8 @@ export function newGameState(playerNation: NationId, seed: number, map: GameMap)
     rngState: rng.state,
     nations,
     provinces,
-    eventQueue: [],
-    eventLog: [],
-    nextEventMonth: 1 + rng.int(0, 3), // 首次事件在 1-3 月内
-    uid: 1,
+    chronicle: [],
     lastAutosaveMonth: 0,
-    stats: { spawned: 0, processed: 0 },
   };
   state.rngState = rng.state;
   return state;
@@ -176,121 +187,31 @@ function commitRng(state: GameState, rng: Rng): void {
   state.rngState = rng.state;
 }
 
-/** 生成一条事件并入队（暂停游戏等待抉择；sim 中忽略 speed） */
-export function spawnEvent(state: GameState, rng: Rng, templateId?: string): EventInstance {
-  let tpl: EventTemplate;
-  if (templateId) {
-    tpl = templateById(templateId) ?? EVENT_TEMPLATES[0];
-  } else {
-    tpl = rng.pickWeighted(EVENT_TEMPLATES, (t) => t.weight);
-  }
-  const ev: EventInstance = {
-    uid: state.uid++,
-    templateId: tpl.id,
-    title: tpl.title,
-    text: tpl.text,
-    options: tpl.options,
-    month: monthIndex(state.day),
-  };
-  state.eventQueue.push(ev);
-  state.stats.spawned++;
-  if (state.speed !== 0) {
-    state.prevSpeed = state.speed;
-    state.speed = 0; // 弹事件卡自动暂停
-  }
-  return ev;
-}
-
-/** 应用选项效果（按国家规模缩放；含 v0.1 的健康/幸福度/商品库存） */
-function applyEffects(state: GameState, map: GameMap, effects: {
-  treasuryFrac?: number;
-  stability?: number;
-  popFrac?: number;
-  literacy?: number;
-  health?: number;
-  happiness?: number;
-  foodFrac?: number;
-  stockFrac?: Partial<Record<GoodId, number>>;
-}): void {
-  const id = state.playerNation;
-  const n = state.nations[id];
-  const incomeM = nationMonthlyIncome(map, state, id);
-  const consYear = nationGrainConsumption(state, id);
-  if (effects.treasuryFrac) n.treasury += effects.treasuryFrac * Math.abs(incomeM);
-  if (effects.popFrac) {
-    // 移民/瘟疫等：按比例调整玩家国家各省 POP（n.popWan 下次结算时由省份重算）
-    const frac = effects.popFrac;
-    for (const p of map.provinces) {
-      if (p.owner !== id || p.isUndiscovered) continue;
-      const ps = state.provinces[p.id];
-      if (!ps) continue;
-      for (const pop of ps.pops) pop.size = Math.max(0, pop.size * (1 + frac));
-    }
-  }
-  if (effects.literacy) n.literacy = Math.min(1, Math.max(0, n.literacy + effects.literacy));
-  if (effects.health) n.health = Math.min(1, Math.max(0, n.health + effects.health));
-  if (effects.foodFrac) n.foodStock = Math.max(0, n.foodStock + effects.foodFrac * consYear);
-  if (effects.stockFrac) {
-    // 各商品库存按比例增减（如开仓平粜 -25% 粮库存）
-    for (const g of Object.keys(effects.stockFrac) as GoodId[]) {
-      const frac = effects.stockFrac[g];
-      if (frac === undefined) continue;
-      n.stocks[g] = Math.max(0, n.stocks[g] * (1 + frac));
-    }
-    n.foodStock = n.stocks.food;
-  }
-  if (effects.stability) n.stability = Math.min(100, Math.max(0, n.stability + effects.stability));
-  if (effects.happiness) {
-    for (const p of map.provinces) {
-      if (p.owner !== id || p.isUndiscovered) continue;
-      const ps = state.provinces[p.id];
-      if (!ps) continue;
-      for (const pop of ps.pops) {
-        pop.happiness = Math.min(100, Math.max(0, pop.happiness + (effects.happiness ?? 0)));
-      }
-    }
-  }
-}
-
-/** 处理队首事件（选项由调用方决定：UI 玩家点选 / sim 用 rng 选） */
-export function processEvent(state: GameState, map: GameMap, optionIndex: number): void {
-  const ev = state.eventQueue.shift();
-  if (!ev) return;
-  const opt = ev.options[optionIndex] ?? ev.options[0];
-  if (opt) applyEffects(state, map, opt.effects);
-  state.eventLog.push({ month: ev.month, day: state.day, title: ev.title, choice: opt?.label ?? '' });
-  state.stats.processed++;
-  if (state.eventQueue.length === 0) state.speed = state.prevSpeed;
-}
-
-/** 「稍后处理」：恢复运行，事件留在队列 */
-export function deferEvent(state: GameState): void {
-  state.speed = state.prevSpeed;
-}
-
 /** 月度结算（仅玩家国家；他国为静态背景） */
 export function settleMonth(state: GameState, map: GameMap): void {
   const rng = makeRng(state);
   const id = state.playerNation;
   const n = state.nations[id];
 
-  // 1) 经济全循环（生产/市场/贸易/工资/幸福度/人口/财政/识字率/稳定度）
+  // 1) 经济全循环（三级市场/奢侈品/投资回报/财政/识字率/稳定度）——纯函数式，无随机
   settleEconomyMonth(state, map);
 
-  // 2) 破产保护：国库允许为负，但触发「破产」事件（带冷却，避免刷屏）
+  // 2) 破产保护：国库允许为负，但记入大事记（带冷却，避免刷屏）
   if (n.treasury < BANKRUPTCY_THRESHOLD && n.bankruptMonths <= 0) {
-    spawnEvent(state, rng, 'bankruptcy');
+    addChronicle(state, '国库破产', `国库跌破 ${BANKRUPTCY_THRESHOLD} 万₭，朝野震动，需设法扭转财政`);
+    n.stability = Math.max(0, n.stability - 6);
     n.bankruptMonths = BANKRUPTCY_COOLDOWN;
   }
   if (n.bankruptMonths > 0) n.bankruptMonths--;
 
-  // 3) 事件：稳定度低触发起义；计划事件（每 1-3 月）
-  if (n.stability < 30 && rng.chance((30 - n.stability) / 150)) {
-    spawnEvent(state, rng, 'rebellion');
-  }
-  if (monthIndex(state.day) >= state.nextEventMonth) {
-    spawnEvent(state, rng);
-    state.nextEventMonth = monthIndex(state.day) + 1 + rng.int(0, 3); // 1-3 月后
+  // 3) 人工事件预留（v0.2 休眠检查点）：MANUAL_EVENTS 为空 → no-op。
+  //    日后在 manualEvents.ts 填入事件后，此处在每月结算时按 triggerMonth 派发。
+  const mi = monthIndex(state.day);
+  for (const ev of MANUAL_EVENTS) {
+    if (ev.triggerMonth >= 0 && ev.triggerMonth === mi) {
+      // 预留：填充后在此将 ev 加入「待处理队列」或直接应用 effect（见 manualEvents.ts 注释）
+      addChronicle(state, ev.title, ev.desc);
+    }
   }
 
   commitRng(state, rng);
@@ -310,6 +231,8 @@ export function allFinite(state: GameState): boolean {
       n.popWan, n.literacy, n.health, n.treasury, n.foodStock, n.stability,
       n.emigration, n.infra.roads, n.infra.ports,
       n.monthly.income, n.monthly.spending, n.monthly.tariff,
+      n.monthly.investIncome, n.monthly.investReturn, n.monthly.investCost, n.monthly.investRefund,
+      n.investCostAcc, n.investRefundAcc,
     ];
     for (const v of nums) if (!Number.isFinite(v)) return false;
     for (const g of Object.keys(n.stocks) as GoodId[]) {
@@ -319,13 +242,40 @@ export function allFinite(state: GameState): boolean {
         if (!Number.isFinite(v)) return false;
       }
     }
+    // 区域市场（省）
+    for (const pid of Object.keys(n.provinceMarkets)) {
+      const pm = n.provinceMarkets[Number(pid)];
+      if (!pm) return false;
+      for (const g of Object.keys(pm) as GoodId[]) {
+        const m = pm[g];
+        for (const v of [m.price, m.prevPrice, m.supply, m.demand, m.consumed, m.unmet, m.netFlow, m.trend]) {
+          if (!Number.isFinite(v)) return false;
+        }
+      }
+    }
+    // 本地市场（县）
+    for (const cid of Object.keys(n.countyMarkets)) {
+      const cm = n.countyMarkets[Number(cid)];
+      if (!cm) return false;
+      for (const g of Object.keys(cm) as GoodId[]) {
+        const m = cm[g];
+        for (const v of [m.price, m.prevPrice, m.supply, m.demand, m.consumed, m.unmet, m.netFlow, m.trend]) {
+          if (!Number.isFinite(v)) return false;
+        }
+      }
+    }
+    // 投资项目
+    for (const p of n.projects) {
+      if (!Number.isFinite(p.totalCost) || !Number.isFinite(p.duration) || !Number.isFinite(p.monthsLeft)) return false;
+      if (p.monthsLeft < 0 || p.monthsLeft > p.duration) return false;
+    }
   }
   for (const p of Object.values(state.provinces)) {
     if (!Number.isFinite(p.popTotal) || !Number.isFinite(p.housingCap) || !Number.isFinite(p.efficiency) || !Number.isFinite(p.happiness)) {
       return false;
     }
     for (const pop of p.pops) {
-      if (!Number.isFinite(pop.size) || !Number.isFinite(pop.happiness) || !Number.isFinite(pop.wage)) return false;
+      if (!Number.isFinite(pop.size) || !Number.isFinite(pop.happiness) || !Number.isFinite(pop.wage) || !Number.isFinite(pop.investIncome)) return false;
       if (pop.size < 0) return false;
     }
   }

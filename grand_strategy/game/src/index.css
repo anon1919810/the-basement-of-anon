@@ -651,8 +651,7 @@ button.active {
 }
 
 /* ---- hover 摘要卡 ---- */
-.hover-card {
-  position: fixed;
+.hover-card {  position: fixed;
   z-index: 40;
   width: 210px;
   background: rgba(16, 22, 30, 0.92);
@@ -697,4 +696,115 @@ button.active {
   margin-top: 5px;
   color: rgba(210, 220, 235, 0.65);
   font-style: italic;
+}
+
+/* ---- v0.2 三级市场 / 投资 ---- */
+.mkt-panel {
+  margin: 4px 0;
+}
+
+.mkt-levels {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.mkt-btn {
+  padding: 2px 12px;
+  font-size: 12px;
+  border-radius: 3px;
+}
+
+.mkt-btn.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.mkt-matrix td,
+.mkt-matrix th {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+
+.mkt-matrix td:first-child,
+.mkt-matrix th:first-child {
+  text-align: left;
+}
+
+.mkt-trend {
+  font-style: normal;
+  font-size: 10px;
+  margin-left: 2px;
+}
+
+.mkt-pick {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.mkt-pick select {
+  font: inherit;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 1px 4px;
+  background: var(--panel);
+}
+
+.invest-card {
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 8px 10px;
+  margin: 8px 0;
+  background: var(--bg);
+}
+
+.invest-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
+.invest-card-head b {
+  letter-spacing: 0.5px;
+}
+
+.invest-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.invest-card-foot select {
+  font: inherit;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 2px 4px;
+  background: var(--panel);
+}
+
+.invest-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.warn-soft {
+  color: var(--warn);
+  font-size: 11.5px;
+  margin-top: 4px;
 }

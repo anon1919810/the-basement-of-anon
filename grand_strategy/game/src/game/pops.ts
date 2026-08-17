@@ -34,12 +34,13 @@ export const JOB_LABEL: Record<JobId, string> = {
   engineer: '工程师',
 };
 
-export const GOODS: GoodId[] = ['food', 'clothing', 'fuel', 'industrial'];
+export const GOODS: GoodId[] = ['food', 'clothing', 'fuel', 'industrial', 'luxury'];
 export const GOOD_LABEL: Record<GoodId, string> = {
   food: '粮食',
   clothing: '衣物',
   fuel: '燃料',
   industrial: '工业品',
+  luxury: '奢侈品',
 };
 
 export const NEEDS: NeedId[] = ['food', 'clothing', 'housing', 'fuel'];
@@ -65,13 +66,42 @@ export const JOB_OUTPUT_PER_WAN: Record<JobId, number> = {
   artisan: 0.016,
   engineer: 0.010,
 };
-/** 每万人月需求（万吨 / 万件；工业品由军费/基建间接消耗） */
+/** 每万人月需求（万吨 / 万件；工业品由军费/基建间接消耗，奢侈品走财富系数公式） */
 export const NEED_PER_WAN: Record<GoodId, number> = {
   food: 0.0075,
   clothing: 0.006,
   fuel: 0.005,
   industrial: 0,
+  luxury: 0,
 };
+/** 职业财富系数（决定奢侈品需求权重与精英投资收入占比） */
+export const WEALTH_BASE: Record<JobId, number> = {
+  farmer: 0.1,
+  miner: 0.2,
+  artisan: 0.5,
+  engineer: 1.0,
+};
+/** 奢侈品：工匠/工程师附加产出（每万从业者月产单位；× 省奢侈品潜力） */
+export const LUXURY_OUTPUT_PER_WAN: Record<JobId, number> = {
+  farmer: 0,
+  miner: 0,
+  artisan: 0.004,
+  engineer: 0.003,
+};
+/** 奢侈品需求基数（× 职业财富 × 幸福度系数 × 国家财富系数） */
+export const LUXURY_NEED_BASE = 0.0022;
+/** 国家财富系数 clamp 范围（国民财富↑ → 奢侈品需求↑） */
+export const LUXURY_WEALTH_MIN = 0.7;
+export const LUXURY_WEALTH_MAX = 2.2;
+/** 省奢侈品潜力（省份文化/财富系数，由经济产出倍率推导，0.5-1.5） */
+export function provinceLuxuryPotential(prov: Province): number {
+  return clamp(0.5 + prov.productivity * 0.5, 0.5, 1.5);
+}
+/** 国家财富系数：人口年收入与国库共同决定（0.7-2.2） */
+export function luxuryWealthCoef(n: { popWan: number; treasury: number }): number {
+  const annualIncome = n.popWan * 3.0; // PER_CAPITA_INCOME 常量内联，避免循环依赖
+  return clamp(0.8 + annualIncome / 6000 + Math.max(0, n.treasury) / 8000, LUXURY_WEALTH_MIN, LUXURY_WEALTH_MAX);
+}
 /** 职业基础年薪（万₭/人/年） */
 export const BASE_WAGE: Record<JobId, number> = {
   farmer: 2.4,
@@ -128,8 +158,10 @@ export interface Pop {
   size: number;
   /** 幸福度 0-100 */
   happiness: number;
-  /** 年薪（万₭/人/年） */
+  /** 年薪（万₭/人/年，劳动力市场工资） */
   wage: number;
+  /** 投资收入（万₭/月，精英/富裕 POP 由全国资本回报池分配） */
+  investIncome: number;
   /** 四件套满足度 0-1 */
   sat: Record<NeedId, number>;
   /** 转职惩罚剩余月数（期间产出减半） */
@@ -173,6 +205,7 @@ export function createProvincePops(
         size,
         happiness: 60,
         wage: BASE_WAGE[job],
+        investIncome: 0,
         sat: { food: 0.9, clothing: 0.9, housing: 0.9, fuel: 0.9 },
         retrainMonths: 0,
       });
@@ -197,8 +230,8 @@ export function initProvinceEcon(
     housingCap: prov.cellIds.length * BASE_HOUSING_PER_CELL,
     efficiency: 0.5 + 0.7 * (stability / 100),
     happiness: stability,
-    output: { food: 0, clothing: 0, fuel: 0, industrial: 0 },
-    demand: { food: 0, clothing: 0, fuel: 0, industrial: 0 },
+    output: { food: 0, clothing: 0, fuel: 0, industrial: 0, luxury: 0 },
+    demand: { food: 0, clothing: 0, fuel: 0, industrial: 0, luxury: 0 },
     freight: 1,
   };
 }

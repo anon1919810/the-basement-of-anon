@@ -30,8 +30,8 @@ export type RaceId =
 /** 职业（技能梯子：农民→矿工→工匠→工程师） */
 export type JobId = 'farmer' | 'miner' | 'artisan' | 'engineer';
 
-/** 商品（国家市场流通物；奢侈品留 v0.2） */
-export type GoodId = 'food' | 'clothing' | 'fuel' | 'industrial';
+/** 商品（三级市场流通物；奢侈品 v0.2 加入） */
+export type GoodId = 'food' | 'clothing' | 'fuel' | 'industrial' | 'luxury';
 
 /** 需求四件套 */
 export type NeedId = 'food' | 'clothing' | 'housing' | 'fuel';
