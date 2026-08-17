@@ -249,6 +249,20 @@ export function nationSlavePop(map: GameMap, state: GameState, nationId: NationI
   return sum;
 }
 
+/** 国家人口加权平均幸福度（0-100，v0.7 侧栏图表用） */
+export function nationAvgHappiness(map: GameMap, state: GameState, nationId: NationId): number {
+  let sum = 0;
+  let total = 0;
+  for (const p of map.provinces) {
+    if (p.owner !== nationId || p.isUndiscovered) continue;
+    const ps = state.provinces[p.id];
+    if (!ps) continue;
+    sum += ps.happiness * ps.popTotal;
+    total += ps.popTotal;
+  }
+  return total > 1e-9 ? sum / total : 50;
+}
+
 /** 月度经济全循环（只结算玩家国家；无随机，确定性） */
 export function settleEconomyMonth(state: GameState, map: GameMap): void {
   const id = state.playerNation;

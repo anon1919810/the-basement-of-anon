@@ -12,6 +12,7 @@ import { cancelInvestment, startInvestment } from './game/buildings';
 import type { BuildingKind } from './game/buildings';
 import { NATIONS, NATION_LIST } from './game/nations';
 import { clampTax } from './game/tax';
+import { sfxClick, sfxPanel, sfxSlider } from './game/sound';
 import WorldMap from './components/WorldMap';
 import TopBar from './components/TopBar';
 import GovernancePanel from './components/GovernancePanel';
@@ -56,9 +57,32 @@ export default function App() {
   const [selectedProvince, setSelectedProvince] = useState<number | null>(null);
   const [savedFlash, setSavedFlash] = useState(false);
   const [oldSaveNotice, setOldSaveNotice] = useState<boolean>(() => hasOldSave());
+  const [staleBorderNotice, setStaleBorderNotice] = useState(false); // v0.7：旧国界编辑因省 id 重构失效
   const [showNationPicker, setShowNationPicker] = useState(false);
   const [govCollapsed, setGovCollapsed] = useState(false); // v0.5 左侧治理面板可折叠
   const flashTimer = useRef<number | null>(null);
+
+  // ---- v0.7 全局音效：按钮点击（data-sfx 覆盖）/ 滑块轻响 ----
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null;
+      const btn = t?.closest?.('button');
+      if (!btn) return;
+      const sfx = btn.getAttribute('data-sfx');
+      if (sfx === 'panel') sfxPanel();
+      else if (sfx !== 'none') sfxClick();
+    };
+    const onInput = (e: Event) => {
+      const t = e.target as HTMLElement | null;
+      if (t && t.tagName === 'INPUT' && (t as HTMLInputElement).type === 'range') sfxSlider();
+    };
+    document.addEventListener('click', onClick);
+    document.addEventListener('input', onInput);
+    return () => {
+      document.removeEventListener('click', onClick);
+      document.removeEventListener('input', onInput);
+    };
+  }, []);
 
   // ---- v0.6 独立编辑模式（国界重绘） ----
   const [editMode, setEditMode] = useState(false);
@@ -70,14 +94,31 @@ export default function App() {
   const [histIndex, setHistIndex] = useState(0);
   const [editStamp, setEditStamp] = useState(0);
   // 开局应用 localStorage 覆盖（仅一次；map 为进程内单例）
+  // v0.7：省份 id 重构 → 旧覆盖全部失效（任一 id 匹配当前省份才应用，否则提示清空重建）
   const appliedRef = useRef(false);
   useEffect(() => {
     if (appliedRef.current) return;
     appliedRef.current = true;
     const saved = loadBorderEdits();
     if (Object.keys(saved).length > 0) {
-      applyBorderOverrides(map, saved);
-      setEditStamp((x) => x + 1); // 触发画布按覆盖后归属重绘
+      let anyMatch = false;
+      for (const key of Object.keys(saved)) {
+        if (map.provinceById.get(Number(key))) {
+          anyMatch = true;
+          break;
+        }
+      }
+      if (anyMatch) {
+        applyBorderOverrides(map, saved);
+        setEditStamp((x) => x + 1); // 触发画布按覆盖后归属重绘
+      } else {
+        try {
+          localStorage.removeItem(BORDER_EDIT_KEY);
+        } catch {
+          // 忽略
+        }
+        setStaleBorderNotice(true);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -390,7 +431,12 @@ export default function App() {
       {savedFlash && <div className="toast">已保存到本机</div>}
       {oldSaveNotice && (
         <div className="toast old-save-toast" onClick={() => setOldSaveNotice(false)}>
-          ⚠ 检测到 v0.5/v0.6 旧存档（不兼容 v0.6：省份重构/循环地图/国界编辑器），已开启新局；点击关闭
+          ⚠ 检测到 v0.6 及更早旧存档（不兼容 v0.7：山川形便省界重划/省份 id 重构/存档 v8），已开启新局；点击关闭
+        </div>
+      )}
+      {staleBorderNotice && (
+        <div className="toast old-save-toast" onClick={() => setStaleBorderNotice(false)}>
+          ⚠ 检测到旧版国界编辑（v0.7 省份 id 已重构，原覆盖失效），已清空重建；可在「编辑模式」重新绘制后保存；点击关闭
         </div>
       )}
       {showNationPicker && (

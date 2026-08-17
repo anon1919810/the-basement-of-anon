@@ -1,20 +1,24 @@
 /**
- * 地图导入器（v0.6 省份重构 + 循环地图）：
+ * 地图导入器（v0.7 山川形便省界重划 + 循环地图）：
  * 层级：cell（格）→ county（县）→ province（省）→ 国家辖区
  *  - cell：原始网格（陆地 = 海拔 h >= 20）
- *  - county：陆地格按自然地理（海拔带 / 气候 temp+prec 相似度）确定性区域生长，目标 5-15 格
- *  - province（v0.6 均匀化）：
- *      ① 县按自然地理合并（山脉为界、气候相近，目标 ≤ ~60 格）
- *      ② 大省拆分：> PROVINCE_SPLIT_MAX(60) 格的省按内部县 BFS 切成目标 ~45 格的多省
- *      ③ 小省并入：< PROVINCE_MERGE_MIN(10) 格的省并入「同属国」最近邻省（环绕格距最小）
- *      ④ 海岛归并：相邻海岛（两岛陆地间最近格距 < ISLAND_MERGE_DIST(35px) 且同属国）归并为多岛省
- *  - 国家：8 国按 v0.5 原则地理规则占有省份（帝国北+西/洛林西岸/扎拉克中/伊尼亚斯东/
+ *  - county（v0.7 自然地理聚类）：陆地格按「同海拔带(floor(h/15)) + 同气候带(temp/prec 五气候)」
+ *    确定性区域生长，目标 5-15 格；山脊格（海拔局部极大值，h≥RIDGE_MIN_H 且严格高于所有陆地邻居）
+ *    不参与县聚类 —— 山脊=天然省界，两侧永不跨脊合并（结构上自保证）
+ *  - province（v0.7 紧凑度约束合并，杜绝长条怪形）：
+ *      ① 县按「共享边界边数最大（= 周长增量最小）」贪心并省，目标 30-60 格（PROVINCE_MIN=15 停，
+ *        允许 15-90 边缘）
+ *      ② 大省拆分：> PROVINCE_SPLIT_MAX(60) 格按紧凑 BFS 切成目标 ~45 格的多省
+ *      ③ 小省并入：< PROVINCE_MERGE_MIN(8) 格并入共享边最多的相邻省（无邻省的海岛走
+ *        「同属国最近邻」距离并入）
+ *      ④ 山脊格归属：各山脊格并入「共享边最多」的相邻省（多山脊成簇时按同大陆块最近省）
+ *      ⑤ 海岛归并：相邻海岛（两岛陆地间最近格距 < ISLAND_MERGE_DIST(35px) 且同属国）归并为多岛省
+ *  - 国家：8 国按 v0.6 原则地理规则占有省份（帝国北+西/洛林西岸/扎拉克中/伊尼亚斯东/
  *    诺曼尼亚南/奥兰治南沿海+海峡/盎格伦撒群岛+海峡/迷雾 x>=0.6W 不变）
  *
- * 循环地图（东西环绕）：所有省距/海峡距离按环绕计算
- *  - wrappedDx(dx) = min(|x1-x2|, W-|x1-x2|)；渲染由 WorldMap 左右各复制一份无缝拼接
+ * 循环地图（东西环绕）：所有省距/海峡距按环绕计算（wrappedDx）；渲染由 WorldMap 左右复制无缝拼接
  *
- * 确定性：全部算法仅依赖格 id 排序与固定比较次序 + 固定种子 RNG —— 同输入必同结果。
+ * 确定性：全部算法仅依赖格 id 排序与固定比较次序 —— 同输入必同结果。
  */
 import raw from '../../../data/kalte_gridcells.json';
 import type { BBox, ClimateId, NationId, Point, ProvinceOwner, TerrainKind } from './types';
@@ -47,19 +51,19 @@ export const FOG_X_RATIO = 0.6; // 迷雾区：大陆质心 x >= 0.6 * W
 export const COUNTY_TARGET = 9;
 export const COUNTY_MIN = 5;
 export const COUNTY_MAX = 15;
-/** 基础省目标格数（v0.5：20-80 格；mergeProvinces 用） */
-export const PROVINCE_MIN = 20;
-export const PROVINCE_MAX = 55;
-/** 山脉界线：两格相邻且海拔均 >= 65 → 视为山脉脊线，不跨省合并 */
-export const RIDGE_H = 65;
+/** 基础省目标格数（v0.7：目标 30-60，允许 15-90 边缘） */
+export const PROVINCE_MIN = 15;
+export const PROVINCE_MAX = 60;
+/** 山脉界线：山脊格最小海拔（海拔局部极大值且 ≥ 该值 → 天然省界，不跨脊合并） */
+export const RIDGE_MIN_H = 50;
 
-// ---- v0.6 省份重构参数 ----
+// ---- v0.6/v0.7 省份后处理参数 ----
 /** 省目标格数（拆分目标） */
 export const PROVINCE_TARGET = 45;
-/** 超过该格数拆分为多省 */
-export const PROVINCE_SPLIT_MAX = 60;
-/** 小于该格数并入最近邻省 */
-export const PROVINCE_MERGE_MIN = 10;
+/** 超过该格数拆分为多省（v0.7 合并上限 ≤ PROVINCE_SIZE_MAX=90，故仅作纯安全兜底，正常不触发） */
+export const PROVINCE_SPLIT_MAX = 90;
+/** 小于该格数并入相邻省 */
+export const PROVINCE_MERGE_MIN = 8;
 /** 大陆块格数 ≤ 该值视为「海岛」（参与海岛归并） */
 export const ISLAND_MAX_CELLS = 60;
 /** 相邻海岛归并阈值：两岛陆地间最近格距（px，环绕） < 该值 */
@@ -69,6 +73,13 @@ export const ISLAND_MERGE_MAX_COMBINED = 90;
 /** 结果省格数允许范围（sim 断言用；海峡要道等少量边缘例外） */
 export const PROVINCE_SIZE_MIN = 8;
 export const PROVINCE_SIZE_MAX = 90;
+
+/** v0.6 紧凑度基线（紧凑度均值，sim 断言「v0.7 均值提升」用） */
+export const PROVINCE_COMPACTNESS_BASELINE = 0.3519;
+/** 长条省判定阈值：省包围盒长宽比 > 该值 视为长条 */
+export const PROVINCE_ASPECT_LONG = 2.5;
+/** 长条省占比上限（sim 断言 < 20%） */
+export const PROVINCE_LONG_SHARE_MAX = 0.2;
 
 export interface CellData {
   id: number;
@@ -100,7 +111,7 @@ export interface County {
 
 export interface Province {
   id: number;
-  /** 所辖县（内嵌对象，含各自的格） */
+  /** 所辖县（内嵌对象，含各自的格；山脊格并入时挂到种子县所在省，counties 不含纯山脊簇） */
   counties: County[];
   countyIds: number[];
   cellIds: number[];
@@ -302,33 +313,83 @@ export function loadMap(): GameMap {
   return cachedMap;
 }
 
-// ---- 区域生长辅助 ----
+// ---- v0.7 山脊与紧凑度聚类 ----
 
+/** 海拔带（floor(h/15)：0-5） */
+export function elevBandOf(h: number): number {
+  return Math.floor(h / 15);
+}
+
+/**
+ * 山脊格：海拔 ≥ RIDGE_MIN_H 且不矮于任何陆地邻居、且至少一个陆地邻居更矮
+ * （峰顶 / 山脊线 / 台地边缘 = 海拔局部极大值域）。
+ * 山脊格不参与县/省合并 —— 山脉=天然省界，两侧永不跨脊合并。
+ */
+export function isRidgeCell(cell: CellData, cellsById: Map<number, CellData>): boolean {
+  if (cell.h < RIDGE_MIN_H) return false;
+  let hasLower = false;
+  for (const nb of cell.neighbors) {
+    const nbC = cellsById.get(nb);
+    if (!nbC || !nbC.land) continue;
+    if (nbC.h > cell.h) return false; // 有更高邻居 → 非局部极大
+    if (nbC.h < cell.h) hasLower = true;
+  }
+  return hasLower;
+}
+
+/** 构建期县（v0.7：无山脊格；同海拔带+同气候带紧凑聚类） */
 interface GrowCounty {
   cellIds: number[];
   hSum: number;
   tempSum: number;
   precSum: number;
+  /** 种子格海拔带（聚类锚点：候选格必须同带同气候） */
+  seedElevBand: number;
+  seedClimate: ClimateId;
 }
 
-function cellSim(cell: CellData, avgH: number, avgT: number, avgP: number): number {
-  const dElev = Math.abs(Math.floor(cell.h / 15) - Math.floor(avgH / 15)) / 6;
-  const dTemp = Math.abs(cell.temp - avgT) / 50;
-  const dPrec = Math.abs(cell.prec - avgP) / 100;
-  return 1 - (0.5 * dElev + 0.3 * dTemp + 0.2 * dPrec);
+/** 单元格到区域共享边数（= 该格与区域内格直接相邻的对数；周长增量 = -2×共享边数） */
+function cellSharedEdges(cellId: number, region: Set<number>, cellsById: Map<number, CellData>): number {
+  const cell = cellsById.get(cellId);
+  if (!cell) return 0;
+  let n = 0;
+  for (const nb of cell.neighbors) if (region.has(nb)) n++;
+  return n;
 }
 
-/** 单个大陆块内：格 → 县 确定性区域生长（同 v0.5）。 */
-function growCounties(
-  landCells: number[],
+/** 两区域共享边数（跨区域陆邻对数；合并时周长增量 = -2×该值） */
+function regionSharedEdges(
+  a: Set<number>,
+  b: Set<number>,
   cellsById: Map<number, CellData>,
+): number {
+  // 遍历较小集合
+  const [small, big] = a.size <= b.size ? [a, b] : [b, a];
+  let n = 0;
+  for (const cid of small) {
+    const cell = cellsById.get(cid);
+    if (!cell) continue;
+    for (const nb of cell.neighbors) if (big.has(nb)) n++;
+  }
+  return n;
+}
+
+/**
+ * 单大陆块内：非山脊格 → 县 确定性区域生长（v0.7 同海拔带+同气候带 + 共享边优先）。
+ * 山脊格（ridgeSet）不参与县聚类 —— 主生长/兜底/孤儿全部跳过，杜绝山脊格同时进县与山脊表。
+ */
+function growCountiesV7(
+  nonRidgeCells: number[],
+  cellsById: Map<number, CellData>,
+  ridgeSet: Set<number>,
 ): GrowCounty[] {
-  const n = landCells.length;
+  const n = nonRidgeCells.length;
   if (n === 0) return [];
-  const sorted = [...landCells].sort((a, b) => a - b);
+  const sorted = [...nonRidgeCells].sort((a, b) => a - b);
   const target = Math.max(1, Math.round(n / COUNTY_TARGET));
   const stride = Math.max(1, Math.floor(n / target));
 
+  // 种子：跨幅取「陆地邻最多」格（tie 取 id 小）
   const seeds: number[] = [];
   for (let i = 0; i < n; i += stride) {
     let best = -1;
@@ -352,17 +413,25 @@ function growCounties(
 
   const counties: GrowCounty[] = seeds.map((sid) => {
     const c = cellsById.get(sid) as CellData;
-    return { cellIds: [sid], hSum: c.h, tempSum: c.temp, precSum: c.prec };
+    return {
+      cellIds: [sid],
+      hSum: c.h,
+      tempSum: c.temp,
+      precSum: c.prec,
+      seedElevBand: elevBandOf(c.h),
+      seedClimate: c.climate,
+    };
   });
   const assigned = new Map<number, number>();
   seeds.forEach((sid, ci) => assigned.set(sid, ci));
-
-  const frontier: Set<number>[] = counties.map(() => new Set<number>());
-  seeds.forEach((sid, ci) => {
+  const regionSet: Set<number>[] = counties.map((c) => new Set(c.cellIds));
+  // 前沿：未分配且与区域相邻的格
+  const frontierAll = new Set<number>();
+  seeds.forEach((sid) => {
     const cell = cellsById.get(sid) as CellData;
     for (const nb of cell.neighbors) {
       const nbC = cellsById.get(nb);
-      if (nbC && nbC.land && !assigned.has(nb)) frontier[ci].add(nb);
+      if (nbC && nbC.land && !assigned.has(nb)) frontierAll.add(nb);
     }
   });
 
@@ -374,33 +443,36 @@ function growCounties(
     county.tempSum += cell.temp;
     county.precSum += cell.prec;
     assigned.set(cid, ci);
-    frontier[ci].delete(cid);
+    regionSet[ci].add(cid);
     for (const nb of cell.neighbors) {
       const nbC = cellsById.get(nb);
-      if (nbC && nbC.land && !assigned.has(nb)) frontier[ci].add(nb);
+      if (nbC && nbC.land && !assigned.has(nb)) frontierAll.add(nb);
     }
   };
 
+  // 主生长：每次选「共享边最多」的 (区域, 格) 对；候选须同海拔带+同气候带
   while (assigned.size < n) {
     let bestCi = -1;
     let bestCell = -1;
-    let bestSim = -Infinity;
+    let bestEdges = -1;
     for (let ci = 0; ci < counties.length; ci++) {
       const county = counties[ci];
       if (county.cellIds.length >= COUNTY_MAX) continue;
-      const avgH = county.hSum / county.cellIds.length;
-      const avgT = county.tempSum / county.cellIds.length;
-      const avgP = county.precSum / county.cellIds.length;
-      for (const cid of frontier[ci]) {
+      const rs = regionSet[ci];
+      for (const cid of frontierAll) {
         if (assigned.has(cid)) continue;
+        if (ridgeSet.has(cid)) continue; // 山脊格不参与县聚类
         const cell = cellsById.get(cid);
         if (!cell) continue;
-        const sim = cellSim(cell, avgH, avgT, avgP);
+        if (elevBandOf(cell.h) !== county.seedElevBand) continue;
+        if (cell.climate !== county.seedClimate) continue;
+        const edges = cellSharedEdges(cid, rs, cellsById);
+        if (edges <= 0) continue; // 必须与区域直接相邻（保持县连通）
         const tie =
-          sim > bestSim ||
-          (sim === bestSim && (bestCi === -1 || ci < bestCi || (ci === bestCi && cid < bestCell)));
+          edges > bestEdges ||
+          (edges === bestEdges && (bestCi === -1 || ci < bestCi || (ci === bestCi && cid < bestCell)));
         if (tie) {
-          bestSim = sim;
+          bestEdges = edges;
           bestCi = ci;
           bestCell = cid;
         }
@@ -410,37 +482,180 @@ function growCounties(
       assign(bestCi, bestCell);
       continue;
     }
-    let anyCi = -1;
-    let anyCell = -1;
-    let anySim = -Infinity;
-    for (let ci = 0; ci < counties.length; ci++) {
-      const county = counties[ci];
-      const avgH = county.hSum / county.cellIds.length;
-      const avgT = county.tempSum / county.cellIds.length;
-      const avgP = county.precSum / county.cellIds.length;
-      for (const cid of frontier[ci]) {
-        if (assigned.has(cid)) continue;
-        const cell = cellsById.get(cid);
-        if (!cell) continue;
-        const sim = cellSim(cell, avgH, avgT, avgP);
-        const tie =
-          sim > anySim ||
-          (sim === anySim && (anyCi === -1 || ci < anyCi || (ci === anyCi && cid < anyCell)));
-        if (tie) {
-          anySim = sim;
-          anyCi = ci;
-          anyCell = cid;
-        }
-      }
-    }
-    if (anyCi === -1) break;
-    assign(anyCi, anyCell);
+    break; // 无同带同气候候选 → 进入兜底
   }
 
-  return counties;
+  // 兜底：剩余格并入「共享边最多」的相邻区域（tie 区域 id 小）；无相邻 → 自成一县
+  while (assigned.size < n) {
+    let bestCi = -1;
+    let bestCell = -1;
+    let bestEdges = -1;
+    for (const cid of frontierAll) {
+      if (assigned.has(cid)) continue;
+      if (ridgeSet.has(cid)) continue; // 山脊格不参与县聚类
+      let bi = -1;
+      let be = -1;
+      for (let ci = 0; ci < counties.length; ci++) {
+        if (counties[ci].cellIds.length >= COUNTY_MAX) continue;
+        const e = cellSharedEdges(cid, regionSet[ci], cellsById);
+        if (e <= 0) continue; // 必须与区域直接相邻（保持县连通）
+        if (e > be || (e === be && (bi === -1 || ci < bi))) {
+          be = e;
+          bi = ci;
+        }
+      }
+      if (bi === -1) continue;
+      const tie =
+        be > bestEdges ||
+        (be === bestEdges && (bestCi === -1 || bi < bestCi || (bi === bestCi && cid < bestCell)));
+      if (tie) {
+        bestEdges = be;
+        bestCi = bi;
+        bestCell = cid;
+      }
+    }
+    if (bestCi !== -1) {
+      assign(bestCi, bestCell);
+      continue;
+    }
+    // 完全孤立的格（无任何陆地邻已分配）：自成一县
+    let orphan = -1;
+    for (const cid of sorted) {
+      if (!assigned.has(cid)) {
+        orphan = cid;
+        break;
+      }
+    }
+    if (orphan === -1) break;
+    const c = cellsById.get(orphan) as CellData;
+    counties.push({
+      cellIds: [orphan],
+      hSum: c.h,
+      tempSum: c.temp,
+      precSum: c.prec,
+      seedElevBand: elevBandOf(c.h),
+      seedClimate: c.climate,
+    });
+    assigned.set(orphan, counties.length - 1);
+    regionSet.push(new Set([orphan]));
+  }
+
+  // 合并 < COUNTY_MIN 的县到「共享边最多」的相邻县（优先同带同气候，其次任意）
+  const list = counties.slice();
+  let changed = true;
+  let guard = 0;
+  while (changed && guard++ < 128) {
+    changed = false;
+    let ti = -1;
+    for (let i = 0; i < list.length; i++) {
+      if (list[i].cellIds.length < COUNTY_MIN && (ti === -1 || list[i].cellIds.length < list[ti].cellIds.length)) {
+        ti = i;
+      }
+    }
+    if (ti === -1) break;
+    const tiny = list[ti];
+    const tinySet = new Set(tiny.cellIds);
+    let bj = -1;
+    let bestEdges = -1;
+    let bestEdgesAny = -1;
+    let bjAny = -1;
+    for (let j = 0; j < list.length; j++) {
+      if (j === ti) continue;
+      const e = regionSharedEdges(tinySet, new Set(list[j].cellIds), cellsById);
+      if (e <= 0) continue;
+      const sameGeo =
+        list[j].seedElevBand === tiny.seedElevBand && list[j].seedClimate === tiny.seedClimate;
+      if (sameGeo && (e > bestEdges || (e === bestEdges && (bj === -1 || j < bj)))) {
+        bestEdges = e;
+        bj = j;
+      }
+      if (e > bestEdgesAny || (e === bestEdgesAny && (bjAny === -1 || j < bjAny))) {
+        bestEdgesAny = e;
+        bjAny = j;
+      }
+    }
+    const target = bj !== -1 ? bj : bjAny;
+    if (target === -1) break;
+    list[target].cellIds.push(...tiny.cellIds);
+    list[target].hSum += tiny.hSum;
+    list[target].tempSum += tiny.tempSum;
+    list[target].precSum += tiny.precSum;
+    list.splice(ti, 1);
+    changed = true;
+  }
+  return list;
 }
 
-/** 两县是否格邻接（共享格邻边） */
+/**
+ * v0.7 紧凑并省：县 → 省（共享边界边数最大 = 周长增量最小，杜绝长条怪形）。
+ * 目标 30-60 格：反复把「最小省」并入「共享边最多」的邻省（合并后 ≤ PROVINCE_MAX 优先，
+ * 其次 ≤ PROVINCE_SIZE_MAX），直到所有省 ≥ PROVINCE_TARGET(45) 或无可合并。
+ * 每次合并都保持连通（两连通区共享边>0 → 合并仍连通）→ 单大陆块省必然连通。
+ * 山脊格不参与县聚类 → 跨脊合并结构上不可能。
+ */
+function mergeProvincesV7(
+  landCounties: GrowCounty[],
+  cellsById: Map<number, CellData>,
+): number[][] {
+  if (landCounties.length === 0) return [];
+  // 区域 = 县索引集合；cells 集合缓存（初始每县一区，全部连通）
+  const regions: Set<number>[] = landCounties.map((_, i) => new Set([i]));
+  const regionCells: Set<number>[] = landCounties.map((c) => new Set(c.cellIds));
+  const sizeOf = (r: number): number => regionCells[r].size;
+
+  let guard = 0;
+  while (guard++ < 8192) {
+    // 最小省（< PROVINCE_TARGET；跳过已被并入清空的区）
+    let ti = -1;
+    let tiSize = Infinity;
+    for (let r = 0; r < regions.length; r++) {
+      if (regions[r].size === 0) continue;
+      const s = sizeOf(r);
+      if (s < PROVINCE_TARGET && s < tiSize) {
+        tiSize = s;
+        ti = r;
+      }
+    }
+    if (ti === -1) break;
+    // 候选邻省：先找「合并后 ≤ PROVINCE_MAX(60)」中共享边最多者；无则放宽到 ≤ PROVINCE_SIZE_MAX(90)
+    let best = -1;
+    let bestEdges = -1;
+    let best60 = -1;
+    let best60Edges = -1;
+    for (let r = 0; r < regions.length; r++) {
+      if (r === ti || regions[r].size === 0) continue;
+      const e = regionSharedEdges(regionCells[ti], regionCells[r], cellsById);
+      if (e <= 0) continue;
+      const combined = tiSize + sizeOf(r);
+      if (combined > PROVINCE_SIZE_MAX) continue;
+      if (e > bestEdges || (e === bestEdges && r < best)) {
+        bestEdges = e;
+        best = r;
+      }
+      if (combined <= PROVINCE_MAX && (e > best60Edges || (e === best60Edges && r < best60))) {
+        best60Edges = e;
+        best60 = r;
+      }
+    }
+    if (best === -1) break; // 无候选（孤岛县/邻域全超限）→ 保留为边缘例外
+    const pick = best60 !== -1 ? best60 : best;
+    // 并入：pick 吸收 ti
+    for (const ci of regions[ti]) regions[pick].add(ci);
+    for (const cid of regionCells[ti]) regionCells[pick].add(cid);
+    regions[ti].clear();
+    regionCells[ti].clear();
+  }
+
+  // 输出非空区域（省 = 县索引数组），按区域 id 升序
+  const out: number[][] = [];
+  for (let r = 0; r < regions.length; r++) {
+    if (regions[r].size === 0) continue;
+    out.push([...regions[r]].sort((a, b) => a - b));
+  }
+  return out;
+}
+
+/** 县对是否格邻接（共享格邻边） */
 function countiesAdjacent(
   a: GrowCounty,
   b: GrowCounty,
@@ -455,147 +670,6 @@ function countiesAdjacent(
     }
   }
   return false;
-}
-
-/** 合并 <5 格的县到相似度最高的邻县（确定性：按县 id 升序处理） */
-function mergeTinyCounties(
-  counties: GrowCounty[],
-  cellsById: Map<number, CellData>,
-): GrowCounty[] {
-  const list = counties.slice();
-  let changed = true;
-  while (changed) {
-    changed = false;
-    let ti = -1;
-    for (let i = 0; i < list.length; i++) {
-      if (list[i].cellIds.length < COUNTY_MIN && (ti === -1 || list[i].cellIds.length < list[ti].cellIds.length)) {
-        ti = i;
-      }
-    }
-    if (ti === -1) break;
-    const tiny = list[ti];
-    let bj = -1;
-    let bestSim = -Infinity;
-    for (let j = 0; j < list.length; j++) {
-      if (j === ti || !countiesAdjacent(tiny, list[j], cellsById)) continue;
-      const tAvgH = tiny.hSum / tiny.cellIds.length;
-      const tAvgT = tiny.tempSum / tiny.cellIds.length;
-      const tAvgP = tiny.precSum / tiny.cellIds.length;
-      const jAvgH = list[j].hSum / list[j].cellIds.length;
-      const jAvgT = list[j].tempSum / list[j].cellIds.length;
-      const jAvgP = list[j].precSum / list[j].cellIds.length;
-      const sim =
-        1 -
-        (0.5 * Math.abs(Math.floor(tAvgH / 15) - Math.floor(jAvgH / 15)) / 6 +
-          0.3 * Math.abs(tAvgT - jAvgT) / 50 +
-          0.2 * Math.abs(tAvgP - jAvgP) / 100);
-      if (sim > bestSim || (sim === bestSim && (bj === -1 || j < bj))) {
-        bestSim = sim;
-        bj = j;
-      }
-    }
-    if (bj === -1) break;
-    list[bj].cellIds.push(...tiny.cellIds);
-    list[bj].hSum += tiny.hSum;
-    list[bj].tempSum += tiny.tempSum;
-    list[bj].precSum += tiny.precSum;
-    list.splice(ti, 1);
-    changed = true;
-  }
-  return list;
-}
-
-/** 县对是否隔山脉（边界存在两格均 >= RIDGE_H 的相邻对） */
-function hasRidgeBetween(
-  a: GrowCounty,
-  b: GrowCounty,
-  cellsById: Map<number, CellData>,
-): boolean {
-  const bMap = new Map<number, CellData>();
-  for (const cid of b.cellIds) {
-    const c = cellsById.get(cid);
-    if (c) bMap.set(cid, c);
-  }
-  for (const cid of a.cellIds) {
-    const cell = cellsById.get(cid);
-    if (!cell) continue;
-    for (const nb of cell.neighbors) {
-      const nbC = bMap.get(nb);
-      if (nbC && cell.h >= RIDGE_H && nbC.h >= RIDGE_H) return true;
-    }
-  }
-  return false;
-}
-
-/** 单个大陆块内：县 → 省 合并（山脉为界、气候相近、目标 20-80 格） */
-function mergeProvinces(
-  landCounties: GrowCounty[],
-  cellsById: Map<number, CellData>,
-): number[][] {
-  if (landCounties.length === 0) return [];
-  const total = landCounties.reduce((s, c) => s + c.cellIds.length, 0);
-  if (total <= PROVINCE_MIN) return [landCounties.map((_, i) => i)];
-
-  const adj: Set<number>[] = landCounties.map(() => new Set<number>());
-  for (let i = 0; i < landCounties.length; i++) {
-    for (let j = i + 1; j < landCounties.length; j++) {
-      if (!countiesAdjacent(landCounties[i], landCounties[j], cellsById)) continue;
-      if (hasRidgeBetween(landCounties[i], landCounties[j], cellsById)) continue;
-      adj[i].add(j);
-      adj[j].add(i);
-    }
-  }
-
-  const sizeOf = (idx: number): number => landCounties[idx].cellIds.length;
-  const unassigned = new Set<number>(landCounties.map((_, i) => i));
-  const provinces: number[][] = [];
-
-  while (unassigned.size > 0) {
-    let seed = -1;
-    for (const i of unassigned) {
-      if (seed === -1 || sizeOf(i) > sizeOf(seed)) seed = i;
-    }
-    const prov: number[] = [seed];
-    unassigned.delete(seed);
-    let size = sizeOf(seed);
-    while (size < PROVINCE_MAX) {
-      let cand = -1;
-      let bestScore = -Infinity;
-      for (const i of unassigned) {
-        let linked = false;
-        for (const pi of prov) {
-          if (adj[pi].has(i)) {
-            linked = true;
-            break;
-          }
-        }
-        if (!linked) continue;
-        const pAvgT = prov.reduce((s, pi) => s + landCounties[pi].tempSum / landCounties[pi].cellIds.length, 0) / prov.length;
-        const pAvgP = prov.reduce((s, pi) => s + landCounties[pi].precSum / landCounties[pi].cellIds.length, 0) / prov.length;
-        const pAvgH = prov.reduce((s, pi) => s + landCounties[pi].hSum / landCounties[pi].cellIds.length, 0) / prov.length;
-        const cAvgT = landCounties[i].tempSum / landCounties[i].cellIds.length;
-        const cAvgP = landCounties[i].precSum / landCounties[i].cellIds.length;
-        const cAvgH = landCounties[i].hSum / landCounties[i].cellIds.length;
-        const sim =
-          1 -
-          (0.45 * Math.abs(Math.floor(pAvgH / 15) - Math.floor(cAvgH / 15)) / 6 +
-            0.3 * Math.abs(pAvgT - cAvgT) / 50 +
-            0.25 * Math.abs(pAvgP - cAvgP) / 100);
-        const sizeFit = 1 - Math.min(1, Math.abs(sizeOf(i) - 10) / 20);
-        const score = sim + 0.15 * sizeFit;
-        if (score > bestScore || (score === bestScore && (cand === -1 || i < cand))) {
-          bestScore = score;
-          cand = i;
-        }
-      }
-      if (cand === -1) break;
-      prov.push(cand);
-      unassigned.delete(cand);
-      size += sizeOf(cand);
-    }
-    provinces.push(prov);
-  }
-  return provinces;
 }
 
 /** 格列表质心（多边形顶点均值） */
@@ -615,26 +689,29 @@ function centroidOf(cids: number[], cellsById: Map<number, CellData>): Point {
   return { x: sx / cids.length, y: sy / cids.length };
 }
 
-// ---- v0.6 省份重构（均匀化 + 海岛归并） ----
+// ---- v0.6/v0.7 省组与后处理（拆分/小省并入/海岛归并/山脊归属） ----
 
 /**
- * 构建期省组：一组全局县索引 + 大陆块分量统计。
+ * 构建期省组：一组全局县索引 + 大陆块分量统计 + 山脊格列表。
  * 多岛省（海岛归并结果）的 landmassId = 格数最多的分量。
  */
 interface ProvGroup {
   countyIdx: number[];
   lmCells: Map<number, number>;
+  /** 并入该省的山脊格（id 升序；不属任何县） */
+  ridgeCells: number[];
 }
 
 function groupCellCount(g: ProvGroup, allCounties: GrowCounty[]): number {
   let n = 0;
   for (const ci of g.countyIdx) n += allCounties[ci].cellIds.length;
-  return n;
+  return n + g.ridgeCells.length;
 }
 
 function groupCells(g: ProvGroup, allCounties: GrowCounty[]): number[] {
   const out: number[] = [];
   for (const ci of g.countyIdx) out.push(...allCounties[ci].cellIds);
+  out.push(...g.ridgeCells);
   return out;
 }
 
@@ -650,24 +727,138 @@ function groupPrimaryLandmass(g: ProvGroup): number {
   return best;
 }
 
-/** 省组 → 归属（地理规则；用于「同属国」归并分组与最终归属） */
+/** 省组 → 归属（地理规则；用于「同属国」归并分组） */
 function groupOwner(g: ProvGroup, allCounties: GrowCounty[], cellsById: Map<number, CellData>, width: number, height: number): ProvinceOwner {
   const cent = centroidOf(groupCells(g, allCounties), cellsById);
   return assignProvinceOwnerV2(groupPrimaryLandmass(g), cent, width, height);
 }
 
+/** 归属判定顺序（多数票 tie-break 用；与 NationId 无关的稳定序） */
+const OWNER_ORDER: ProvinceOwner[] = [
+  'empire', 'lorraine', 'ianys', 'orange', 'zalakN', 'zalakS', 'angland', 'normandy', 'undiscovered',
+];
+
+/**
+ * v0.7 归属重派：按「格多数票」给省定属（每个陆地格按地理区域规则 assignProvinceOwnerV2，
+ * 多数者胜；tie 按 OWNER_ORDER 稳定序）。比质心判定更稳 —— 大省不会被质心偏移带错国。
+ */
+function ownerByMajority(
+  g: ProvGroup,
+  allCounties: GrowCounty[],
+  cellOfLandmass: Map<number, number>,
+  cellsById: Map<number, CellData>,
+  width: number,
+  height: number,
+): ProvinceOwner {
+  const counts = new Map<ProvinceOwner, number>();
+  const tally = (cid: number): void => {
+    const cell = cellsById.get(cid);
+    if (!cell) return;
+    const lm = cellOfLandmass.get(cid) ?? -1;
+    const o = assignProvinceOwnerV2(lm, { x: (cell.bbox.minX + cell.bbox.maxX) / 2, y: (cell.bbox.minY + cell.bbox.maxY) / 2 }, width, height);
+    counts.set(o, (counts.get(o) ?? 0) + 1);
+  };
+  for (const ci of g.countyIdx) for (const cid of allCounties[ci].cellIds) tally(cid);
+  for (const rc of g.ridgeCells) tally(rc);
+  let best: ProvinceOwner = 'undiscovered';
+  let bestN = -1;
+  for (const o of OWNER_ORDER) {
+    const n = counts.get(o) ?? 0;
+    if (n > bestN) {
+      bestN = n;
+      best = o;
+    }
+  }
+  return best;
+}
+
+/** 山脊格归属：并入「共享边最多」的相邻省；无相邻（纯山脊簇）按同大陆块最近省；仍无 → 独立成省 */
+function assignRidgeCells(
+  groups: ProvGroup[],
+  allCounties: GrowCounty[],
+  ridgeCells: number[],
+  cellOfLandmass: Map<number, number>,
+  cellsById: Map<number, CellData>,
+): ProvGroup[] {
+  if (ridgeCells.length === 0) return groups;
+  const out = groups.map((g) => ({ ...g, ridgeCells: [] as number[] }));
+  // 每组格集合（不含山脊）用于共享边计算
+  const cellSets: Set<number>[] = out.map((g) => {
+    const s = new Set<number>();
+    for (const ci of g.countyIdx) for (const cid of allCounties[ci].cellIds) s.add(cid);
+    return s;
+  });
+  const unassigned = new Set<number>(ridgeCells);
+
+  // 1) 有相邻省者：共享边最多（tie 省 id 小；避免把省顶过 PROVINCE_SIZE_MAX）
+  for (const rc of ridgeCells) {
+    if (!unassigned.has(rc)) continue;
+    const cell = cellsById.get(rc);
+    if (!cell) continue;
+    let best = -1;
+    let bestEdges = -1;
+    for (let g = 0; g < out.length; g++) {
+      if (cellSets[g].size + 1 > PROVINCE_SIZE_MAX) continue; // 顶格省不再接收山脊
+      const e = cellSharedEdges(rc, cellSets[g], cellsById);
+      if (e > bestEdges || (e === bestEdges && (best === -1 || g < best))) {
+        bestEdges = e;
+        best = g;
+      }
+    }
+    if (best !== -1 && bestEdges > 0) {
+      out[best].ridgeCells.push(rc);
+      cellSets[best].add(rc);
+      unassigned.delete(rc);
+    }
+  }
+  // 2) 剩余（纯山脊簇/无邻）：按「同大陆块最近省质心」并入（环绕距离；避免顶过 PROVINCE_SIZE_MAX）
+  if (unassigned.size > 0) {
+    const width = 1920;
+    for (const rc of [...unassigned].sort((a, b) => a - b)) {
+      const cell = cellsById.get(rc);
+      if (!cell) continue;
+      const lm = cellOfLandmass.get(rc) ?? -1;
+      let best = -1;
+      let bestD = Infinity;
+      for (let g = 0; g < out.length; g++) {
+        if (cellSets[g].size + 1 > PROVINCE_SIZE_MAX) continue;
+        const gLm = groupPrimaryLandmass(out[g]);
+        if (gLm !== lm && gLm !== -1) continue;
+        const cent = centroidOf(groupCells(out[g], allCounties), cellsById);
+        const d = wrappedDistanceXY(cell.polygon[0].x, cell.polygon[0].y, cent.x, cent.y, width);
+        if (d < bestD || (d === bestD && (best === -1 || g < best))) {
+          bestD = d;
+          best = g;
+        }
+      }
+      if (best !== -1) {
+        out[best].ridgeCells.push(rc);
+        cellSets[best].add(rc);
+        unassigned.delete(rc);
+      } else {
+        // 3) 理论兜底：独立成省（纯山脊岛）
+        const lmCells = new Map<number, number>();
+        lmCells.set(lm, 1);
+        out.push({ countyIdx: [], lmCells, ridgeCells: [rc] });
+        cellSets.push(new Set([rc]));
+        unassigned.delete(rc);
+      }
+    }
+  }
+  return out;
+}
+
 /**
  * 大省拆分：> PROVINCE_SPLIT_MAX 格的省切成目标 ~PROVINCE_TARGET 的多省。
- * 确定性：种子 = 剩余县中格数最多者（tie-break 索引小）；BFS 前沿按县格数降序扩展（大县先填）。
- * 策略：先按 k-1 片 BFS 生长（每片 ≥ ~45 格），最后一片 = 全部剩余县（可为多岛/断片，
- * 与海岛归并的多岛省概念一致）；末尾 < PROVINCE_MERGE_MIN 的片并入相邻片，避免
- * 「小省并入」步骤把刚拆开的两片又并回去。
+ * v0.7 紧凑版：片生长沿「共享边最多」的县扩展（周长增量最小）。
+ * 确定性：种子 = 剩余县中格数最多者（tie 索引小）；末尾 < PROVINCE_MERGE_MIN 的片并入相邻片。
  */
-function splitLargeGroup(
+function splitLargeGroupV7(
   g: ProvGroup,
   allCounties: GrowCounty[],
   adj: Set<number>[],
   cellOfLandmass: Map<number, number>,
+  cellsById: Map<number, CellData>,
 ): ProvGroup[] {
   const sizeOf = (ci: number): number => allCounties[ci].cellIds.length;
   const lmOfCounty = (ci: number): number => cellOfLandmass.get(allCounties[ci].cellIds[0]) ?? -1;
@@ -677,51 +868,51 @@ function splitLargeGroup(
   const remaining = new Set<number>(g.countyIdx);
   const pieces: number[][] = [];
 
-  // 1) 前 pieceCount-1 片：BFS 生长至 ≥ PROVINCE_TARGET（前沿按格数降序）
+  // 1) 前 pieceCount-1 片：种子=格数最多县，前沿按「共享边最多」扩展至 ≥ PROVINCE_TARGET
   for (let p = 0; p < pieceCount - 1 && remaining.size > 0; p++) {
     let seed = -1;
     for (const i of remaining) {
       if (seed === -1 || sizeOf(i) > sizeOf(seed)) seed = i;
     }
-    const piece: number[] = [];
-    const inPiece = new Set<number>([seed]);
+    const piece: number[] = [seed];
     remaining.delete(seed);
-    piece.push(seed);
     let size = sizeOf(seed);
-    const frontier: number[] = [];
-    const pushFrontier = (ci: number): void => {
-      if (!remaining.has(ci) || inPiece.has(ci)) return;
-      inPiece.add(ci);
-      frontier.push(ci);
-      frontier.sort((a, b) => sizeOf(b) - sizeOf(a) || a - b);
-    };
-    for (const nb of adj[seed]) pushFrontier(nb);
-    while (frontier.length > 0 && size < PROVINCE_TARGET) {
-      const cur = frontier.shift() as number;
-      remaining.delete(cur);
-      piece.push(cur);
-      size += sizeOf(cur);
-      for (const nb of adj[cur]) pushFrontier(nb);
+    while (size < PROVINCE_TARGET) {
+      // 找「与片共享边最多」的剩余县
+      let cand = -1;
+      let candEdges = -1;
+      const pieceCells = new Set<number>();
+      for (const ci of piece) for (const cid of allCounties[ci].cellIds) pieceCells.add(cid);
+      for (const i of remaining) {
+        const e = regionSharedEdges(pieceCells, countyCellSet(allCounties, i), cellsById);
+        if (e > candEdges || (e === candEdges && (cand === -1 || i < cand))) {
+          candEdges = e;
+          cand = i;
+        }
+      }
+      if (cand === -1 || candEdges <= 0) break;
+      remaining.delete(cand);
+      piece.push(cand);
+      size += sizeOf(cand);
     }
     pieces.push(piece);
   }
-  // 2) 最后一片 = 全部剩余县（可能断片/多岛，概念同海岛归并省）
+  // 2) 最后一片 = 全部剩余县（可为断片/多岛）
   if (remaining.size > 0) pieces.push([...remaining]);
 
-  // 3) 借县补足：< PROVINCE_MERGE_MIN 的片从相邻片「借」最小县，直到 ≥ 下限
-  //    （避免把刚拆开的片又并入回去 → 61 格省变回一整块）
+  // 3) 借县补足：< PROVINCE_MERGE_MIN 的片从相邻片「借」共享边最多的最小县
   let guard = 0;
   while (guard++ < 64) {
     let ti = -1;
     for (let i = 0; i < pieces.length; i++) {
-      const n = pieces[i].reduce((s, ci) => s + sizeOf(ci), 0);
-      if (n < PROVINCE_MERGE_MIN && (ti === -1 || n < pieces[ti].reduce((s, ci) => s + sizeOf(ci), 0))) {
+      const nn = pieces[i].reduce((s, ci) => s + sizeOf(ci), 0);
+      if (nn < PROVINCE_MERGE_MIN && (ti === -1 || nn < pieces[ti].reduce((s, ci) => s + sizeOf(ci), 0))) {
         ti = i;
       }
     }
     if (ti === -1) break;
     const tinySet = new Set(pieces[ti]);
-    // 候选借出县：优先「与 tiny 片邻接」的县中格数最小者；无邻接县时取任意片中最小县（tie 全局县索引小）
+    // 候选借出县：优先与 tiny 片邻接（共享边>0）且格数最小者；无邻接时任意片最小县
     let best = -1;
     let bestSize = Infinity;
     let bestAdj = -1;
@@ -749,7 +940,6 @@ function splitLargeGroup(
     }
     const borrow = bestAdj !== -1 ? bestAdj : best;
     if (borrow !== -1) {
-      // 把 borrow 从原片移到 tiny 片
       for (let j = 0; j < pieces.length; j++) {
         if (j === ti) continue;
         const idx = pieces[j].indexOf(borrow);
@@ -761,7 +951,7 @@ function splitLargeGroup(
       pieces[ti].push(borrow);
       continue;
     }
-    // 4) 兜底吸收：无县可借（理论不触发）→ 并入合并后最小的相邻片
+    // 4) 兜底吸收：并入合并后最小的相邻片
     let bj = -1;
     let bestMerged = Infinity;
     for (let j = 0; j < pieces.length; j++) {
@@ -791,8 +981,13 @@ function splitLargeGroup(
   return pieces.map((piece) => {
     const lmCells = new Map<number, number>();
     for (const ci of piece) lmCells.set(lmOfCounty(ci), (lmCells.get(lmOfCounty(ci)) ?? 0) + sizeOf(ci));
-    return { countyIdx: piece, lmCells };
+    return { countyIdx: piece, lmCells, ridgeCells: [] };
   });
+}
+
+/** 辅助：县内格集合（共享边计算用） */
+function countyCellSet(allCounties: GrowCounty[], ci: number): Set<number> {
+  return new Set(allCounties[ci].cellIds);
 }
 
 // ---- 环绕格距计算（v0.6：所有省距/海峡距/归并判定均环绕） ----
@@ -858,11 +1053,11 @@ function minCellDistBetween(
 }
 
 /**
- * 小省并入：< PROVINCE_MERGE_MIN 格的省并入「同属国」最近邻省（环绕格距最小）。
- * 同属国限制保证：群岛国（盎格伦撒等）不会因并入异国大陆而灭国；迷雾区不跨界。
+ * 小省并入（v0.7）：< PROVINCE_MERGE_MIN 格的省并入「共享边最多」的相邻省；
+ * 无相邻省（海岛/山脊隔断）则并入「同属国」最近邻省（环绕格距最小，保留 v0.6 行为）。
  * 确定性：按省 id 升序反复处理最小者。
  */
-function mergeTinyGroups(
+function mergeTinyGroupsV7(
   groups: ProvGroup[],
   allCounties: GrowCounty[],
   dc: DistCache,
@@ -885,24 +1080,41 @@ function mergeTinyGroups(
     }
     if (ti === -1) break;
     const tiny = list[ti];
+    const tinyCells = new Set(cellsOf(tiny));
     const tinyOwner = groupOwner(tiny, allCounties, cellsById, width, height);
-    const tinyCells = cellsOf(tiny);
+    // 1) 相邻省（共享边>0）：共享边最多优先（tie 省 id 小）；合并后 ≤ PROVINCE_SIZE_MAX
     let bj = -1;
-    let bestD = Infinity;
+    let bestEdges = -1;
     for (let j = 0; j < list.length; j++) {
       if (j === ti) continue;
-      const other = list[j];
-      if (groupOwner(other, allCounties, cellsById, width, height) !== tinyOwner) continue; // 同属国才并入
-      const d = minCellDistBetween(dc, tinyCells, cellsOf(other), bestD);
-      if (d < bestD || (d === bestD && (bj === -1 || j < bj))) {
-        bestD = d;
+      const e = regionSharedEdges(tinyCells, new Set(cellsOf(list[j])), cellsById);
+      if (e <= 0) continue;
+      if (groupCellCount(tiny, allCounties) + groupCellCount(list[j], allCounties) > PROVINCE_SIZE_MAX) continue;
+      if (e > bestEdges || (e === bestEdges && (bj === -1 || j < bj))) {
+        bestEdges = e;
         bj = j;
       }
     }
-    if (bj === -1) break; // 无同属国邻省（如盎格伦撒仅剩 8 格）→ 保留为边缘例外
+    // 2) 无相邻 → 同属国最近邻（环绕格距最小，v0.6 行为；海岛并入；合并后 ≤ PROVINCE_SIZE_MAX）
+    if (bj === -1) {
+      let bestD = Infinity;
+      for (let j = 0; j < list.length; j++) {
+        if (j === ti) continue;
+        const other = list[j];
+        if (groupOwner(other, allCounties, cellsById, width, height) !== tinyOwner) continue;
+        if (groupCellCount(tiny, allCounties) + groupCellCount(other, allCounties) > PROVINCE_SIZE_MAX) continue;
+        const d = minCellDistBetween(dc, cellsOf(tiny), cellsOf(other), bestD);
+        if (d < bestD || (d === bestD && (bj === -1 || j < bj))) {
+          bestD = d;
+          bj = j;
+        }
+      }
+    }
+    if (bj === -1) break; // 无候选 → 保留为边缘例外（如盎格伦撒极小岛省）
     // 并入
     const target = list[bj];
     target.countyIdx.push(...tiny.countyIdx);
+    target.ridgeCells.push(...tiny.ridgeCells);
     for (const [lm, n] of tiny.lmCells) target.lmCells.set(lm, (target.lmCells.get(lm) ?? 0) + n);
     list.splice(ti, 1);
     changed = true;
@@ -967,10 +1179,12 @@ function mergeIslandGroups(
     let any = false;
     for (const c of candidates) {
       if (merged.has(c.i) || merged.has(c.j)) continue;
-      // 合并 j 入 i
+      // 合并 j 入 i（实时复查上限：i 可能已吸收多个岛而变大）
       const a = list[c.i];
       const b = list[c.j];
+      if (groupCellCount(a, allCounties) + groupCellCount(b, allCounties) > ISLAND_MERGE_MAX_COMBINED) continue;
       a.countyIdx.push(...b.countyIdx);
+      a.ridgeCells.push(...b.ridgeCells);
       for (const [lm, n] of b.lmCells) a.lmCells.set(lm, (a.lmCells.get(lm) ?? 0) + n);
       merged.add(c.j);
       any = true;
@@ -984,26 +1198,24 @@ function mergeIslandGroups(
 // ---- v0.5 国界重绘（v0.6 区域化：旧 PROVINCE_OWNER_OVERRIDES 因省份 id 重构失效） ----
 /**
  * v0.6 归属覆盖表（兼容编辑器导出格式 {provinceId: nationId}）。
- * v0.5 的手调条目（#0 中央低地→南扎拉克、#38/#45 凯森海峡哨岛→奥兰治/盎格伦撒）
- * 已区域化进 assignProvinceOwnerV2（按大陆块 + 质心区域，不依赖省份 id），
+ * v0.5 的手调条目已区域化进 assignProvinceOwnerV2（按大陆块 + 质心区域，不依赖省份 id），
  * 因此本表默认空；编辑器（localStorage kalt-border-edits）与导出 JSON 仍按此格式覆盖。
+ * v0.7 省份 id 再次重构 → 旧 localStorage 覆盖因 id 失效（App 侧提示清空重建）。
  */
 export const PROVINCE_OWNER_OVERRIDES: Record<number, ProvinceOwner> = {};
 
 /** 海峡判定阈值（格质心间最近距离 px；小于阈值视为窄海/交通要道）。
- * 实测：凯森海峡哨岛对（块18↔块20）≈24、盎格伦撒群岛对（块14↔块15）≈38、
- * 奥兰治西南群岛对（块32↔块35）≈31 —— 阈值 40 恰好只标记这些要道，不误伤大陆本体。 */
+ * 实测：凯森海峡哨岛对 ≈24、盎格伦撒群岛对 ≈38、奥兰治西南群岛对 ≈31 —— 阈值 40 恰好只标记要道。 */
 export const STRAIT_DIST = 40;
 
 /**
- * v0.6 八国划分（按大陆块 id + 省质心区域 + 覆盖表；确定性；沿用 v0.5 原则）：
+ * v0.6/v0.7 八国划分（按大陆块 id + 省质心区域 + 覆盖表；确定性；沿用 v0.5 原则）：
  *  - 右侧新大陆 x >= 0.6W 保持未探明（不动）
- *  - LM0 北大陆：中央低地（x∈[0.30W,0.44W] 且 y∈[0.42H,0.56H]，v0.5 #0 区域化）→ 南扎拉克；
- *    南端（y>=0.55H）→ 诺曼尼亚；其余 → 帝国（北+西）
+ *  - LM0 北大陆：中央低地 → 南扎拉克；南端 → 诺曼尼亚；其余 → 帝国（北+西）
  *  - LM1/2/3/4/6/7 北境群岛 → 帝国
  *  - LM13/16/17 西大陆 → 洛林（西岸）；LM18 凯森海峡西岸哨岛 → 奥兰治；LM20 东岸哨岛 → 盎格伦撒
- *  - LM19 南大陆中央：西端（x<=0.43W）或南端（y>=0.63H）→ 诺曼尼亚；北（y<0.47H）→ 北扎拉克；其余 → 南扎拉克
- *  - LM21/30/31 东岸工业带（铁+煤）→ 伊尼亚斯
+ *  - LM19 南大陆中央：西端/南端 → 诺曼尼亚；北 → 北扎拉克；其余 → 南扎拉克
+ *  - LM21/30/31 东岸工业带 → 伊尼亚斯
  *  - LM9/12/14/15 中北群岛 → 盎格伦撒（群岛）
  *  - LM24/26/27/29/32/33/34/35 西南群岛 → 奥兰治（南部沿海低地）
  */
@@ -1011,7 +1223,6 @@ function assignProvinceOwnerV2(lmId: number, c: Point, width: number, height: nu
   if (c.x >= width * FOG_X_RATIO) return 'undiscovered';
   switch (lmId) {
     case 0:
-      // 北大陆：中央低地 → 南扎拉克（v0.5 #0 区域化）；南端 → 诺曼尼亚；其余 → 帝国
       if (c.x >= width * 0.3 && c.x <= width * 0.44 && c.y >= height * 0.42 && c.y <= height * 0.56) {
         return 'zalakS';
       }
@@ -1045,11 +1256,10 @@ function assignProvinceOwnerV2(lmId: number, c: Point, width: number, height: nu
     case 17:
       return 'lorraine'; // 西大陆（洛林西岸）
     case 18:
-      return 'orange'; // 凯森海峡西岸哨岛（v0.5 #38 区域化）
+      return 'orange'; // 凯森海峡西岸哨岛
     case 20:
-      return 'angland'; // 凯森海峡东岸哨岛（v0.5 #45 区域化）
+      return 'angland'; // 凯森海峡东岸哨岛
     case 19:
-      // 南大陆中央：诺曼尼亚=南端/西岸；北扎拉克=北；南扎拉克=中
       if (c.x <= width * 0.43) return 'normandy';
       if (c.y >= height * 0.63) return 'normandy';
       return c.y < height * 0.47 ? 'zalakN' : 'zalakS';
@@ -1070,8 +1280,7 @@ function assignProvinceOwnerV2(lmId: number, c: Point, width: number, height: nu
   return 'lorraine';
 }
 
-/** 计算各省「海峡省份」标记（沿海且与异大陆块最近环绕格距 < STRAIT_DIST）。
- * 只统计「已探明大陆块」之间的窄海（右侧迷雾新大陆不参与判定）。 */
+/** 计算各省「海峡省份」标记（沿海且与异大陆块最近环绕格距 < STRAIT_DIST）。 */
 export function computeStraitFlags(map: GameMap): void {
   const fogLandmasses = new Set<number>();
   for (const p of map.provinces) {
@@ -1206,17 +1415,29 @@ function buildMap(raw: RawMap): GameMap {
     }
   }
 
-  // ---- 三级制：大陆块内 格→县→省（基础合并） ----
+  // 山脊格：海拔局部极大值（> 所有陆地邻居，≥ RIDGE_MIN_H）—— 天然省界，不跨脊合并
+  const ridgeCells: number[] = [];
+  const ridgeSet = new Set<number>();
+  for (const cid of landCellIds) {
+    const cell = cellsById.get(cid);
+    if (cell && isRidgeCell(cell, cellsById)) {
+      ridgeCells.push(cid);
+      ridgeSet.add(cid);
+    }
+  }
+  ridgeCells.sort((a, b) => a - b);
+
+  // ---- 三级制：大陆块内 非山脊格→县（同海拔带+同气候带）→ 省（紧凑合并） ----
   const allCounties: GrowCounty[] = []; // 全局累计
   const baseProvinceCountyIdx: number[][] = []; // 每省 = 全局县索引数组
   const baseProvinceLandmass: number[] = []; // 每省所在大陆块
 
   landmasses.forEach((lmCells, lmId) => {
-    const grown = growCounties(lmCells, cellsById);
-    const merged = mergeTinyCounties(grown, cellsById);
-    const provIdx = mergeProvinces(merged, cellsById);
+    const nonRidge = lmCells.filter((cid) => !ridgeSet.has(cid));
+    const grown = growCountiesV7(nonRidge, cellsById, ridgeSet);
+    const provIdx = mergeProvincesV7(grown, cellsById);
     const base = allCounties.length;
-    merged.forEach((c) => {
+    grown.forEach((c) => {
       allCounties.push(c);
     });
     provIdx.forEach((countyIdxList) => {
@@ -1225,13 +1446,13 @@ function buildMap(raw: RawMap): GameMap {
     });
   });
 
-  // ---- v0.6 省组：均匀化重构（拆分 → 小省并入 → 海岛归并） ----
+  // ---- v0.7 省组：紧凑重构（拆分 → 小省并入 → 山脊归属 → 海岛归并） ----
   const mkGroup = (countyIdx: number[], lmId: number): ProvGroup => {
     const lmCells = new Map<number, number>();
     for (const ci of countyIdx) {
       lmCells.set(lmId, (lmCells.get(lmId) ?? 0) + allCounties[ci].cellIds.length);
     }
-    return { countyIdx, lmCells };
+    return { countyIdx, lmCells, ridgeCells: [] };
   };
 
   let groups: ProvGroup[] = baseProvinceCountyIdx.map((idxList, i) => mkGroup(idxList, baseProvinceLandmass[i]));
@@ -1247,12 +1468,12 @@ function buildMap(raw: RawMap): GameMap {
     }
   }
 
-  // 1) 大省拆分（两轮：基础合并后 + 小省并入后，后者覆盖 60+9 的超限组合）
+  // 1) 大省拆分（两轮：基础合并后 + 小省并入后，后者覆盖 60+ 的超限组合）
   const splitAll = (gs: ProvGroup[]): ProvGroup[] => {
     const out: ProvGroup[] = [];
     for (const g of gs) {
       if (groupCellCount(g, allCounties) > PROVINCE_SPLIT_MAX) {
-        const pieces = splitLargeGroup(g, allCounties, countyAdj, cellOfLandmass);
+        const pieces = splitLargeGroupV7(g, allCounties, countyAdj, cellOfLandmass, cellsById);
         out.push(...pieces);
       } else {
         out.push(g);
@@ -1262,16 +1483,22 @@ function buildMap(raw: RawMap): GameMap {
   };
   groups = splitAll(groups);
 
-  // 2) 小省并入（同属国最近邻）
+  // 2) 小省并入（共享边最多；无邻省走同属国最近邻）
   const dc = buildDistCache(cellsById, landCellIds, width);
-  groups = mergeTinyGroups(groups, allCounties, dc, cellsById, width, height);
-  // 2b) 小省并入可能把 60 格省顶到 61-69 → 再拆一轮
+  groups = mergeTinyGroupsV7(groups, allCounties, dc, cellsById, width, height);
+  // 2b) 小省并入可能把 60 格省顶到 61+ → 再拆一轮
   groups = splitAll(groups);
 
-  // 3) 海岛归并（同属国、不同大陆块、<35px）
+  // 3) 山脊格归属（并入共享边最多的相邻省；纯山脊簇按同大陆块最近省）
+  groups = assignRidgeCells(groups, allCounties, ridgeCells, cellOfLandmass, cellsById);
+
+  // 4) 海岛归并（同属国、不同大陆块、<35px）
   groups = mergeIslandGroups(groups, allCounties, dc, cellOfLandmass, cellsById, width, height);
 
-  // 4) 重新计算每个组的 landmass 分量（多岛省）
+  // 5) 小省并入（海岛归并后再收一轮：多岛省可能仍 < 8）
+  groups = mergeTinyGroupsV7(groups, allCounties, dc, cellsById, width, height);
+
+  // 6) 重新计算每个组的 landmass 分量（多岛省）
   const finalGroups = groups.map((g) => {
     const lmCells = new Map<number, number>();
     for (const ci of g.countyIdx) {
@@ -1279,7 +1506,11 @@ function buildMap(raw: RawMap): GameMap {
       const lm = cellOfLandmass.get(cid) ?? -1;
       lmCells.set(lm, (lmCells.get(lm) ?? 0) + allCounties[ci].cellIds.length);
     }
-    return { countyIdx: g.countyIdx, lmCells };
+    for (const rc of g.ridgeCells) {
+      const lm = cellOfLandmass.get(rc) ?? -1;
+      lmCells.set(lm, (lmCells.get(lm) ?? 0) + 1);
+    }
+    return { countyIdx: g.countyIdx, lmCells, ridgeCells: g.ridgeCells };
   });
 
   // 县对象（含中心/气候统计）
@@ -1322,6 +1553,7 @@ function buildMap(raw: RawMap): GameMap {
     const provCounties: County[] = g.countyIdx.map((ci) => counties[ci]);
     const cellIds: number[] = [];
     for (const c of provCounties) cellIds.push(...c.cellIds);
+    cellIds.push(...g.ridgeCells);
 
     const climateCells: Record<ClimateId, number> = {
       arctic: 0,
@@ -1351,7 +1583,7 @@ function buildMap(raw: RawMap): GameMap {
       terrCount[b] > terrCount[a] ? b : a,
     );
     const cent = centroidOf(cellIds, cellsById);
-    const baseOwner = assignProvinceOwnerV2(lmId, cent, width, height);
+    const baseOwner = ownerByMajority(g, allCounties, cellOfLandmass, cellsById, width, height);
     const owner = PROVINCE_OWNER_OVERRIDES[pid] ?? baseOwner;
     return {
       id: pid,
@@ -1442,7 +1674,102 @@ export function provinceOwnerTable(map: GameMap): Array<{
   return out;
 }
 
-/** 调试统计（sim 用；v0.6 增加省份规模分布/环绕校验样本） */
+/** 省包围盒长宽比（长轴/短轴；长条省判定用） */
+export function provinceAspect(map: GameMap, prov: Province): number {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const cid of prov.cellIds) {
+    const c = map.cellsById.get(cid);
+    if (!c) continue;
+    if (c.bbox.minX < minX) minX = c.bbox.minX;
+    if (c.bbox.minY < minY) minY = c.bbox.minY;
+    if (c.bbox.maxX > maxX) maxX = c.bbox.maxX;
+    if (c.bbox.maxY > maxY) maxY = c.bbox.maxY;
+  }
+  const w = Math.max(0, maxX - minX);
+  const h = Math.max(0, maxY - minY);
+  return Math.max(w, h) / Math.max(1e-9, Math.min(w, h));
+}
+
+/** 省离散紧凑度 = min(1, 4πn/P²)，n=格数，P=省边界边数（每条边界计一次） */
+export function provinceCompactness(map: GameMap, prov: Province): number {
+  const provSet = new Set(prov.cellIds);
+  let p = 0;
+  for (const cid of prov.cellIds) {
+    const cell = map.cellsById.get(cid);
+    if (!cell) continue;
+    for (const nb of cell.neighbors) {
+      if (nb < cid) continue; // 规范方向：避免跨省边重复计数
+      const nbCell = map.cellsById.get(nb);
+      if (!nbCell || !nbCell.land || !provSet.has(nb)) p++;
+    }
+  }
+  const n = Math.max(1, prov.cellIds.length);
+  return Math.min(1, (4 * Math.PI * n) / (p * p));
+}
+
+/** v0.7 紧凑度统计（sim 断言用）：均值 / 长条省占比 / 最差紧凑度 */
+export function compactnessStats(map: GameMap): {
+  mean: number;
+  longStripShare: number;
+  longStripCount: number;
+  min: number;
+  max: number;
+  worst: { id: number; cells: number; compactness: number; aspect: number }[];
+} {
+  const rows = map.provinces.map((p) => ({
+    id: p.id,
+    cells: p.cellIds.length,
+    compactness: provinceCompactness(map, p),
+    aspect: provinceAspect(map, p),
+  }));
+  const n = Math.max(1, rows.length);
+  const mean = rows.reduce((s, r) => s + r.compactness, 0) / n;
+  const long = rows.filter((r) => r.aspect > PROVINCE_ASPECT_LONG);
+  const worst = [...rows].sort((a, b) => a.compactness - b.compactness).slice(0, 8);
+  return {
+    mean,
+    longStripShare: long.length / n,
+    longStripCount: long.length,
+    min: Math.min(...rows.map((r) => r.compactness)),
+    max: Math.max(...rows.map((r) => r.compactness)),
+    worst,
+  };
+}
+
+/** 山脊统计（sim 断言用）：山脊格总数 / 有跨省邻的山脊格占比（= 山脊两侧分属不同省） */
+export function ridgeStats(map: GameMap): {
+  ridgeCells: number;
+  boundaryRidgeCells: number;
+  boundaryShare: number;
+  sample: { ridgeId: number; h: number; provs: number }[];
+} {
+  let ridgeCells = 0;
+  let boundary = 0;
+  const sample: { ridgeId: number; h: number; provs: number }[] = [];
+  for (const cid of map.landCellIds) {
+    const cell = map.cellsById.get(cid);
+    if (!cell || !isRidgeCell(cell, map.cellsById)) continue;
+    ridgeCells++;
+    const provOf = provOfCell(map, cid);
+    const provs = new Set<number>();
+    for (const nb of cell.neighbors) {
+      const nbC = map.cellsById.get(nb);
+      if (!nbC || !nbC.land) continue;
+      const np = provOfCell(map, nb);
+      if (np !== undefined) provs.add(np);
+    }
+    if (provs.size >= 2 || (provOf !== undefined && provs.size >= 1 && !provs.has(provOf))) boundary++;
+    if (sample.length < 200) sample.push({ ridgeId: cid, h: cell.h, provs: provs.size });
+  }
+  return {
+    ridgeCells,
+    boundaryRidgeCells: boundary,
+    boundaryShare: ridgeCells > 0 ? boundary / ridgeCells : 1,
+    sample,
+  };
+}
+
+/** 调试统计（sim 用；v0.7 增加紧凑度/山脊/规模分布） */
 export function mapStats(map: GameMap): Record<string, unknown> {
   const nationCells: Record<NationId | 'undiscovered', number> = {
     empire: 0,
@@ -1484,6 +1811,8 @@ export function mapStats(map: GameMap): Record<string, unknown> {
     }
     wrapSample = wrappedDistance(west.centroid, east.centroid, map.width);
   }
+  const comp = compactnessStats(map);
+  const ridge = ridgeStats(map);
   return {
     cells: map.cellsById.size,
     landCells: map.landCellIds.length,
@@ -1500,5 +1829,10 @@ export function mapStats(map: GameMap): Record<string, unknown> {
     nationCells,
     climateCount,
     wrapSample,
+    compactnessMean: comp.mean,
+    longStripShare: comp.longStripShare,
+    longStripCount: comp.longStripCount,
+    ridgeCells: ridge.ridgeCells,
+    ridgeBoundaryShare: ridge.boundaryShare,
   };
 }

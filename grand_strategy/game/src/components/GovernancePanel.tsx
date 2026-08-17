@@ -1,13 +1,17 @@
 /**
- * v0.5 左侧治理面板：国家治理元素从右侧 NationPanel 移到左侧边栏。
- * 分区（可折叠手风琴）：经济 / 市场 / 税收 / 阶级 / 人口 / 政策 / 投资 / 大事记。
+ * v0.5/v0.7 左侧治理面板：国家治理元素从右侧 NationPanel 移到左侧边栏。
+ * 分区（可折叠手风琴）：经济 / 稳定度 / 市场 / 税收 / 阶级 / 人口 / 政策 / 投资 / 大事记。
+ * v0.7：五个分区内嵌 ECharts 迷你图表（经济/人口/市场/税收/稳定度，近 12 月历史快照）。
  * 右侧区域让位给 地图 + 选中省份详情（ProvincePanel）。
  */
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { ComponentType } from 'react';
-import { Coins, LineChart, BadgePercent, Users2, Users, ScrollText, Factory, Newspaper } from 'lucide-react';
+import { Coins, LineChart, BadgePercent, Users2, Users, ScrollText, Factory, Newspaper, HeartPulse } from 'lucide-react';
+import type { EChartsOption } from 'echarts';
+import MiniChart, { themedBase } from './MiniChart';
 import type { GameMap, Province } from '../game/map';
 import type { GameState } from '../game/state';
+import type { HistoryMonth } from '../game/state';
 import type { ClassId, GoodId } from '../game/types';
 import { NATIONS } from '../game/nations';
 import {
@@ -42,8 +46,31 @@ interface Props {
   onAbolish: () => void;
 }
 
-type Section = 'economy' | 'market' | 'tax' | 'class' | 'pop' | 'policy' | 'invest' | 'log';
+type Section = 'economy' | 'stability' | 'market' | 'tax' | 'class' | 'pop' | 'policy' | 'invest' | 'log';
 type MktLevel = 'nation' | 'province' | 'county';
+
+/** 阶级饼图配色（与 ClassTab 一致） */
+const CLASS_COLORS: Record<ClassId, string> = {
+  1: '#b5472f', 2: '#c8aa3c', 3: '#2f7d45', 4: '#466ec8', 5: '#7d8a96', 6: '#5a6470', 7: '#2b2b28',
+};
+
+/** 历史月份标签（短：年份后两位-月序） */
+function monthTick(h: HistoryMonth): string {
+  return `${h.year.toString().slice(2)}-${(h.month % 12) + 1}`;
+}
+
+/** 迷你图表通用基底（主题色 + 微缩刻度） */
+function baseChart(theme: ReturnType<typeof themedBase>): {
+  grid: object;
+  tooltip: object;
+  textStyle: { color: string; fontSize: number };
+} {
+  return {
+    grid: { left: 2, right: 6, top: 10, bottom: 2, containLabel: true },
+    tooltip: { confine: true, textStyle: { fontSize: 10 } },
+    textStyle: { color: theme.text, fontSize: 10 },
+  };
+}
 
 const SPEND_LABEL: Record<'military' | 'admin' | 'infra' | 'court' | 'health', string> = {
   military: '军费',
@@ -66,6 +93,185 @@ const GOOD_CAT_LABEL: Record<string, string> = {
   semi: '半成品',
   finished: '成品',
 };
+
+// ---- v0.7 侧栏图表 option 构建（数据源：state.history 近 12 月快照；主题色走 CSS 变量） ----
+
+/** 经济：国库（左轴）/ 月收支（右轴）折线 */
+function ecoChartOption(history: HistoryMonth[], theme: ReturnType<typeof themedBase>): EChartsOption {
+  const base = baseChart(theme);
+  return {
+    ...base,
+    grid: { ...(base.grid as object), top: 14 },
+    tooltip: { ...(base.tooltip as object), trigger: 'axis' },
+    legend: { top: 0, left: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 9, color: theme.dim } },
+    xAxis: {
+      type: 'category',
+      data: history.map(monthTick),
+      axisLine: { lineStyle: { color: theme.line } },
+      axisTick: { show: false },
+      axisLabel: { fontSize: 8, color: theme.dim, interval: 2 },
+    },
+    yAxis: [
+      { type: 'value', scale: true, splitLine: { lineStyle: { color: theme.line, opacity: 0.5 } }, axisLabel: { fontSize: 8, color: theme.dim } },
+      { type: 'value', scale: true, splitLine: { show: false }, axisLabel: { fontSize: 8, color: theme.dim } },
+    ],
+    series: [
+      { name: '国库', type: 'line', data: history.map((h) => Math.round(h.treasury)), smooth: true, showSymbol: false, lineStyle: { width: 1.4, color: theme.accent }, itemStyle: { color: theme.accent } },
+      { name: '月收入', type: 'line', yAxisIndex: 1, data: history.map((h) => Math.round(h.income)), showSymbol: false, lineStyle: { width: 1, color: '#466ec8' }, itemStyle: { color: '#466ec8' } },
+      { name: '月支出', type: 'line', yAxisIndex: 1, data: history.map((h) => Math.round(h.spending)), showSymbol: false, lineStyle: { width: 1, color: '#b5472f' }, itemStyle: { color: '#b5472f' } },
+    ],
+  };
+}
+
+/** 人口：人口曲线（近 12 月） */
+function popChartOption(history: HistoryMonth[], theme: ReturnType<typeof themedBase>): EChartsOption {
+  const base = baseChart(theme);
+  return {
+    ...base,
+    tooltip: { ...(base.tooltip as object), trigger: 'axis' },
+    xAxis: {
+      type: 'category',
+      data: history.map(monthTick),
+      axisLine: { lineStyle: { color: theme.line } },
+      axisTick: { show: false },
+      axisLabel: { fontSize: 8, color: theme.dim, interval: 2 },
+    },
+    yAxis: {
+      type: 'value',
+      scale: true,
+      splitLine: { lineStyle: { color: theme.line, opacity: 0.5 } },
+      axisLabel: { fontSize: 8, color: theme.dim },
+    },
+    series: [
+      { name: '人口', type: 'line', data: history.map((h) => Math.round(h.popWan)), smooth: true, showSymbol: false, areaStyle: { opacity: 0.12, color: theme.accent }, lineStyle: { width: 1.4, color: theme.accent }, itemStyle: { color: theme.accent } },
+    ],
+  };
+}
+
+/** 人口：阶级分布饼图（最新快照） */
+function classPieOption(history: HistoryMonth[], theme: ReturnType<typeof themedBase>): EChartsOption {
+  const base = baseChart(theme);
+  const latest = history[history.length - 1];
+  const data = latest
+    ? CLASSES.map((c, i) => ({ name: CLASS_DEFS[c].label, value: Math.max(0, latest.classMix[i] ?? 0), itemStyle: { color: CLASS_COLORS[c] } })).filter((d) => d.value > 0.01)
+    : [];
+  return {
+    ...base,
+    tooltip: { ...(base.tooltip as object), trigger: 'item', formatter: '{b}: {c}万 ({d}%)' },
+    series: [
+      {
+        type: 'pie',
+        radius: ['42%', '72%'],
+        center: ['50%', '50%'],
+        avoidLabelOverlap: true,
+        label: { show: false },
+        labelLine: { show: false },
+        data,
+      },
+    ],
+  };
+}
+
+/** 市场：主要商品（6 种）价格走势多线 */
+function marketChartOption(history: HistoryMonth[], theme: ReturnType<typeof themedBase>): EChartsOption {
+  const base = baseChart(theme);
+  const goods = ['food', 'coal', 'iron', 'steel', 'tools', 'luxury'] as const;
+  const palette = ['#2f7d45', '#466ec8', '#b98a2e', '#b5472f', '#8c5ab4', '#3c8c8c'];
+  return {
+    ...base,
+    tooltip: { ...(base.tooltip as object), trigger: 'axis' },
+    legend: { top: 0, left: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 8, color: theme.dim } },
+    xAxis: {
+      type: 'category',
+      data: history.map(monthTick),
+      axisLine: { lineStyle: { color: theme.line } },
+      axisTick: { show: false },
+      axisLabel: { fontSize: 8, color: theme.dim, interval: 2 },
+    },
+    yAxis: {
+      type: 'value',
+      scale: true,
+      splitLine: { lineStyle: { color: theme.line, opacity: 0.5 } },
+      axisLabel: { fontSize: 8, color: theme.dim },
+    },
+    series: goods.map((g, i) => ({
+      name: GOOD_LABEL[g],
+      type: 'line' as const,
+      data: history.map((h) => h.prices?.[g] ?? 0),
+      showSymbol: false,
+      smooth: true,
+      lineStyle: { width: 1, color: palette[i] },
+      itemStyle: { color: palette[i] },
+    })),
+  };
+}
+
+/** 税收：各税种实收堆叠柱状图（近 12 月） */
+function taxChartOption(history: HistoryMonth[], theme: ReturnType<typeof themedBase>): EChartsOption {
+  const base = baseChart(theme);
+  const kinds = [
+    { key: 'land', label: TAX_LABEL.land, color: '#2f7d45' },
+    { key: 'poll', label: TAX_LABEL.poll, color: '#466ec8' },
+    { key: 'consumption', label: TAX_LABEL.consumption, color: '#b98a2e' },
+    { key: 'tariff', label: TAX_LABEL.tariff, color: '#8c5ab4' },
+    { key: 'other', label: TAX_LABEL.other, color: '#3c8c8c' },
+    { key: 'goods', label: '商品税', color: '#b5472f' },
+  ] as const;
+  return {
+    ...base,
+    tooltip: { ...(base.tooltip as object), trigger: 'axis', axisPointer: { type: 'shadow' } },
+    legend: { top: 0, left: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 8, color: theme.dim } },
+    xAxis: {
+      type: 'category',
+      data: history.map(monthTick),
+      axisLine: { lineStyle: { color: theme.line } },
+      axisTick: { show: false },
+      axisLabel: { fontSize: 8, color: theme.dim, interval: 2 },
+    },
+    yAxis: {
+      type: 'value',
+      scale: true,
+      splitLine: { lineStyle: { color: theme.line, opacity: 0.5 } },
+      axisLabel: { fontSize: 8, color: theme.dim },
+    },
+    series: kinds.map((k) => ({
+      name: k.label,
+      type: 'bar' as const,
+      stack: 'tax',
+      barMaxWidth: 8,
+      data: history.map((h) => Number(((h.tax as Record<string, number>)[k.key] ?? 0).toFixed(1))),
+      itemStyle: { color: k.color },
+    })),
+  };
+}
+
+/** 稳定度：幸福度 / 稳定度 双线（0-100） */
+function stabilityChartOption(history: HistoryMonth[], theme: ReturnType<typeof themedBase>): EChartsOption {
+  const base = baseChart(theme);
+  return {
+    ...base,
+    tooltip: { ...(base.tooltip as object), trigger: 'axis' },
+    legend: { top: 0, left: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 9, color: theme.dim } },
+    xAxis: {
+      type: 'category',
+      data: history.map(monthTick),
+      axisLine: { lineStyle: { color: theme.line } },
+      axisTick: { show: false },
+      axisLabel: { fontSize: 8, color: theme.dim, interval: 2 },
+    },
+    yAxis: {
+      type: 'value',
+      min: 0,
+      max: 100,
+      splitLine: { lineStyle: { color: theme.line, opacity: 0.5 } },
+      axisLabel: { fontSize: 8, color: theme.dim },
+    },
+    series: [
+      { name: '稳定度', type: 'line', data: history.map((h) => Math.round(h.stability * 10) / 10), smooth: true, showSymbol: false, lineStyle: { width: 1.4, color: theme.accent }, itemStyle: { color: theme.accent } },
+      { name: '幸福度', type: 'line', data: history.map((h) => Math.round(h.happiness * 10) / 10), smooth: true, showSymbol: false, lineStyle: { width: 1.4, color: '#466ec8' }, itemStyle: { color: '#466ec8' } },
+    ],
+  };
+}
 
 function fmt(n: number): string {
   if (!Number.isFinite(n)) return '—';
@@ -466,9 +672,21 @@ function TaxTab({ game, map, onTaxRate, onGoodsTax }: {
   const burden = nationClassTaxBurden(map, game, id);
   const hints = taxTransmissionHints(game);
   const total = ledger.pollTax + ledger.landTax + ledger.consumptionTax + ledger.tariff + ledger.otherTax + ledger.goodsTax;
+  // v0.7 税收柱状图（近 12 月堆叠）
+  const taxTheme = themedBase();
+  const taxOption = useMemo(() => taxChartOption(game.history[id] ?? [], taxTheme), [game.history, id, taxTheme]);
 
   return (
     <div className="tab-body">
+      <section className="p-sec">
+        <h4>各税种实收（近 12 月 · 万₭/月）</h4>
+        <MiniChart option={taxOption} height={100} />
+        {game.history[id]?.length ? (
+          <p className="dim">近 {game.history[id]?.length} 月 · 随月度结算更新</p>
+        ) : (
+          <p className="dim">尚无历史数据——推进一个月后开始记录。</p>
+        )}
+      </section>
       <section className="p-sec">
         <h4>税制概览</h4>
         <table className="mini-table">
@@ -600,10 +818,10 @@ function TaxTab({ game, map, onTaxRate, onGoodsTax }: {
   );
 }
 
-/** 手风琴分区头部（v0.6：各分区配 Lucide 图标） */
+/** 手风琴分区头部（v0.6：各分区配 Lucide 图标；v0.7 data-sfx=panel → 面板开合「哗啦」音效） */
 function SectionHead({ title, icon: Icon, open, onToggle }: { title: string; icon: ComponentType<{ size?: number | string; className?: string }>; open: boolean; onToggle: () => void }) {
   return (
-    <button className={`gov-sec-head ${open ? 'active' : ''}`} onClick={onToggle}>
+    <button className={`gov-sec-head ${open ? 'active' : ''}`} onClick={onToggle} data-sfx="panel">
       <span className="gov-sec-title">
         <Icon size={14} className="gov-sec-icon" />
         {title}
@@ -615,7 +833,7 @@ function SectionHead({ title, icon: Icon, open, onToggle }: { title: string; ico
 
 export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSpending, onRetrain, onInvest, onCancelInvest, onTogglePolicy, onAbolish, collapsed, onToggleCollapse }: Props & { collapsed: boolean; onToggleCollapse: () => void }) {
   const [open, setOpen] = useState<Record<Section, boolean>>({
-    economy: true, market: true, tax: false, class: false, pop: true, policy: false, invest: false, log: false,
+    economy: true, stability: false, market: true, tax: false, class: false, pop: true, policy: false, invest: false, log: false,
   });
   const n = game.nations[game.playerNation];
   const def = NATIONS[game.playerNation];
@@ -629,6 +847,18 @@ export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSp
   const focusPs = focusProv ? game.provinces[focusProv.id] ?? null : null;
   const netInvest = ledger.investReturn - ledger.investCost + ledger.investRefund;
   const toggle = (s: Section) => setOpen((prev) => ({ ...prev, [s]: !prev[s] }));
+
+  // ---- v0.7 侧栏图表（历史快照 → ECharts option；主题色随 CSS 变量） ----
+  const history = game.history[game.playerNation] ?? [];
+  const theme = themedBase();
+  const ecoOption = useMemo(() => ecoChartOption(history, theme), [history, theme]);
+  const popOption = useMemo(() => popChartOption(history, theme), [history, theme]);
+  const classPie = useMemo(() => classPieOption(history, theme), [history, theme]);
+  const marketOption = useMemo(() => marketChartOption(history, theme), [history, theme]);
+  const stabilityOption = useMemo(() => stabilityChartOption(history, theme), [history, theme]);
+  const historyTip = history.length === 0
+    ? <p className="dim">尚无历史数据——推进一个月后开始记录（仅保留近 12 月）。</p>
+    : <p className="dim">近 {history.length} 月 · 随月度结算更新（仅保留 12 月）</p>;
 
   return (
     <aside className={`gov-panel ${collapsed ? 'collapsed' : ''}`}>
@@ -645,6 +875,11 @@ export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSp
           <SectionHead title="经济" icon={Coins} open={open.economy} onToggle={() => toggle('economy')} />
           {open.economy && (
             <div className="gov-sec-body">
+              <section className="p-sec">
+                <h4>国库 / 月收支（近 12 月 · 万₭）</h4>
+                <MiniChart option={ecoOption} height={92} />
+                {historyTip}
+              </section>
               <section className="p-sec">
                 <h4>月度支出（万₭）</h4>
                 {(['military', 'admin', 'infra', 'court', 'health'] as const).map((k) => (
@@ -739,10 +974,31 @@ export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSp
             </div>
           )}
 
+          {/* ---- 稳定度（v0.7 新分区） ---- */}
+          <SectionHead title="稳定度" icon={HeartPulse} open={open.stability} onToggle={() => toggle('stability')} />
+          {open.stability && (
+            <div className="gov-sec-body">
+              <section className="p-sec">
+                <h4>幸福度 / 稳定度（近 12 月 · 0-100）</h4>
+                <MiniChart option={stabilityOption} height={96} />
+                {historyTip}
+                <p className="dim">
+                  稳定度漂移 = 税负惩罚 + 缺粮 + 低幸福 + 下层动乱；当前 {Math.round(n.stability)} · 动乱 {n.unrest.toFixed(2)}。
+                  重税稳国库却伤民心——治理即平衡。
+                </p>
+              </section>
+            </div>
+          )}
+
           {/* ---- 市场 ---- */}
           <SectionHead title="市场" icon={LineChart} open={open.market} onToggle={() => toggle('market')} />
           {open.market && (
             <div className="gov-sec-body">
+              <section className="p-sec">
+                <h4>主要商品价格走势（近 12 月）</h4>
+                <MiniChart option={marketOption} height={96} />
+                {historyTip}
+              </section>
               <section className="p-sec">
                 <h4>市场价目（17 商品 · 供需定价 0.4~2.5 倍）</h4>
                 <MarketTable game={game} map={map} ownedProvs={ownedProvs} focusProvId={focusProv?.id ?? null} />
@@ -769,6 +1025,15 @@ export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSp
           <SectionHead title="人口" icon={Users} open={open.pop} onToggle={() => toggle('pop')} />
           {open.pop && (
             <div className="gov-sec-body">
+              <section className="p-sec">
+                <h4>人口曲线（近 12 月 · 万人）</h4>
+                <MiniChart option={popOption} height={88} />
+                {historyTip}
+              </section>
+              <section className="p-sec">
+                <h4>阶级分布（最新快照 · 万人）</h4>
+                <MiniChart option={classPie} height={92} />
+              </section>
               <section className="p-sec">
                 <h4>人口概览（v0.5 按容量缩放 · 迁移软化）</h4>
                 <table className="mini-table">

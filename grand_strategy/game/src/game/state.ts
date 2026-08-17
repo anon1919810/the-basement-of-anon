@@ -7,12 +7,14 @@
 import { Rng } from './rng';
 import type { GameMap } from './map';
 import type { GoodId, NationId, ProvinceOwner, Speed } from './types';
-import { DAYS_PER_MONTH, monthIndex } from './clock';
+import { DAYS_PER_MONTH, monthIndex, yearOf } from './clock';
 import { NATIONS } from './nations';
 import { BASE_HOUSING_PER_CELL } from './pops';
 import {
   BANKRUPTCY_COOLDOWN,
   BANKRUPTCY_THRESHOLD,
+  nationAvgHappiness,
+  nationClassMixOf,
   settleEconomyMonth,
   zeroLedger,
 } from './economy';
@@ -23,14 +25,15 @@ import { newMarket, zeroGoods } from './market';
 import type { CountyMarket, MarketGood, ProvinceMarket } from './market';
 import type { InvestmentProject } from './buildings';
 import { MANUAL_EVENTS } from './manualEvents';
+import { CLASSES } from './classes';
 // 注意：tax 必须在 economy/pops 之后导入（tax → market，避免 market 半初始化时 pops 读取 GOODS_LIST）
 import { defaultNationTax } from './tax';
 import type { NationTax } from './tax';
 
-export const SAVE_VERSION = 7;
-export const SAVE_KEY = 'kalt-save-v7';
-/** 旧存档键（v0.6 起存档不兼容，提示用） */
-export const OLD_SAVE_KEYS = ['kalt-save-v6', 'kalt-save-v5', 'kalt-save-v4', 'kalt-save-v3'];
+export const SAVE_VERSION = 8;
+export const SAVE_KEY = 'kalt-save-v8';
+/** 旧存档键（v0.7 起存档不兼容，提示用；含 v0.6 的 v7 键） */
+export const OLD_SAVE_KEYS = ['kalt-save-v7', 'kalt-save-v6', 'kalt-save-v5', 'kalt-save-v4', 'kalt-save-v3'];
 
 /** 国家政策（v0.3）：作用于当前国，写入状态与存档 */
 export interface NationPolicies {
@@ -100,6 +103,38 @@ export interface ChronicleEntry {
   detail?: string;
 }
 
+// ---- v0.7 月度历史快照（侧栏图表：仅保留近 HISTORY_MAX 个月） ----
+
+/** 历史保留月数 */
+export const HISTORY_MAX = 12;
+/** 市场图表主要商品（4-6 种价格走势多线） */
+export const HISTORY_GOODS: GoodId[] = ['food', 'coal', 'iron', 'steel', 'tools', 'luxury'];
+
+export interface HistoryMonth {
+  /** 0 基月序号（自新历 1023 年 1 月起） */
+  month: number;
+  /** 年份（新历） */
+  year: number;
+  /** 国库（万₭） */
+  treasury: number;
+  /** 上月收入（万₭/月） */
+  income: number;
+  /** 上月支出（万₭/月） */
+  spending: number;
+  /** 人口（万人） */
+  popWan: number;
+  /** 稳定度 0-100 */
+  stability: number;
+  /** 人口加权平均幸福度 0-100 */
+  happiness: number;
+  /** 七级阶级分布（万人，[1..7]） */
+  classMix: number[];
+  /** 主要商品价格（HISTORY_GOODS） */
+  prices: Record<string, number>;
+  /** 六税种实收（万₭/月） */
+  tax: { poll: number; land: number; consumption: number; tariff: number; other: number; goods: number };
+}
+
 export interface GameState {
   version: number;
   seed: number;
@@ -112,6 +147,43 @@ export interface GameState {
   provinces: Record<number, ProvinceState>;
   chronicle: ChronicleEntry[];
   lastAutosaveMonth: number;
+  /** v0.7 月度历史快照（按国；仅当月主国推进；每国保留近 12 月） */
+  history: Partial<Record<NationId, HistoryMonth[]>>;
+}
+
+/** 月度结算后记录历史快照（确定性：纯函数式数据） */
+export function recordHistory(state: GameState, map: GameMap): void {
+  const id = state.playerNation;
+  const n = state.nations[id];
+  const mi = monthIndex(state.day);
+  const happy = nationAvgHappiness(map, state, id);
+  const mix = nationClassMixOf(map, state, id);
+  const prices: Record<string, number> = {};
+  for (const g of HISTORY_GOODS) prices[g] = n.market[g].price;
+  const rec: HistoryMonth = {
+    month: mi,
+    year: yearOf(state.day),
+    treasury: n.treasury,
+    income: n.monthly.income,
+    spending: n.monthly.spending,
+    popWan: n.popWan,
+    stability: n.stability,
+    happiness: happy,
+    classMix: CLASSES.map((c) => mix[c]),
+    prices,
+    tax: {
+      poll: n.monthly.pollTax,
+      land: n.monthly.landTax,
+      consumption: n.monthly.consumptionTax,
+      tariff: n.monthly.tariff,
+      other: n.monthly.otherTax,
+      goods: n.monthly.goodsTax,
+    },
+  };
+  const list = state.history[id] ?? [];
+  list.push(rec);
+  if (list.length > HISTORY_MAX) list.splice(0, list.length - HISTORY_MAX);
+  state.history[id] = list;
 }
 
 /** 追加一条大事记（破产/工厂落成等被动信息） */
@@ -289,6 +361,7 @@ export function newGameState(playerNation: NationId, seed: number, map: GameMap)
     provinces,
     chronicle: [],
     lastAutosaveMonth: 0,
+    history: {},
   };
   state.rngState = rng.state;
   return state;
@@ -310,6 +383,9 @@ export function settleMonth(state: GameState, map: GameMap): void {
 
   // 1) 经济全循环（三级市场/产业链/阶级/政策/财政/识字率/稳定度）——纯函数式，无随机
   settleEconomyMonth(state, map);
+
+  // 1b) v0.7 月度历史快照（侧栏图表数据源）
+  recordHistory(state, map);
 
   // 2) 破产保护：国库允许为负，但记入大事记（带冷却，避免刷屏）
   if (n.treasury < BANKRUPTCY_THRESHOLD && n.bankruptMonths <= 0) {
@@ -464,6 +540,17 @@ export function allFinite(state: GameState): boolean {
     for (const pop of p.pops) {
       if (!Number.isFinite(pop.size) || !Number.isFinite(pop.happiness) || !Number.isFinite(pop.wage) || !Number.isFinite(pop.investIncome)) return false;
       if (pop.size < 0) return false;
+    }
+  }
+  // v0.7 历史快照校验
+  for (const list of Object.values(state.history ?? {})) {
+    if (!list || list.length === 0) continue;
+    if (list.length > HISTORY_MAX) return false;
+    for (const h of list) {
+      const nums = [h.treasury, h.income, h.spending, h.popWan, h.stability, h.happiness, ...(h.classMix ?? [])];
+      for (const v of nums) if (!Number.isFinite(v)) return false;
+      for (const g of HISTORY_GOODS) if (!Number.isFinite(h.prices?.[g])) return false;
+      if (!Number.isFinite(h.tax?.poll) || !Number.isFinite(h.tax?.land) || !Number.isFinite(h.tax?.consumption) || !Number.isFinite(h.tax?.tariff) || !Number.isFinite(h.tax?.other) || !Number.isFinite(h.tax?.goods)) return false;
     }
   }
   return true;

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import type { GameMap, Province } from '../game/map';
+import type { CellData, GameMap, Province } from '../game/map';
 import { cellIsBoundary, cellIsCountyBoundary, findCellAt, provOfCell } from '../game/map';
 import { CLIMATE_LABEL, TERRAIN_LABEL } from '../game/map';
 import type { GameState } from '../game/state';
@@ -8,7 +8,7 @@ import { NATIONS, UNDISCOVERED_RGB } from '../game/nations';
 import { provinceLuxuryPotential } from '../game/pops';
 import { provinceResourceLabels } from '../game/resources';
 import { BASE_PRICE, GOODS_LIST } from '../game/market';
-import type { ClimateId, ProvinceOwner, TerrainKind } from '../game/types';
+import type { ClimateId, Point, ProvinceOwner, TerrainKind } from '../game/types';
 
 type MapView = 'political' | 'terrain' | 'population' | 'output';
 
@@ -37,8 +37,9 @@ const COUNTY_BORDER = 'rgba(255,255,255,0.16)';
 const FOG_BORDER = 'rgba(150,165,190,0.8)';
 const SELECT_COLOR = '#35c46b';
 const COAST_LINE = 'rgba(240,246,255,0.55)';
-const MIN_SCALE = 0.4;
-const MAX_SCALE = 4;
+/** v0.7 全屏鸟瞰默认镜头：缩放限幅 0.35x ~ 3x */
+const MIN_SCALE = 0.35;
+const MAX_SCALE = 3;
 
 /** v0.5 地形底图（public 静态资源；与地图同尺寸 1920x1080，含经纬网格） */
 const RELIEF_SRC = '/kalte_relief.png';
@@ -123,6 +124,42 @@ function hexToRgba(hex: string, alpha: number): string {
   const g = parseInt(hex.slice(3, 5), 16);
   const b = parseInt(hex.slice(5, 7), 16);
   return `rgba(${r},${g},${b},${alpha})`;
+}
+
+/**
+ * v0.7 接缝修复：把多边形裁剪到 x∈[0,W] 纵向条带（Sutherland–Hodgman）。
+ * 地图数据有 378 个格的多边形顶点越界（如 x=-14 / x=1929）——不裁剪会在东西接缝处双绘碎块。
+ */
+function clipPolygonToStrip(pts: { x: number; y: number }[], W: number): { x: number; y: number }[] {
+  let out = pts;
+  // clip x >= 0
+  let clipped: { x: number; y: number }[] = [];
+  for (let i = 0; i < out.length; i++) {
+    const a = out[i];
+    const b = out[(i + 1) % out.length];
+    const aIn = a.x >= 0;
+    const bIn = b.x >= 0;
+    if (aIn) clipped.push(a);
+    if (aIn !== bIn) {
+      const t = (0 - a.x) / (b.x - a.x || 1e-9);
+      clipped.push({ x: 0, y: a.y + (b.y - a.y) * t });
+    }
+  }
+  out = clipped;
+  // clip x <= W
+  clipped = [];
+  for (let i = 0; i < out.length; i++) {
+    const a = out[i];
+    const b = out[(i + 1) % out.length];
+    const aIn = a.x <= W;
+    const bIn = b.x <= W;
+    if (aIn) clipped.push(a);
+    if (aIn !== bIn) {
+      const t = (W - a.x) / (b.x - a.x || 1e-9);
+      clipped.push({ x: W, y: a.y + (b.y - a.y) * t });
+    }
+  }
+  return clipped;
 }
 
 /** 归属中文名（含迷雾锁） */
@@ -257,22 +294,40 @@ export default function WorldMap({
       canvas.height = Math.round(ch * dpr);
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // v0.7 边缘乱码修复：所有绘制裁剪到画布边界
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, cw, ch);
+    ctx.clip();
     const v = viewRef.current;
     const W = map.width;
     const H = map.height;
 
-    // 环绕副本范围（视口覆盖哪些 k*W 副本）
+    // 环绕副本范围（视口覆盖哪些 k*W 副本；按需绘制）
     const viewLeft = v.offsetX;
     const viewRight = v.offsetX + cw / v.scale;
-    const kMin = Math.floor(viewLeft / W) - 1;
-    const kMax = Math.ceil(viewRight / W) + 1;
+    const kMin = Math.floor(viewLeft / W);
+    const kMax = Math.floor(viewRight / W);
     const tx = (x: number, k: number) => (x + k * W - v.offsetX) * v.scale;
     const ty = (y: number) => (y - v.offsetY) * v.scale;
+    // 接缝修复：跨地图边界的格（顶点超出 [0,W]）裁剪到 [0,W] 纵向条带，
+    // 使其只在所属副本内绘制（杜绝东西接缝处的双绘碎块/乱码）
+    const clipCache = new Map<number, Point[]>();
+    const polyOf = (cell: CellData): Point[] => {
+      if (cell.bbox.minX >= 0 && cell.bbox.maxX <= W) return cell.polygon;
+      let pts = clipCache.get(cell.id);
+      if (!pts) {
+        pts = clipPolygonToStrip(cell.polygon, W);
+        clipCache.set(cell.id, pts);
+      }
+      return pts;
+    };
     const traceCell = (cellId: number, k: number): boolean => {
       const cell = map.cellsById.get(cellId);
       if (!cell) return false;
+      const pts = polyOf(cell);
+      if (pts.length < 3) return false;
       ctx.beginPath();
-      const pts = cell.polygon;
       const first = pts[0];
       ctx.moveTo(tx(first.x, k), ty(first.y));
       for (let i = 1; i < pts.length; i++) ctx.lineTo(tx(pts[i].x, k), ty(pts[i].y));
@@ -291,7 +346,7 @@ export default function WorldMap({
       return out;
     };
 
-    // 0) 底图：地形底图（未加载完成时程序化海洋+陆地兜底）；左右副本无缝拼接
+    // 0) 底图：地形底图（未加载完成时程序化海洋+陆地兜底）；左右副本按需绘制、无缝拼接
     const reliefReady = relief !== null && relief.complete && relief.naturalWidth > 0;
     for (let k = kMin; k <= kMax; k++) {
       const sx = (k * W - v.offsetX) * v.scale;
@@ -304,7 +359,7 @@ export default function WorldMap({
         for (const cell of map.cellsById.values()) {
           if (cell.land) continue;
           ctx.fillStyle = oceanColor(cell.h);
-          if (traceCell(cell.id, k)) ctx.fill();
+          for (const kk of cellKs(cell.id)) if (kk === k && traceCell(cell.id, k)) ctx.fill();
         }
         for (const prov of map.provinces) {
           for (const cid of prov.cellIds) {
@@ -479,6 +534,9 @@ export default function WorldMap({
         ctx.fillText(`${(10 - i) * 10}°N`, 3, sy - 3);
       }
     }
+
+    // v0.7 结束裁剪域（边缘乱码修复）
+    ctx.restore();
   };
 
   // 异步重绘统一走 drawRef（rAF 缩放循环 / ResizeObserver 始终取最新闭包，避免陈旧视图状态）
