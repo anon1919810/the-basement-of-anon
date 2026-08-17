@@ -2,12 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import type { GameMap } from './game/map';
 import { loadMap } from './game/map';
 import type { GameState } from './game/state';
-import { loadGame, newGameState, tickDay, saveGame, clearSave } from './game/state';
+import { loadGame, newGameState, tickDay, saveGame, clearSave, setPolicy, abolishSerfdom, hasOldSave } from './game/state';
 import type { NationId, Speed, TaxLevel } from './game/types';
 import { monthIndex, daysPerSecond } from './game/clock';
 import { retrainPop } from './game/labor';
-import { cancelInvestment, startInvestment } from './game/investment';
-import type { ProjectKind } from './game/investment';
+import { cancelInvestment, startInvestment } from './game/buildings';
+import type { BuildingKind } from './game/buildings';
 import WorldMap from './components/WorldMap';
 import TopBar from './components/TopBar';
 import NationPanel from './components/NationPanel';
@@ -25,6 +25,7 @@ export default function App() {
 
   const [selectedProvince, setSelectedProvince] = useState<number | null>(null);
   const [savedFlash, setSavedFlash] = useState(false);
+  const [oldSaveNotice, setOldSaveNotice] = useState<boolean>(() => hasOldSave());
   const flashTimer = useRef<number | null>(null);
 
   // 实时时钟：rAF + dt 驱动（暂停 / 1x / 2x / 3x）
@@ -89,7 +90,7 @@ export default function App() {
       retrainPop(g, map, provId, popIndex);
       setGame({ ...g });
     },
-    invest(kind: ProjectKind, provId: number) {
+    invest(kind: BuildingKind, provId: number) {
       const g = gameRef.current;
       startInvestment(g, map, kind, provId);
       setGame({ ...g });
@@ -99,6 +100,20 @@ export default function App() {
       cancelInvestment(g, projectId);
       setGame({ ...g });
     },
+    togglePolicy(policy: 'progressiveTax' | 'universalSuffrage', on: boolean) {
+      const g = gameRef.current;
+      setPolicy(g, policy, on);
+      setGame({ ...g });
+    },
+    abolish() {
+      const g = gameRef.current;
+      if (abolishSerfdom(g, map)) {
+        setGame({ ...g });
+        flash();
+      } else {
+        window.alert('废农奴制不可用：当前无奴隶或已废除。');
+      }
+    },
     save() {
       if (saveGame(gameRef.current)) flash();
     },
@@ -106,6 +121,7 @@ export default function App() {
       if (!window.confirm('开始新游戏？当前进度将被覆盖。')) return;
       const g = newGameState('lorraine', (Date.now() >>> 0) % 0x7fffffff, map);
       clearSave();
+      setOldSaveNotice(false);
       setSelectedProvince(null);
       setGame(g);
     },
@@ -136,9 +152,16 @@ export default function App() {
           onRetrain={actions.retrain}
           onInvest={actions.invest}
           onCancelInvest={actions.cancelInvest}
+          onTogglePolicy={actions.togglePolicy}
+          onAbolish={actions.abolish}
         />
       </main>
       {savedFlash && <div className="toast">已保存到本机</div>}
+      {oldSaveNotice && (
+        <div className="toast old-save-toast" onClick={() => setOldSaveNotice(false)}>
+          ⚠ 检测到 v0.2 旧存档（不兼容 v0.3），已开启新局；点击关闭
+        </div>
+      )}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 /**
- * 三级市场（v0.2）：本地（县）→ 区域（省）→ 国家，外加简化国际贸易。
+ * 三级市场（v0.3）：本地（县）→ 区域（省）→ 国家，外加简化国际贸易。
  *
  * 层级与流向（确定性、纯函数式演化，无随机）：
  *  - 本地市场（县）：县内自产自销、无运费，价格 = 基础价 × 县内供需比（clamp 0.4~2.5）
@@ -8,28 +8,75 @@
  *  - 国际贸易：国家盈余 → 按世界价出口（+关税）；国家缺口 → 进口补足（扣关税），容量受商路（基建）影响
  *  - 价格信号跨层传导（权重）：国家价格趋势 → 区域（15% 权重）→ 本地（20% 权重）
  *
- * 守恒（每商品）：生产（县产 + 工厂供给）+ 进口 = 消费（县 + 政府）+ 出口 + Δ国家库存（严格浮点同序）
+ * v0.3 产业链接入：
+ *  - 商品表扩展为 17 种（资源/半成品/成品），全部纳入三级供需定价与国际贸易
+ *  - 建筑（投资）供给：工厂产出进入国家市场供给（factorySupply）
+ *  - 建筑输入需求：建筑消耗输入从国家库存扣除（economy 预扣），此处：
+ *      · buildingDemand  参与国家价格形成（需求↑ → 价格↑，稀缺信号）
+ *      · buildingConsumed 从「未满足需求」中扣除（避免重复进口：库存已扣过的不再进口）
+ *    守恒（每商品）：生产（县产 + 工厂供给）+ 进口 = 消费（县 + 政府）+ 出口 + Δ国家库存 + 建筑消耗
  */
 import type { GoodId, TaxLevel } from './types';
 import { clamp } from './pops';
 
-export const GOODS_LIST: GoodId[] = ['food', 'clothing', 'fuel', 'industrial', 'luxury'];
+export type GoodCategory = 'resource' | 'semi' | 'finished';
 
-/** 基础价（万₭/单位） */
+export const GOODS_LIST: GoodId[] = [
+  // 资源
+  'food', 'timber', 'cotton', 'fur', 'coal', 'ironOre', 'salt', 'fish',
+  // 半成品
+  'lumber', 'cloth', 'iron', 'steel',
+  // 成品
+  'tools', 'weapons', 'sailShip', 'clothing', 'luxury',
+];
+
+/** 商品类别（UI 分组） */
+export const GOOD_CATEGORY: Record<GoodId, GoodCategory> = {
+  food: 'resource', timber: 'resource', cotton: 'resource', fur: 'resource',
+  coal: 'resource', ironOre: 'resource', salt: 'resource', fish: 'resource',
+  lumber: 'semi', cloth: 'semi', iron: 'semi', steel: 'semi',
+  tools: 'finished', weapons: 'finished', sailShip: 'finished', clothing: 'finished', luxury: 'finished',
+};
+
+/** 基础价（万₭/单位）——随加工链价值上升（资源低 → 成品高） */
 export const BASE_PRICE: Record<GoodId, number> = {
   food: 2.0,
+  timber: 1.0,
+  cotton: 1.4,
+  fur: 1.6,
+  coal: 1.5,
+  ironOre: 1.2,
+  salt: 0.8,
+  fish: 1.1,
+  lumber: 1.7,
+  cloth: 2.0,
+  iron: 2.6,
+  steel: 3.4,
+  tools: 3.0,
+  weapons: 3.2,
+  sailShip: 5.0,
   clothing: 1.8,
-  fuel: 1.5,
-  industrial: 2.4,
   luxury: 5.0,
 };
 
 /** 世界价（略高于本国基础价：外部市场更大） */
 export const WORLD_PRICE: Record<GoodId, number> = {
   food: 2.4,
+  timber: 1.4,
+  cotton: 1.9,
+  fur: 2.2,
+  coal: 2.0,
+  ironOre: 1.7,
+  salt: 1.1,
+  fish: 1.5,
+  lumber: 2.3,
+  cloth: 2.8,
+  iron: 3.4,
+  steel: 4.4,
+  tools: 4.0,
+  weapons: 4.2,
+  sailShip: 6.4,
   clothing: 2.6,
-  fuel: 2.0,
-  industrial: 2.8,
   luxury: 6.0,
 };
 
@@ -40,9 +87,21 @@ export const PRICE_CLAMP_MAX = 2.5;
 /** 基础月出口/进口容量（单位/月，基建可提升） */
 export const BASE_TRADE_CAP: Record<GoodId, number> = {
   food: 3.0,
+  timber: 2.0,
+  cotton: 1.6,
+  fur: 1.2,
+  coal: 2.6,
+  ironOre: 1.6,
+  salt: 2.2,
+  fish: 1.8,
+  lumber: 1.4,
+  cloth: 1.4,
+  iron: 1.2,
+  steel: 0.9,
+  tools: 0.9,
+  weapons: 0.7,
+  sailShip: 0.4,
   clothing: 2.2,
-  fuel: 2.6,
-  industrial: 1.6,
   luxury: 0.6,
 };
 
@@ -61,7 +120,14 @@ export const BLEND_COUNTY_FROM_PROV = 0.2; // 本地价格 = 县供需比 × (1-
 export const FREIGHT_PRICE_INTRA = 0.15;
 export const FREIGHT_PRICE_CROSS = 0.2;
 
-/** 国家市场商品状态（v0.1 结构保留：UI/断言兼容） */
+/** 全零商品记录（避免逐商品字面量初始化） */
+export function zeroGoods(): Record<GoodId, number> {
+  const out = {} as Record<GoodId, number>;
+  for (const g of GOODS_LIST) out[g] = 0;
+  return out;
+}
+
+/** 国家市场商品状态 */
 export interface MarketGood {
   basePrice: number;
   /** 当前价（万₭/单位） */
@@ -69,7 +135,7 @@ export interface MarketGood {
   prevPrice: number;
   /** 上月总供给（县产 + 工厂） */
   supply: number;
-  /** 上月总需求（县消费 + 政府） */
+  /** 上月总需求（县消费 + 政府 + 建筑输入） */
   demand: number;
   /** 上月实际消费（县 + 政府） */
   consumed: number;
@@ -120,8 +186,10 @@ export interface MarketSnapshot {
   tariff: number;
   exportValue: number;
   importValue: number;
-  /** 工厂对国家的额外供给（单位/月） */
+  /** 工厂对国家的额外供给（单位/月，含建筑产出） */
   factorySupply: Record<GoodId, number>;
+  /** 建筑输入消耗（单位/月，economy 预扣自库存；守恒断言用） */
+  buildingConsumed: Record<GoodId, number>;
 }
 
 /** 单个县的流量输入（economy 按省分组、按县 id 升序传入） */
@@ -136,9 +204,13 @@ export interface CountyFlow {
 
 export interface MarketInput {
   counties: CountyFlow[];
-  /** 工厂对国家市场的额外供给（单位/月） */
+  /** 工厂对国家市场的额外供给（单位/月，含建筑产出） */
   factorySupply: Record<GoodId, number>;
   govDemand: Record<GoodId, number>;
+  /** 建筑输入需求（参与价格形成；economy 已预扣自库存） */
+  buildingDemand: Record<GoodId, number>;
+  /** 建筑输入实际消耗（从「未满足需求」扣除，避免重复进口） */
+  buildingConsumed: Record<GoodId, number>;
   stocks: Record<GoodId, number>;
   /** 商路系数（基建/地理 → 贸易容量放大） */
   routeCoef: number;
@@ -244,12 +316,13 @@ export function settleMarket(input: MarketInput, markets: MarketState): MarketSn
   const provConsumed: Record<number, Record<GoodId, number>> = {};
   const provDemand: Record<number, Record<GoodId, number>> = {};
   const factorySupply: Record<GoodId, number> = { ...input.factorySupply };
+  const buildingConsumed: Record<GoodId, number> = { ...input.buildingConsumed };
 
   for (const g of GOODS_LIST) {
     const base = BASE_PRICE[g];
     const m = nat[g];
 
-    // ---- 1. 国家供需与价格 ----
+    // ---- 1. 国家供需与价格（含建筑输入需求：稀缺 → 涨价信号） ----
     let natSupplyGross = 0;
     let natDemandGross = 0;
     for (const c of input.counties) {
@@ -257,7 +330,7 @@ export function settleMarket(input: MarketInput, markets: MarketState): MarketSn
       natDemandGross += c.demand[g];
     }
     natSupplyGross += input.factorySupply[g];
-    natDemandGross += input.govDemand[g];
+    natDemandGross += input.govDemand[g] + input.buildingDemand[g];
     const natRatio = natDemandGross / Math.max(natSupplyGross, 1e-9);
     m.supply = natSupplyGross;
     m.demand = natDemandGross;
@@ -338,7 +411,7 @@ export function settleMarket(input: MarketInput, markets: MarketState): MarketSn
       const pm = getProvMarket(markets, pid)[g];
       pm.netFlow = provNetSurplus[pid] - provNetDeficit[pid];
     }
-    // 4c. 国家市场：库存承接省盈余，补省缺口，政府需求优先
+    // 4c. 国家市场：库存承接省盈余，补省缺口，政府/建筑需求优先
     let nationSupply = 0;
     let nationDemand = 0;
     for (const pid of provOrder) {
@@ -346,7 +419,7 @@ export function settleMarket(input: MarketInput, markets: MarketState): MarketSn
       nationDemand += provNetDeficit[pid];
     }
     nationSupply += input.factorySupply[g];
-    nationDemand += input.govDemand[g];
+    nationDemand += input.govDemand[g] + input.buildingDemand[g];
 
     let stock = input.stocks[g] + nationSupply;
     const govConsumed = Math.min(input.govDemand[g], stock);
@@ -364,7 +437,8 @@ export function settleMarket(input: MarketInput, markets: MarketState): MarketSn
     m.consumed = consumed;
     m.exported = 0;
     m.imported = 0;
-    let unmet = nationDemand - consumed;
+    // 未满足需求：建筑输入已由 economy 预扣自库存，此处扣除避免重复进口
+    let unmet = nationDemand - consumed - input.buildingConsumed[g];
     if (unmet > 0) {
       const cap = BASE_TRADE_CAP[g] * input.routeCoef;
       const imported = Math.min(unmet, cap);
@@ -421,7 +495,7 @@ export function settleMarket(input: MarketInput, markets: MarketState): MarketSn
       provConsumed[pid][g] = consumedSum;
       provDemand[pid][g] = demandSum;
     }
-    // 国家总消费 = 县消费（自产+省内调剂+国家补足）+ 政府消费（守恒公式用）
+    // 国家总消费 = 县消费（自产+省内调剂+国家补足）+ 政府消费（守恒公式用；建筑消耗单独计）
     m.consumed = consumed + totalCountyConsumed;
   }
 
@@ -435,6 +509,7 @@ export function settleMarket(input: MarketInput, markets: MarketState): MarketSn
     exportValue,
     importValue,
     factorySupply,
+    buildingConsumed,
   };
 }
 

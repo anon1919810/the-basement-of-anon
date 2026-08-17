@@ -6,6 +6,7 @@ import { CLIMATE_LABEL } from '../game/map';
 import type { GameState } from '../game/state';
 import { NATIONS, UNDISCOVERED_RGB } from '../game/nations';
 import { provinceLuxuryPotential } from '../game/pops';
+import { provinceResourceLabels } from '../game/resources';
 import type { ClimateId, TerrainKind } from '../game/types';
 
 interface View {
@@ -403,6 +404,12 @@ function HoverCard({ prov, game, pos }: { prov: Province; game: GameState; pos: 
         <dd>{prov.counties.length} 县 / {prov.cellIds.length} 格 / 均海拔 {prov.elevStats.avg.toFixed(0)}</dd>
         <dt>气候</dt>
         <dd>均温 {prov.avgTemp.toFixed(0)}℃ · 降水 {prov.avgPrec.toFixed(0)}</dd>
+        {!prov.isUndiscovered && (
+          <dt>资源</dt>
+        )}
+        {!prov.isUndiscovered && (
+          <dd>{provinceResourceLabels(prov).join(' · ') || '—'}</dd>
+        )}
         {!prov.isUndiscovered && ps && (
           <>
             <dt>人口</dt>

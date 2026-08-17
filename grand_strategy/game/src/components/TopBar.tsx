@@ -24,7 +24,7 @@ export default function TopBar({ game, onSpeed, onNation, onSave, onNewGame }: P
     <header className="topbar">
       <div className="brand">
         <span className="brand-mark">《卡尔特》</span>
-        <span className="brand-sub">v0.2.0 三级市场 · 奢侈品 · 投资</span>
+        <span className="brand-sub">v0.3.0 产业链 · 阶级 · 政策</span>
       </div>
 
       <div className="tb-clock">

@@ -1,7 +1,7 @@
 /**
- * 游戏状态机（v0.2）：新游戏 / 日 tick / 月度结算（经济全循环：三级市场 + 奢侈品 + 投资回报）。
+ * 游戏状态机（v0.3）：新游戏 / 日 tick / 月度结算（经济全循环：三级市场 + 产业链 + 阶级系统 + 政策）。
  * 纯逻辑、无 DOM 依赖，浏览器 UI 与无头模拟（scripts/sim.ts）共用。
- * 确定性：v0.2 移除自动事件后，月度结算完全无随机（纯函数式演化）；
+ * 确定性：月度结算完全无随机（纯函数式演化）；
  * 仅玩家操作（sim 中的随机策略 / UI 的政令）经 game.rngState 恢复的 Rng（mulberry32）。
  */
 import { Rng } from './rng';
@@ -18,13 +18,29 @@ import {
 import type { MonthlyLedger } from './economy';
 import { initProvinceEcon } from './pops';
 import type { Pop } from './pops';
-import { newMarket } from './market';
+import { newMarket, zeroGoods } from './market';
 import type { CountyMarket, MarketGood, ProvinceMarket } from './market';
-import type { InvestmentProject } from './investment';
+import type { InvestmentProject } from './buildings';
 import { MANUAL_EVENTS } from './manualEvents';
 
-export const SAVE_VERSION = 3;
-export const SAVE_KEY = 'kalt-save-v3';
+export const SAVE_VERSION = 4;
+export const SAVE_KEY = 'kalt-save-v4';
+/** 旧存档键（v0.3 起存档不兼容，提示用） */
+export const OLD_SAVE_KEYS = ['kalt-save-v3'];
+
+/** 国家政策（v0.3）：作用于当前国，写入状态与存档 */
+export interface NationPolicies {
+  /** 废农奴制：一次性转型（奴隶→佃农/自耕农），短期稳定度↓ + 人口效率长期↑ */
+  abolishedSerfdom: boolean;
+  /** 累进税：上层税负↑下层↓，可开关 */
+  progressiveTax: boolean;
+  /** 普选：下阶层政治权重↑上阶层↓，稳定度混合影响 */
+  universalSuffrage: boolean;
+}
+
+export function defaultPolicies(): NationPolicies {
+  return { abolishedSerfdom: false, progressiveTax: false, universalSuffrage: false };
+}
 
 export interface NationState {
   popWan: number; // 人口（万人）
@@ -36,12 +52,12 @@ export interface NationState {
   taxLevel: TaxLevel;
   spending: { military: number; admin: number; infra: number; court: number; health: number }; // 万₭/月
   cells: number; // 所辖陆地格数（静态）
-  // ---- 三级市场（v0.2） ----
+  // ---- 三级市场（v0.2/v0.3：17 商品） ----
   stocks: Record<GoodId, number>; // 国家市场库存（单位）
   market: Record<GoodId, MarketGood>; // 国家市场状态（价格/供需/趋势）
   provinceMarkets: Record<number, Record<GoodId, ProvinceMarket>>; // 区域市场（省）
   countyMarkets: Record<number, Record<GoodId, CountyMarket>>; // 本地市场（县）
-  // ---- 投资（v0.2） ----
+  // ---- 投资（v0.3 产业链建筑） ----
   projects: InvestmentProject[]; // 在建/已投产项目
   nextProjectId: number;
   investCostAcc: number; // 本月投资支出累计（结算时并入账本并清零）
@@ -50,6 +66,12 @@ export interface NationState {
   emigration: number; // 上月流亡人口（万人）
   monthly: MonthlyLedger; // 上月账本（UI/断言）
   bankruptMonths: number; // 破产冷却（月）
+  // ---- 阶级（v0.3） ----
+  policies: NationPolicies;
+  /** 上月奴隶人口（万人，政策/断言/UI） */
+  slavePop: number;
+  /** 上月动乱指数（下层不满加权，0 起） */
+  unrest: number;
 }
 
 export interface ProvinceState {
@@ -101,20 +123,28 @@ function nationCellCount(map: GameMap, id: NationId): number {
   return n;
 }
 
+/** 初始国家库存（17 商品；资源给足、半成品/成品少量起步） */
+function initialStocks(def: { popWan: number; foodMonths: number }): Record<GoodId, number> {
+  const fm = def.foodMonths;
+  const s = zeroGoods();
+  s.food = (def.popWan * 0.09 * fm) / 12;
+  s.clothing = def.popWan * 0.006 * fm;
+  s.coal = def.popWan * 0.005 * fm;
+  const resBase = def.popWan * 0.001 * fm;
+  for (const g of ['timber', 'cotton', 'fur', 'ironOre', 'salt', 'fish'] as GoodId[]) s[g] = resBase;
+  const semiBase = def.popWan * 0.0003 * fm;
+  for (const g of ['lumber', 'cloth', 'iron', 'steel', 'tools', 'weapons', 'sailShip', 'luxury'] as GoodId[]) {
+    s[g] = semiBase;
+  }
+  return s;
+}
+
 export function newGameState(playerNation: NationId, seed: number, map: GameMap): GameState {
   const rng = new Rng(seed);
   const nations = {} as Record<NationId, NationState>;
   (Object.keys(NATIONS) as NationId[]).forEach((id) => {
     const def = NATIONS[id];
-    const consYear = def.popWan * 0.09;
-    const market = newMarket();
-    const stocks: Record<GoodId, number> = {
-      food: (consYear / 12) * def.foodMonths,
-      clothing: def.popWan * 0.006 * def.foodMonths,
-      fuel: def.popWan * 0.005 * def.foodMonths,
-      industrial: def.popWan * 0.0005 * def.foodMonths,
-      luxury: def.popWan * 0.0004 * def.foodMonths,
-    };
+    const stocks = initialStocks(def);
     nations[id] = {
       popWan: def.popWan,
       literacy: def.literacy,
@@ -126,7 +156,7 @@ export function newGameState(playerNation: NationId, seed: number, map: GameMap)
       spending: { ...def.defaultSpending, court: 15, health: 10 },
       cells: nationCellCount(map, id),
       stocks,
-      market,
+      market: newMarket(),
       provinceMarkets: {},
       countyMarkets: {},
       projects: [],
@@ -137,6 +167,9 @@ export function newGameState(playerNation: NationId, seed: number, map: GameMap)
       emigration: 0,
       monthly: zeroLedger(),
       bankruptMonths: 0,
+      policies: defaultPolicies(),
+      slavePop: 0,
+      unrest: 0,
     };
   });
 
@@ -155,8 +188,8 @@ export function newGameState(playerNation: NationId, seed: number, map: GameMap)
         housingCap: 0,
         efficiency: 1,
         happiness: 50,
-        output: { food: 0, clothing: 0, fuel: 0, industrial: 0, luxury: 0 },
-        demand: { food: 0, clothing: 0, fuel: 0, industrial: 0, luxury: 0 },
+        output: zeroGoods(),
+        demand: zeroGoods(),
         freight: 1,
       };
     }
@@ -193,7 +226,7 @@ export function settleMonth(state: GameState, map: GameMap): void {
   const id = state.playerNation;
   const n = state.nations[id];
 
-  // 1) 经济全循环（三级市场/奢侈品/投资回报/财政/识字率/稳定度）——纯函数式，无随机
+  // 1) 经济全循环（三级市场/产业链/阶级/政策/财政/识字率/稳定度）——纯函数式，无随机
   settleEconomyMonth(state, map);
 
   // 2) 破产保护：国库允许为负，但记入大事记（带冷却，避免刷屏）
@@ -205,11 +238,9 @@ export function settleMonth(state: GameState, map: GameMap): void {
   if (n.bankruptMonths > 0) n.bankruptMonths--;
 
   // 3) 人工事件预留（v0.2 休眠检查点）：MANUAL_EVENTS 为空 → no-op。
-  //    日后在 manualEvents.ts 填入事件后，此处在每月结算时按 triggerMonth 派发。
   const mi = monthIndex(state.day);
   for (const ev of MANUAL_EVENTS) {
     if (ev.triggerMonth >= 0 && ev.triggerMonth === mi) {
-      // 预留：填充后在此将 ev 加入「待处理队列」或直接应用 effect（见 manualEvents.ts 注释）
       addChronicle(state, ev.title, ev.desc);
     }
   }
@@ -223,13 +254,78 @@ export function tickDay(state: GameState, map: GameMap): void {
   if (state.day % DAYS_PER_MONTH === 0) settleMonth(state, map);
 }
 
+/**
+ * 政策操作：
+ *  - 废农奴制（一次性）：奴隶 → 佃农(6) 60% / 自耕农(5) 40%，短期稳定度 -15，废除农奴制效率惩罚
+ *  - 累进税 / 普选：开关切换（作用于当前国）
+ */
+export function setPolicy(state: GameState, policy: 'progressiveTax' | 'universalSuffrage', on: boolean): void {
+  const n = state.nations[state.playerNation];
+  if (policy === 'progressiveTax') {
+    n.policies.progressiveTax = on;
+    addChronicle(state, on ? '推行累进税' : '废止累进税', '上层多缴、下层减负；贵族啧有烦言');
+  } else {
+    n.policies.universalSuffrage = on;
+    addChronicle(state, on ? '颁布普选' : '废止普选', on ? '庶民入朝堂，旧贵失其柄' : '选权收回，议会重归旧制');
+    if (on) {
+      // 普选对稳定度的混合影响：识字率高受益，低则动荡
+      n.stability = Math.max(0, Math.min(100, n.stability + (n.literacy >= 0.5 ? 3 : -4)));
+    }
+  }
+}
+
+/** 废农奴制（一次性）：奴隶 → 佃农/自耕农；帝国初始可用 */
+export function abolishSerfdom(state: GameState, map: GameMap): boolean {
+  const n = state.nations[state.playerNation];
+  if (n.policies.abolishedSerfdom) return false;
+  // 统计奴隶并按职业转化（奴隶多为 farmer/miner；目标阶级 POP 不存在则创建）
+  let converted = 0;
+  for (const p of map.provinces) {
+    if (p.owner !== state.playerNation || p.isUndiscovered) continue;
+    const ps = state.provinces[p.id];
+    const slaves = ps.pops.filter((pop) => pop.class === 7);
+    for (const s of slaves) {
+      const toTenant = s.size * 0.6; // 佃农
+      const toOwner = s.size * 0.4; // 自耕农
+      if (toTenant > 0) {
+        let t = ps.pops.find((x) => x.class === 6 && x.job === s.job && x.race === s.race);
+        if (!t) {
+          t = { class: 6, job: s.job, race: s.race, size: 0, happiness: 46, wage: s.wage, investIncome: 0, sat: { ...s.sat }, retrainMonths: 0 };
+          ps.pops.push(t);
+        }
+        t.size += toTenant;
+      }
+      if (toOwner > 0) {
+        let o = ps.pops.find((x) => x.class === 5 && x.job === s.job && x.race === s.race);
+        if (!o) {
+          o = { class: 5, job: s.job, race: s.race, size: 0, happiness: 54, wage: s.wage, investIncome: 0, sat: { ...s.sat }, retrainMonths: 0 };
+          ps.pops.push(o);
+        }
+        o.size += toOwner;
+      }
+      converted += s.size;
+      s.size = 0;
+    }
+    // 清空零规模奴隶 POP
+    ps.pops = ps.pops.filter((x) => x.size > 1e-9 || x.class !== 7);
+    ps.popTotal = 0;
+    for (const pop of ps.pops) ps.popTotal += pop.size;
+  }
+  if (converted <= 0) return false;
+  n.policies.abolishedSerfdom = true;
+  n.slavePop = 0;
+  n.stability = Math.max(0, n.stability - 15); // 短期动荡：地主震怒、秩序重排
+  addChronicle(state, '废农奴制', `解放奴隶 ${converted.toFixed(0)} 万 → 佃农/自耕农；地主震怒，稳定度 -15`);
+  return true;
+}
+
 /** 月度结束时检查所有数值有限（调试/断言用） */
 export function allFinite(state: GameState): boolean {
   for (const id of Object.keys(state.nations) as NationId[]) {
     const n = state.nations[id];
     const nums: number[] = [
       n.popWan, n.literacy, n.health, n.treasury, n.foodStock, n.stability,
-      n.emigration, n.infra.roads, n.infra.ports,
+      n.emigration, n.infra.roads, n.infra.ports, n.slavePop, n.unrest,
       n.monthly.income, n.monthly.spending, n.monthly.tariff,
       n.monthly.investIncome, n.monthly.investReturn, n.monthly.investCost, n.monthly.investRefund,
       n.investCostAcc, n.investRefundAcc,
@@ -267,6 +363,7 @@ export function allFinite(state: GameState): boolean {
     // 投资项目
     for (const p of n.projects) {
       if (!Number.isFinite(p.totalCost) || !Number.isFinite(p.duration) || !Number.isFinite(p.monthsLeft)) return false;
+      if (!Number.isFinite(p.lastSkillFactor) || !Number.isFinite(p.lastRunFactor) || !Number.isFinite(p.lastOutput)) return false;
       if (p.monthsLeft < 0 || p.monthsLeft > p.duration) return false;
     }
   }
@@ -304,7 +401,8 @@ export function loadGame(): GameState | null {
       parsed.version === SAVE_VERSION &&
       typeof parsed.day === 'number' &&
       parsed.nations &&
-      parsed.nations.lorraine
+      parsed.nations.lorraine &&
+      parsed.nations.lorraine.policies
     ) {
       return parsed;
     }
@@ -314,10 +412,21 @@ export function loadGame(): GameState | null {
   }
 }
 
+/** 是否存在旧版本存档（v0.3 存档不兼容提示） */
+export function hasOldSave(): boolean {
+  if (typeof localStorage === 'undefined') return false;
+  try {
+    return OLD_SAVE_KEYS.some((k) => localStorage.getItem(k) !== null);
+  } catch {
+    return false;
+  }
+}
+
 export function clearSave(): void {
   if (typeof localStorage === 'undefined') return;
   try {
     localStorage.removeItem(SAVE_KEY);
+    for (const k of OLD_SAVE_KEYS) localStorage.removeItem(k);
   } catch {
     // 忽略
   }
