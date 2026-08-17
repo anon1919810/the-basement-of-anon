@@ -1,0 +1,525 @@
+/* 《覆巢之下》—— 极简金融终端风格：白底 / 深色文字 / 绿涨红跌(A股) / 1px 细边框 / 无圆角 */
+
+:root {
+  --bg: #f6f7f8;
+  --panel: #ffffff;
+  --border: #d9dce1;
+  --border-dark: #b8bcc4;
+  --text: #1c1f24;
+  --muted: #7a808a;
+  --up: #e03636; /* 涨 = 红（A股习惯） */
+  --down: #17a05e; /* 跌 = 绿 */
+  --accent: #1f6feb;
+  --accent-bg: #eef4ff;
+  --font-sans:
+    "Inter Variable", "Inter", -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans SC",
+    system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+.app {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.up {
+  color: var(--up);
+}
+
+.down {
+  color: var(--down);
+}
+
+.flat {
+  color: var(--muted);
+}
+
+/* ---------- 顶栏 ---------- */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 10px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.topbar-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.logo {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.sub {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.topbar-day b {
+  font-size: 15px;
+}
+
+.topbar-assets {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.topbar-assets .num {
+  font-size: 15px;
+}
+
+.pct {
+  font-variant-numeric: tabular-nums;
+}
+
+.topbar-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* ---------- 按钮 ---------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border-dark);
+  border-radius: 0;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.btn:hover {
+  background: #f0f2f5;
+}
+
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.btn.primary:hover {
+  background: #1a5fd0;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn.small {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+/* ---------- 布局 ---------- */
+.main-grid {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr) 330px;
+  gap: 12px;
+  padding: 12px;
+  align-items: start;
+}
+
+.bottom-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding: 0 12px 16px;
+  align-items: start;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+}
+
+.panel-inner {
+  padding: 10px 12px;
+}
+
+.panel-title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  border-left: 3px solid var(--accent);
+  padding-left: 8px;
+}
+
+.empty {
+  color: var(--muted);
+  padding: 18px 4px;
+  text-align: center;
+}
+
+/* ---------- 表格 ---------- */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th,
+.table td {
+  border-bottom: 1px solid var(--border);
+  padding: 6px 8px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.table th {
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 12px;
+}
+
+.table tbody tr {
+  cursor: pointer;
+}
+
+.table tbody tr:hover {
+  background: #f7f9fc;
+}
+
+.row-selected td {
+  background: var(--accent-bg);
+}
+
+.stock-name {
+  font-weight: 600;
+}
+
+.stock-code {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.market-table {
+  font-size: 12.5px;
+}
+
+/* ---------- 图表 ---------- */
+.chart {
+  height: 340px;
+}
+
+.chart-panel .panel-title .sub {
+  font-weight: 400;
+}
+
+/* ---------- 交易面板 ---------- */
+.quote-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 2px;
+}
+
+.quote-row .price {
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.quote-meta {
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+
+.seg {
+  display: flex;
+  gap: 0;
+  margin-bottom: 8px;
+}
+
+.seg-btn {
+  flex: 1;
+  padding: 6px 0;
+  font-size: 13px;
+  font-family: inherit;
+  background: var(--panel);
+  border: 1px solid var(--border-dark);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+.seg-btn + .seg-btn {
+  border-left: none;
+}
+
+.seg-btn.active {
+  background: var(--text);
+  color: #fff;
+}
+
+.seg-btn.active.buy {
+  background: var(--up);
+  border-color: var(--up);
+}
+
+.seg-btn.active.sell {
+  background: var(--down);
+  border-color: var(--down);
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.field input {
+  width: 130px;
+  padding: 5px 8px;
+  font-size: 13px;
+  font-family: inherit;
+  border: 1px solid var(--border-dark);
+  border-radius: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.field input:focus {
+  outline: 1px solid var(--accent);
+}
+
+.trade-info {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 4px 0 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.trade-info .t1 {
+  color: var(--accent);
+}
+
+.trade-submit {
+  width: 100%;
+  justify-content: center;
+  padding: 8px 0;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.trade-submit.buy {
+  background: var(--up);
+  border-color: var(--up);
+  color: #fff;
+}
+
+.trade-submit.buy:hover {
+  background: #c92e2e;
+}
+
+.trade-submit.sell {
+  background: var(--down);
+  border-color: var(--down);
+  color: #fff;
+}
+
+.trade-submit.sell:hover {
+  background: #138a50;
+}
+
+.notice {
+  margin-top: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  background: #fbfbfc;
+  font-size: 12px;
+}
+
+.pending-orders {
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.pending-orders h3,
+.action-log h3 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.order-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 3px 0;
+  font-size: 12px;
+}
+
+.action-log {
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.log-line {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 2px 0;
+  border-bottom: 1px dashed #eee;
+}
+
+/* ---------- 新闻 ---------- */
+.news-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.news-item {
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.news-item:last-child {
+  border-bottom: none;
+}
+
+.news-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  margin-bottom: 2px;
+}
+
+.news-day {
+  color: var(--muted);
+  background: #f0f2f5;
+  padding: 0 6px;
+}
+
+.news-impact {
+  font-variant-numeric: tabular-nums;
+}
+
+.news-src {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.news-title {
+  font-weight: 600;
+}
+
+.news-summary {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* ---------- 结算弹窗 ---------- */
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 24, 30, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal {
+  background: var(--panel);
+  border: 1px solid var(--border-dark);
+  padding: 20px 24px;
+  width: 460px;
+  max-width: 92vw;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+}
+
+.modal-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  font-size: 16px;
+}
+
+.settle-summary {
+  display: flex;
+  gap: 18px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.settle-summary b {
+  font-size: 15px;
+}
+
+.row-player td {
+  background: var(--accent-bg);
+}
+
+.modal-actions {
+  margin-top: 14px;
+  text-align: center;
+}
+
+/* ---------- 响应式 ---------- */
+@media (max-width: 1100px) {
+  .main-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .bottom-grid {
+    grid-template-columns: 1fr;
+  }
+}
