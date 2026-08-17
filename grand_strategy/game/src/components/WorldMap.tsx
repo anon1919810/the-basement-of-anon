@@ -31,6 +31,16 @@ const COAST_LINE = 'rgba(240,246,255,0.55)';
 const MIN_SCALE = 0.05;
 const MAX_SCALE = 10;
 
+/** v0.5 地形底图（public 静态资源；与地图同尺寸 1920x1080，含经纬网格） */
+const RELIEF_SRC = '/kalte_relief.png';
+/** 国家覆盖不透明度（v0.5：半透明叠加于底图） */
+const NATION_ALPHA = 0.55;
+/** 迷雾新大陆覆盖（保持深灰） */
+const FOG_FILL = 'rgba(34,44,60,0.92)';
+/** 经纬网格显示缩放范围（仅缩小视图时显示，避免放大后杂乱） */
+const GRID_MIN_SCALE = 0.25;
+const GRID_MAX_SCALE = 1.5;
+
 // ---- 海洋水深渐变（h 0-19：深→浅） ----
 const OCEAN_DEEP = [6, 12, 26];
 const OCEAN_SHALLOW = [38, 92, 148];
@@ -86,6 +96,13 @@ export default function WorldMap({ map, game, selectedProvince, onSelect }: Prop
   onSelectRef.current = onSelect;
   const [hoverProvince, setHoverProvince] = useState<number | null>(null);
   const [hoverPos, setHoverPos] = useState<{ x: number; y: number } | null>(null);
+  // v0.5 地形底图（异步加载；加载完成触发重绘）
+  const [relief, setRelief] = useState<HTMLImageElement | null>(null);
+  useEffect(() => {
+    const img = new Image();
+    img.onload = () => setRelief(img);
+    img.src = RELIEF_SRC;
+  }, []);
 
   const draw = () => {
     const canvas = canvasRef.current;
@@ -118,37 +135,40 @@ export default function WorldMap({ map, game, selectedProvince, onSelect }: Prop
       return true;
     };
 
-    // 0) 海洋底（最深色，兜底）
-    ctx.fillStyle = oceanColor(0);
-    ctx.fillRect(0, 0, cw, ch);
-
-    // 1) 海洋格按水深深浅蓝渐变
-    for (const cell of map.cellsById.values()) {
-      if (cell.land) continue;
-      ctx.fillStyle = oceanColor(cell.h);
-      if (traceCell(cell.id)) ctx.fill();
-    }
-
-    // 2) 陆地：地形色晕 + 气候着色（每个格独立色，含迷雾深灰）
-    for (const prov of map.provinces) {
-      for (const cid of prov.cellIds) {
-        const cell = map.cellsById.get(cid);
-        if (!cell) continue;
-        ctx.fillStyle = prov.isUndiscovered
-          ? rgbStr(UNDISCOVERED_RGB)
-          : landColor(cell.terrain, cell.climate);
-        if (traceCell(cid)) ctx.fill();
+    // 0) 底图：v0.5 地形底图（未加载完成时程序化海洋+陆地兜底）
+    const reliefReady = relief !== null && relief.complete && relief.naturalWidth > 0;
+    if (reliefReady) {
+      ctx.drawImage(relief, -v.offsetX * v.scale, -v.offsetY * v.scale, map.width * v.scale, map.height * v.scale);
+    } else {
+      // 海洋底（最深色，兜底）
+      ctx.fillStyle = oceanColor(0);
+      ctx.fillRect(0, 0, cw, ch);
+      // 海洋格按水深深浅蓝渐变
+      for (const cell of map.cellsById.values()) {
+        if (cell.land) continue;
+        ctx.fillStyle = oceanColor(cell.h);
+        if (traceCell(cell.id)) ctx.fill();
+      }
+      // 陆地：地形色晕 + 气候着色
+      for (const prov of map.provinces) {
+        for (const cid of prov.cellIds) {
+          const cell = map.cellsById.get(cid);
+          if (!cell) continue;
+          ctx.fillStyle = prov.isUndiscovered
+            ? rgbStr(UNDISCOVERED_RGB)
+            : landColor(cell.terrain, cell.climate);
+          if (traceCell(cid)) ctx.fill();
+        }
       }
     }
 
-    // 3) 国家半透明覆盖（柔化：先淡后浓两层）
+    // 1) 国家半透明覆盖（v0.5：alpha 0.55 叠加于底图；迷雾新大陆保持深灰）
     for (const prov of map.provinces) {
-      if (prov.isUndiscovered) continue;
-      ctx.fillStyle = nationWash(prov.owner, 0.26);
+      ctx.fillStyle = prov.isUndiscovered ? FOG_FILL : nationWash(prov.owner, NATION_ALPHA);
       for (const cid of prov.cellIds) if (traceCell(cid)) ctx.fill();
     }
 
-    // 4) 海岸线提亮（陆地格邻接海洋）
+    // 2) 海岸线提亮（陆地格邻接海洋）
     ctx.lineWidth = 0.7;
     ctx.strokeStyle = COAST_LINE;
     for (const prov of map.provinces) {
@@ -167,7 +187,7 @@ export default function WorldMap({ map, game, selectedProvince, onSelect }: Prop
       }
     }
 
-    // 5) 县界（更细）
+    // 3) 县界（更细）
     ctx.lineWidth = 0.35;
     ctx.strokeStyle = COUNTY_BORDER;
     for (const county of map.counties) {
@@ -178,7 +198,7 @@ export default function WorldMap({ map, game, selectedProvince, onSelect }: Prop
       }
     }
 
-    // 6) 省界（细线）
+    // 4) 省界（细线）
     ctx.lineWidth = 0.55;
     ctx.strokeStyle = PROV_BORDER;
     for (const prov of map.provinces) {
@@ -189,7 +209,7 @@ export default function WorldMap({ map, game, selectedProvince, onSelect }: Prop
       }
     }
 
-    // 7) 国界柔化：粗淡描边 + 半透明多层（视觉柔和）
+    // 5) 国界深色加粗（多层柔化）
     const nationLayers = [
       { width: 3.4, alpha: 0.16 },
       { width: 2.3, alpha: 0.3 },
@@ -218,7 +238,7 @@ export default function WorldMap({ map, game, selectedProvince, onSelect }: Prop
       }
     }
 
-    // 8) 迷雾大陆：虚线描边
+    // 6) 迷雾大陆：虚线描边
     ctx.lineWidth = 1.1;
     ctx.setLineDash([4, 3]);
     ctx.strokeStyle = FOG_BORDER;
@@ -231,7 +251,7 @@ export default function WorldMap({ map, game, selectedProvince, onSelect }: Prop
     }
     ctx.setLineDash([]);
 
-    // 9) 选中省份高亮
+    // 7) 选中省份高亮
     if (selectedProvince !== null) {
       const prov = map.provinceById.get(selectedProvince);
       if (prov) {
@@ -241,6 +261,28 @@ export default function WorldMap({ map, game, selectedProvince, onSelect }: Prop
           const cell = map.cellsById.get(cid);
           if (cell && cellIsBoundary(map, cell, prov.id) && traceCell(cid)) ctx.stroke();
         }
+      }
+    }
+
+    // 8) v0.5 经纬网格 + 标注（每 10% 一条，浅色细线；仅在缩小时显示避免杂乱）
+    if (v.scale >= GRID_MIN_SCALE && v.scale <= GRID_MAX_SCALE) {
+      ctx.lineWidth = 0.5;
+      ctx.strokeStyle = 'rgba(226,236,248,0.32)';
+      ctx.fillStyle = 'rgba(226,236,248,0.7)';
+      ctx.font = '10px var(--sans), system-ui, sans-serif';
+      for (let i = 1; i < 10; i++) {
+        const sx = tx((i / 10) * map.width);
+        ctx.beginPath();
+        ctx.moveTo(sx, 0);
+        ctx.lineTo(sx, ch);
+        ctx.stroke();
+        ctx.fillText(`${i * 10}°E`, sx + 2, 10);
+        const sy = ty((i / 10) * map.height);
+        ctx.beginPath();
+        ctx.moveTo(0, sy);
+        ctx.lineTo(cw, sy);
+        ctx.stroke();
+        ctx.fillText(`${(10 - i) * 10}°N`, 3, sy - 3);
       }
     }
   };
@@ -277,7 +319,7 @@ export default function WorldMap({ map, game, selectedProvince, onSelect }: Prop
   useEffect(() => {
     draw();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [map, selectedProvince]);
+  }, [map, selectedProvince, relief]);
 
   // 滚轮缩放（原生监听以支持 preventDefault）
   useEffect(() => {
@@ -367,7 +409,11 @@ export default function WorldMap({ map, game, selectedProvince, onSelect }: Prop
         }}
       />
       {hoverProv && hoverPos && <HoverCard prov={hoverProv} game={game} pos={hoverPos} />}
-      <div className="map-hint">滚轮缩放 · 拖拽平移 · 点击省份选中 · 悬停查看摘要</div>
+      <div className="map-hint">
+        滚轮缩放 · 拖拽平移 · 点击省份选中 · 悬停摘要
+        <span className="map-hint-sep">｜</span>
+        空格=暂停 · 1/2/3=速度 · S=存档 · N=新游戏
+      </div>
     </div>
   );
 }
@@ -396,6 +442,7 @@ function HoverCard({ prov, game, pos }: { prov: Province; game: GameState; pos: 
     <div className="hover-card" style={style}>
       <div className="hover-title">
         行省 #{prov.id + 1} · {CLIMATE_LABEL[prov.climate]}
+        {prov.isStrait && <span className="hover-strait">海峡要道</span>}
       </div>
       <dl>
         <dt>归属</dt>

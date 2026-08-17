@@ -97,6 +97,8 @@ export interface Province {
   owner: ProvinceOwner;
   /** 大陆块 id（同一连通大陆上的省份共享） */
   landmassId: number;
+  /** v0.5 海峡省份：沿海且与另一大陆块最近格距 < STRAIT_DIST（交通要道） */
+  isStrait: boolean;
 }
 
 export interface GameMap {
@@ -575,27 +577,54 @@ function centroidOf(cids: number[], cellsById: Map<number, CellData>): Point {
   return { x: sx / cids.length, y: sy / cids.length };
 }
 
+// ---- v0.5 国界重绘（人工梳理原则） ----
+// 人工归属覆盖表（可手调）：省份 id → 属国，**优先于**下方地理规则。
+// 下一轮微调只改这张表即可，无需动地理规则。
+//   · 0   （北大陆中央低地，y≈0.49H）→ 南扎拉克（"扎拉克=中央"）
+//   · 38  （凯森海峡西岸哨岛，块18）→ 奥兰治（控制海峡一侧）
+//   · 45  （凯森海峡东岸哨岛，块20）→ 盎格伦撒（控制海峡一侧）
+export const PROVINCE_OWNER_OVERRIDES: Record<number, ProvinceOwner> = {
+  0: 'zalakS',
+  38: 'orange',
+  45: 'angland',
+};
+
+/** 海峡判定阈值（格质心间最近距离 px；小于阈值视为窄海/交通要道）。
+ * 实测：凯森海峡哨岛对（块18↔块20）≈24、盎格伦撒群岛对（块14↔块15）≈38、
+ * 奥兰治西南群岛对（块32↔块35）≈31 —— 阈值 40 恰好只标记这些要道，不误伤大陆本体。 */
+export const STRAIT_DIST = 40;
+
 /**
- * v0.4 八国划分（按大陆块 id + 省质心，确定性；与实测地图对齐）：
+ * v0.5 八国划分（按大陆块 id + 省质心 + 手调覆盖表；确定性；与实测地图对齐）：
  *  - 右侧新大陆 x >= 0.6W 保持未探明（不动）
- *  - LM0 北大陆：南端（y>=0.65H）→ 诺曼尼亚，其余 → 帝国；北境群岛（LM1/2/3/4/6/7）→ 帝国
- *  - LM13/16/17/18/20 西岸 → 洛林
- *  - LM24/26/27/29/32/33/34/35 南西岸低地 → 奥兰治（沿海低地）
- *  - LM19 中央块：西端（x<=0.43W）或南端（y>=0.63H）→ 诺曼尼亚；北（y<0.47H）→ 北扎拉克；其余 → 南扎拉克
- *  - LM21/30/31 东岸工业岛 → 伊尼亚斯；LM9/12/14/15 东部群岛 → 盎格伦撒
+ *  - LM0 北大陆：**帝国 = 北部+西部**（y < 0.55H，不含中央 #0）；南端（y>=0.55H）→ 诺曼尼亚；
+ *    中央 #0 由覆盖表划给南扎拉克 —— 帝国不再独占整块大陆
+ *  - LM1/2/3/4/6/7 北境群岛 → 帝国
+ *  - LM13/16/17 西大陆 → 洛林（西岸）；LM18/20 凯森海峡哨岛由覆盖表划给 奥兰治/盎格伦撒
+ *  - LM19 南大陆中央：西端（x<=0.43W）或南端（y>=0.63H）→ 诺曼尼亚；北（y<0.47H）→ 北扎拉克；
+ *    其余 → 南扎拉克（扎拉克=中央）
+ *  - LM21/30/31 东岸工业带（铁+煤）→ 伊尼亚斯
+ *  - LM9/12/14/15 中北群岛 → 盎格伦撒（群岛）
+ *  - LM24/26/27/29/32/33/34/35 西南群岛 → 奥兰治（南部沿海低地）
+ *
+ * v0.4 旧规则（保留作对照）：
+ *  - LM0：南端（y>=0.65H）→ 诺曼尼亚，其余 → 帝国
+ *  - LM13/16/17/18/20 西岸 → 洛林；LM19 西端/南端 → 诺曼尼亚，北 → 北扎拉克，其余 → 南扎拉克
+ *  - LM21/30/31 东岸 → 伊尼亚斯；LM9/12/14/15 群岛 → 盎格伦撒；LM24/26/27/29/32/33/34/35 → 奥兰治
  */
 function assignProvinceOwner(lmId: number, c: Point, width: number, height: number): ProvinceOwner {
   if (c.x >= width * FOG_X_RATIO) return 'undiscovered';
   switch (lmId) {
     case 0:
-      return c.y >= height * 0.65 ? 'normandy' : 'empire';
+      // 北大陆：诺曼尼亚=南端（y>=0.55H）；帝国=北部+西部（#0 中央由覆盖表划给南扎拉克）
+      return c.y >= height * 0.55 ? 'normandy' : 'empire';
     case 1:
     case 2:
     case 3:
     case 4:
     case 6:
     case 7:
-      return 'empire';
+      return 'empire'; // 北境群岛
     case 5:
     case 8:
     case 10:
@@ -607,26 +636,28 @@ function assignProvinceOwner(lmId: number, c: Point, width: number, height: numb
     case 36:
     case 37:
     case 38:
-      return 'undiscovered';
+      return 'undiscovered'; // 右侧迷雾新大陆
     case 9:
     case 12:
     case 14:
     case 15:
-      return 'angland';
+      return 'angland'; // 中北群岛（盎格伦撒）
     case 13:
     case 16:
     case 17:
+      return 'lorraine'; // 西大陆（洛林西岸）；LM18/20 海峡哨岛 → 覆盖表
     case 18:
     case 20:
-      return 'lorraine';
+      return 'lorraine'; // 凯森海峡哨岛基准归属（覆盖表改写为 奥兰治/盎格伦撒）
     case 19:
+      // 南大陆中央：诺曼尼亚=南端/西岸；北扎拉克=北；南扎拉克=中
       if (c.x <= width * 0.43) return 'normandy';
       if (c.y >= height * 0.63) return 'normandy';
       return c.y < height * 0.47 ? 'zalakN' : 'zalakS';
     case 21:
     case 30:
     case 31:
-      return 'ianys';
+      return 'ianys'; // 东岸工业带
     case 24:
     case 26:
     case 27:
@@ -635,9 +666,65 @@ function assignProvinceOwner(lmId: number, c: Point, width: number, height: numb
     case 33:
     case 34:
     case 35:
-      return 'orange';
+      return 'orange'; // 西南群岛（南部沿海低地）
   }
   return 'lorraine';
+}
+
+/** 计算各省「海峡省份」标记（沿海且与异大陆块最近格距 < STRAIT_DIST）。
+ * 只统计「已探明大陆块」之间的窄海（右侧迷雾新大陆不参与判定）。
+ * 实测要道：凯森海峡哨岛对（块18↔块20 ≈24px，奥兰治#38 / 盎格伦撒#45）、
+ * 盎格伦撒群岛对（块14↔块15 ≈27px，#32/#33）、奥兰治西南群岛对（块32↔块35 ≈31px，#63/#66）。 */
+export function computeStraitFlags(map: GameMap): void {
+  // 迷雾大陆块（不参与窄海判定）
+  const fogLandmasses = new Set<number>();
+  for (const p of map.provinces) {
+    if (p.isUndiscovered) fogLandmasses.add(p.landmassId);
+  }
+  // 格质心
+  const cellCent = new Map<number, Point>();
+  const cellBBox = new Map<number, BBox>();
+  for (const cid of map.landCellIds) {
+    const cell = map.cellsById.get(cid);
+    if (!cell) continue;
+    let cx = 0, cy = 0;
+    for (const p of cell.polygon) {
+      cx += p.x;
+      cy += p.y;
+    }
+    cellCent.set(cid, { x: cx / cell.polygon.length, y: cy / cell.polygon.length });
+    cellBBox.set(cid, cell.bbox);
+  }
+  const lmOfCell = new Map<number, number>();
+  for (const p of map.provinces) {
+    for (const cid of p.cellIds) lmOfCell.set(cid, p.landmassId);
+  }
+  for (const prov of map.provinces) {
+    prov.isStrait = false;
+    if (prov.isUndiscovered) continue;
+    let min = Infinity;
+    for (const cid of prov.cellIds) {
+      const c = cellCent.get(cid);
+      const cb = cellBBox.get(cid);
+      if (!c || !cb) continue;
+      for (const other of map.landCellIds) {
+        const otherLm = lmOfCell.get(other);
+        if (otherLm === undefined || otherLm === prov.landmassId) continue;
+        if (fogLandmasses.has(otherLm)) continue; // 迷雾不参与
+        const oc = cellCent.get(other);
+        const ob = cellBBox.get(other);
+        if (!oc || !ob) continue;
+        // bbox 剪枝（快速排除远格）
+        if (ob.minX > cb.maxX + STRAIT_DIST || ob.maxX < cb.minX - STRAIT_DIST) continue;
+        if (ob.minY > cb.maxY + STRAIT_DIST || ob.maxY < cb.minY - STRAIT_DIST) continue;
+        const dx = c.x - oc.x;
+        const dy = c.y - oc.y;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        if (d < min) min = d;
+      }
+    }
+    prov.isStrait = min <= STRAIT_DIST;
+  }
 }
 
 function buildMap(raw: RawMap): GameMap {
@@ -803,7 +890,9 @@ function buildMap(raw: RawMap): GameMap {
       terrCount[b] > terrCount[a] ? b : a,
     );
     const cent = centroidOf(cellIds, cellsById);
-    const owner = assignProvinceOwner(lmId, cent, width, height);
+    // v0.5：手调覆盖表优先于地理规则（支持 config 显式覆盖，便于下一轮微调）
+    const baseOwner = assignProvinceOwner(lmId, cent, width, height);
+    const owner = PROVINCE_OWNER_OVERRIDES[pid] ?? baseOwner;
     return {
       id: pid,
       counties: provCounties,
@@ -821,6 +910,7 @@ function buildMap(raw: RawMap): GameMap {
       isUndiscovered: owner === 'undiscovered',
       owner,
       landmassId: lmId,
+      isStrait: false, // 由 computeStraitFlags 填充
     };
   });
 
@@ -830,7 +920,55 @@ function buildMap(raw: RawMap): GameMap {
   provOfCellCache = null; // 缓存失效
   countyOfCellCache = null;
 
-  return { width, height, seed, cellsById, landCellIds, counties, countyById, provinces, provinceById };
+  const map: GameMap = { width, height, seed, cellsById, landCellIds, counties, countyById, provinces, provinceById };
+  computeStraitFlags(map); // v0.5：海峡省份判定
+  return map;
+}
+
+/** 省份-归属表（v0.5 审查输出）：id / 质心 / 格数 / 沿海 / 海峡 / 属国 */
+export function provinceOwnerTable(map: GameMap): Array<{
+  id: number;
+  x: number;
+  y: number;
+  cells: number;
+  coastal: boolean;
+  strait: boolean;
+  owner: ProvinceOwner;
+}> {
+  const out: Array<{
+    id: number;
+    x: number;
+    y: number;
+    cells: number;
+    coastal: boolean;
+    strait: boolean;
+    owner: ProvinceOwner;
+  }> = [];
+  for (const p of map.provinces) {
+    let coastal = false;
+    for (const cid of p.cellIds) {
+      const cell = map.cellsById.get(cid);
+      if (!cell) continue;
+      for (const nb of cell.neighbors) {
+        const nbCell = map.cellsById.get(nb);
+        if (nbCell && !nbCell.land) {
+          coastal = true;
+          break;
+        }
+      }
+      if (coastal) break;
+    }
+    out.push({
+      id: p.id,
+      x: Math.round(p.centroid.x),
+      y: Math.round(p.centroid.y),
+      cells: p.cellIds.length,
+      coastal,
+      strait: p.isStrait,
+      owner: p.owner,
+    });
+  }
+  return out;
 }
 
 /** 调试统计（sim 用） */

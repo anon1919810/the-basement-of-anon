@@ -25,7 +25,7 @@ export default function TopBar({ game, onSpeed, onNation, onSave, onNewGame }: P
     <header className="topbar">
       <div className="brand">
         <span className="brand-mark">《卡尔特》</span>
-        <span className="brand-sub">v0.4.0 八国可玩 · 立体税制</span>
+        <span className="brand-sub">v0.5.0 八国可玩 · 地形底图 · 立体税制</span>
       </div>
 
       <div className="tb-clock">
@@ -94,6 +94,7 @@ export default function TopBar({ game, onSpeed, onNation, onSave, onNewGame }: P
         综合税负 {taxPct.toFixed(1)}%
       </div>
       <span className="tb-nation-info">{def.name} · {def.gov}</span>
+      <span className="tb-shortcut">空格=暂停 · 1/2/3=速度 · S=存档 · N=新游戏</span>
     </header>
   );
 }

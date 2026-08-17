@@ -77,6 +77,9 @@ export const CAPITAL_POOL_INDUSTRY = 0.5; // 建筑工业利润计入比例
 /** 农奴制效率惩罚（未废奴且存在奴隶 → 产出 ×0.9） */
 export const SERFDOM_PENALTY = 0.9;
 
+/** v0.5 迁移软化：单省月流出上限 = 该省住房容量 × 2%（不再首月大额流亡） */
+export const MIGRATION_CAP = 0.02;
+
 /**
  * 建筑成本结构表（market.ts 成本传导用，避免 market↔buildings 循环依赖）：
  * 商品 → 生产该商品的建筑 { 每单位输出所需输入量, 满产产能 }。
@@ -123,6 +126,11 @@ export interface MonthlyLedger {
   investCost: number;
   /** 玩家投资取消退款（本月合计） */
   investRefund: number;
+  // ---- v0.5 迁移（软化的月迁移账） ----
+  /** 本月省外流人口合计（万人，过挤省推挤） */
+  migrationOut: number;
+  /** 本月迁入人口合计（万人，空余省拉引） */
+  migrationIn: number;
 }
 
 export function zeroLedger(): MonthlyLedger {
@@ -131,6 +139,7 @@ export function zeroLedger(): MonthlyLedger {
     exportValue: 0, importValue: 0, tradeBalance: 0,
     foodProd: 0, foodConsumed: 0, foodSurplus: 0, growthRate: 0,
     investIncome: 0, investReturn: 0, investCost: 0, investRefund: 0,
+    migrationOut: 0, migrationIn: 0,
   };
 }
 
@@ -586,28 +595,71 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
     ps.popTotal = 0;
     for (const pop of ps.pops) ps.popTotal += pop.size;
   }
-  // 迁移：超容量 → 池；按省 id 序填充空缺；剩余 = 流亡流失
+  // 迁移（v0.5 软化）：月上限（单省 2% 容量）+ 推拉因子（拥挤度差/幸福度差），不再首月大额流亡
+  //  推：过挤省（pop > cap）每月最多挤出 min(超额, 容量×2%)，进入迁移池
+  //  拉：空余容量 × (0.5 + 幸福度/200) 权重 → 按比例分配给迁入省（确定性：省 id 序）
+  //  剩余池 = 流民（emigration，代表流向他国/失踪人口；国家人口守恒 = 流出=迁入+流民）
+  let migrationOut = 0;
+  let migrationIn = 0;
   let pool = 0;
+  // 1) 推：过挤省按上限流出
   for (const pid of provIds) {
     const ps = state.provinces[pid];
-    if (ps.popTotal > ps.housingCap) {
-      const excess = ps.popTotal - ps.housingCap;
-      const ratio = ps.housingCap / Math.max(ps.popTotal, 1e-9);
-      for (const pop of ps.pops) pop.size *= ratio;
-      ps.popTotal = ps.housingCap;
-      pool += excess;
+    const excess = ps.popTotal - ps.housingCap;
+    if (excess > 1e-9) {
+      const outflow = Math.min(excess, ps.housingCap * MIGRATION_CAP);
+      if (outflow > 1e-9) {
+        const ratio = 1 - outflow / Math.max(ps.popTotal, 1e-9);
+        for (const pop of ps.pops) pop.size *= ratio;
+        ps.popTotal -= outflow;
+        pool += outflow;
+        migrationOut += outflow;
+      }
     }
   }
-  for (const pid of provIds) {
-    if (pool <= 0) break;
-    const ps = state.provinces[pid];
-    const free = ps.housingCap - ps.popTotal;
-    if (free > 0) {
-      const take = Math.min(free, pool);
-      const addRatio = 1 + take / Math.max(ps.popTotal, 1e-9);
-      for (const pop of ps.pops) pop.size *= addRatio;
-      ps.popTotal += take;
-      pool -= take;
+  // 2) 拉：按 空余容量 × 拉引系数（幸福度越高越有吸引力）分配迁移池
+  if (pool > 1e-9) {
+    const pulls: { pid: number; weight: number }[] = [];
+    for (const pid of provIds) {
+      const ps = state.provinces[pid];
+      const free = ps.housingCap - ps.popTotal;
+      if (free > 1e-9) {
+        const w = free * (0.5 + ps.happiness / 200);
+        if (w > 1e-9) pulls.push({ pid, weight: w });
+      }
+    }
+    if (pulls.length > 0) {
+      const wSum = pulls.reduce((s, x) => s + x.weight, 0);
+      let rem = pool;
+      for (let i = 0; i < pulls.length && rem > 1e-9; i++) {
+        const { pid, weight } = pulls[i];
+        const ps = state.provinces[pid];
+        const free = ps.housingCap - ps.popTotal;
+        if (free <= 1e-9) continue;
+        const share = i === pulls.length - 1 ? rem : (weight / wSum) * pool;
+        const take = Math.min(free, share);
+        if (take <= 1e-9) continue;
+        const addRatio = 1 + take / Math.max(ps.popTotal, 1e-9);
+        for (const pop of ps.pops) pop.size *= addRatio;
+        ps.popTotal += take;
+        rem -= take;
+        migrationIn += take;
+      }
+      pool = Math.max(0, rem);
+    }
+    // 3) 兜底：剩余池按省 id 序填满所有空余（确定性）
+    for (const pid of provIds) {
+      if (pool <= 1e-9) break;
+      const ps = state.provinces[pid];
+      const free = ps.housingCap - ps.popTotal;
+      if (free > 1e-9) {
+        const take = Math.min(free, pool);
+        const addRatio = 1 + take / Math.max(ps.popTotal, 1e-9);
+        for (const pop of ps.pops) pop.size *= addRatio;
+        ps.popTotal += take;
+        pool -= take;
+        migrationIn += take;
+      }
     }
   }
   n.emigration = pool;
@@ -678,6 +730,8 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
     investReturn,
     investCost,
     investRefund,
+    migrationOut,
+    migrationIn,
   };
 
   // ---- 14. 识字率 & 健康（教育/卫生支出） ----

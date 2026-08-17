@@ -9,6 +9,7 @@ import type { GameMap } from './map';
 import type { GoodId, NationId, ProvinceOwner, Speed } from './types';
 import { DAYS_PER_MONTH, monthIndex } from './clock';
 import { NATIONS } from './nations';
+import { BASE_HOUSING_PER_CELL } from './pops';
 import {
   BANKRUPTCY_COOLDOWN,
   BANKRUPTCY_THRESHOLD,
@@ -26,10 +27,10 @@ import { MANUAL_EVENTS } from './manualEvents';
 import { defaultNationTax } from './tax';
 import type { NationTax } from './tax';
 
-export const SAVE_VERSION = 5;
-export const SAVE_KEY = 'kalt-save-v5';
-/** 旧存档键（v0.4 起存档不兼容，提示用） */
-export const OLD_SAVE_KEYS = ['kalt-save-v4', 'kalt-save-v3'];
+export const SAVE_VERSION = 6;
+export const SAVE_KEY = 'kalt-save-v6';
+/** 旧存档键（v0.5 起存档不兼容，提示用） */
+export const OLD_SAVE_KEYS = ['kalt-save-v5', 'kalt-save-v4', 'kalt-save-v3'];
 
 /** 国家政策（v0.3）：作用于当前国，写入状态与存档 */
 export interface NationPolicies {
@@ -127,16 +128,91 @@ function nationCellCount(map: GameMap, id: NationId): number {
   return n;
 }
 
-/** 初始国家库存（17 商品；资源给足、半成品/成品少量起步） */
-function initialStocks(def: { popWan: number; foodMonths: number }): Record<GoodId, number> {
-  const fm = def.foodMonths;
+// ---- v0.5 人口按住房容量缩放（消除首月大崩溃） ----
+
+/** 初始总人口目标 = 全图住房容量 × 0.75（"容量×0.75 左右"） */
+export const POP_SCALE_TARGET = 0.75;
+
+/** 国家住房容量（万人）= 所辖陆地格 × 每格容量（与省 housingCap 同口径） */
+export function nationHousingCap(map: GameMap, id: NationId): number {
+  let cap = 0;
+  for (const p of map.provinces) {
+    if (p.owner === id && !p.isUndiscovered) cap += p.cellIds.length * BASE_HOUSING_PER_CELL;
+  }
+  return cap;
+}
+
+/**
+ * v0.5 初始人口水填法缩放：
+ *  - 总目标 = 全图容量 × POP_SCALE_TARGET；
+ *  - 先按世界观人口比例缩放，超容量国家封顶到自身容量，释放的配额按比例分给未封顶国家（迭代至稳定）；
+ *  - 保留国家间相对比例（容量允许范围内）；阶级构成/识字率/政体本来就是比例与属性，天然保留；
+ *  - 消除「伊尼亚斯 1300 万挤 10 格」的首月瞬间流亡。
+ */
+export function scaledNationPops(map: GameMap): Record<NationId, number> {
+  const ids = Object.keys(NATIONS) as NationId[];
+  const caps = {} as Record<NationId, number>;
+  let totalCap = 0;
+  for (const id of ids) {
+    caps[id] = nationHousingCap(map, id);
+    totalCap += caps[id];
+  }
+  let target = totalCap * POP_SCALE_TARGET;
+  let worldPool = ids.reduce((s, id) => s + NATIONS[id].popWan, 0);
+  const pops = {} as Record<NationId, number>;
+  const capped = new Set<NationId>();
+  let guard = 0;
+  while (guard++ < 32) {
+    const scale = worldPool > 0 ? target / worldPool : 0;
+    const tentative = {} as Record<NationId, number>;
+    let overflow = 0;
+    for (const id of ids) {
+      if (capped.has(id)) continue;
+      const scaled = NATIONS[id].popWan * scale;
+      if (scaled > caps[id]) {
+        tentative[id] = caps[id];
+        overflow += scaled - caps[id];
+      } else {
+        tentative[id] = scaled;
+      }
+    }
+    if (overflow <= 1e-9) {
+      for (const id of ids) if (!capped.has(id)) pops[id] = tentative[id];
+      break;
+    }
+    // 封顶本轮超限国家，释放其配额
+    for (const id of ids) {
+      if (capped.has(id)) continue;
+      if (tentative[id] >= caps[id] - 1e-9) {
+        pops[id] = caps[id];
+        capped.add(id);
+        target -= caps[id];
+        worldPool -= NATIONS[id].popWan;
+      }
+    }
+  }
+  // 兜底（理论不会触发）：剩余未定国家按剩余配额均分
+  for (const id of ids) {
+    if (pops[id] === undefined) pops[id] = 0;
+  }
+  return pops;
+}
+
+/** 单一国家初始人口（UI 国家选择器显示用） */
+export function scaledNationPop(map: GameMap, id: NationId): number {
+  return scaledNationPops(map)[id];
+}
+
+/** 初始国家库存（17 商品；资源给足、半成品/成品少量起步；按缩放后人口计） */
+function initialStocks(popWan: number, foodMonths: number): Record<GoodId, number> {
+  const fm = foodMonths;
   const s = zeroGoods();
-  s.food = (def.popWan * 0.09 * fm) / 12;
-  s.clothing = def.popWan * 0.006 * fm;
-  s.coal = def.popWan * 0.005 * fm;
-  const resBase = def.popWan * 0.001 * fm;
+  s.food = (popWan * 0.09 * fm) / 12;
+  s.clothing = popWan * 0.006 * fm;
+  s.coal = popWan * 0.005 * fm;
+  const resBase = popWan * 0.001 * fm;
   for (const g of ['timber', 'cotton', 'fur', 'ironOre', 'salt', 'fish'] as GoodId[]) s[g] = resBase;
-  const semiBase = def.popWan * 0.0003 * fm;
+  const semiBase = popWan * 0.0003 * fm;
   for (const g of ['lumber', 'cloth', 'iron', 'steel', 'tools', 'weapons', 'sailShip', 'luxury'] as GoodId[]) {
     s[g] = semiBase;
   }
@@ -145,12 +221,14 @@ function initialStocks(def: { popWan: number; foodMonths: number }): Record<Good
 
 export function newGameState(playerNation: NationId, seed: number, map: GameMap): GameState {
   const rng = new Rng(seed);
+  const scaledPops = scaledNationPops(map); // v0.5：8 国人口按容量缩放
   const nations = {} as Record<NationId, NationState>;
   (Object.keys(NATIONS) as NationId[]).forEach((id) => {
     const def = NATIONS[id];
-    const stocks = initialStocks(def);
+    const popWan = scaledPops[id];
+    const stocks = initialStocks(popWan, def.foodMonths);
     nations[id] = {
-      popWan: def.popWan,
+      popWan,
       literacy: def.literacy,
       health: 0.6,
       treasury: def.treasury,
@@ -182,7 +260,7 @@ export function newGameState(playerNation: NationId, seed: number, map: GameMap)
     const owner = p.owner;
     if (owner !== 'undiscovered') {
       const def = NATIONS[owner];
-      const econ = initProvinceEcon(p, owner, def.popWan, nations[owner].cells, def.stability);
+      const econ = initProvinceEcon(p, owner, scaledPops[owner], nations[owner].cells, def.stability);
       provinces[p.id] = { owner, ...econ };
     } else {
       provinces[p.id] = {

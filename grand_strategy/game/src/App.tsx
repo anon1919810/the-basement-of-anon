@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { GameMap } from './game/map';
 import { loadMap } from './game/map';
 import type { GameState } from './game/state';
-import { loadGame, newGameState, tickDay, saveGame, clearSave, setPolicy, abolishSerfdom, hasOldSave } from './game/state';
+import { loadGame, newGameState, tickDay, saveGame, clearSave, setPolicy, abolishSerfdom, hasOldSave, scaledNationPop } from './game/state';
 import type { NationId, Speed } from './game/types';
 import type { TaxKind } from './game/tax';
 import type { GoodId } from './game/types';
@@ -14,7 +14,8 @@ import { NATIONS, NATION_LIST } from './game/nations';
 import { clampTax } from './game/tax';
 import WorldMap from './components/WorldMap';
 import TopBar from './components/TopBar';
-import NationPanel from './components/NationPanel';
+import GovernancePanel from './components/GovernancePanel';
+import ProvincePanel from './components/ProvincePanel';
 
 export default function App() {
   const mapRef = useRef<GameMap | null>(null);
@@ -31,6 +32,7 @@ export default function App() {
   const [savedFlash, setSavedFlash] = useState(false);
   const [oldSaveNotice, setOldSaveNotice] = useState<boolean>(() => hasOldSave());
   const [showNationPicker, setShowNationPicker] = useState(false);
+  const [govCollapsed, setGovCollapsed] = useState(false); // v0.5 左侧治理面板可折叠
   const flashTimer = useRef<number | null>(null);
 
   // 实时时钟：rAF + dt 驱动（暂停 / 1x / 2x / 3x）
@@ -74,6 +76,10 @@ export default function App() {
       if (s > 0) g.prevSpeed = s;
       g.speed = s;
       setGame({ ...g });
+    },
+    togglePause() {
+      const g = gameRef.current;
+      actions.setSpeed(g.speed === 0 ? (g.prevSpeed || 1) : 0);
     },
     setNation(id: NationId) {
       const g = gameRef.current;
@@ -130,7 +136,6 @@ export default function App() {
       if (saveGame(gameRef.current)) flash();
     },
     newGame() {
-      // v0.4：新游戏保留国家选择（8 国全开放）
       if (!window.confirm('开始新游戏？当前进度将被覆盖。')) return;
       setShowNationPicker(true);
     },
@@ -144,6 +149,44 @@ export default function App() {
     },
   };
 
+  // v0.5 键盘快捷键：空格=暂停/继续、1/2/3=速度、S=存档、N=新游戏（带确认）
+  const actionsRef = useRef(actions);
+  actionsRef.current = actions;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
+      const a = actionsRef.current;
+      switch (e.key) {
+        case ' ':
+          e.preventDefault();
+          a.togglePause();
+          break;
+        case '1':
+          a.setSpeed(1);
+          break;
+        case '2':
+          a.setSpeed(2);
+          break;
+        case '3':
+          a.setSpeed(3);
+          break;
+        case 's':
+        case 'S':
+          a.save();
+          break;
+        case 'n':
+        case 'N':
+          a.newGame();
+          break;
+        default:
+          break;
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   return (
     <div className="app">
       <TopBar
@@ -154,16 +197,9 @@ export default function App() {
         onNewGame={actions.newGame}
       />
       <main className="main">
-        <WorldMap
-          map={map}
-          game={game}
-          selectedProvince={selectedProvince}
-          onSelect={setSelectedProvince}
-        />
-        <NationPanel
+        <GovernancePanel
           game={game}
           map={map}
-          selectedProvince={selectedProvince}
           onTaxRate={actions.setTaxRate}
           onGoodsTax={actions.setGoodsTax}
           onSpending={actions.setSpending}
@@ -172,25 +208,36 @@ export default function App() {
           onCancelInvest={actions.cancelInvest}
           onTogglePolicy={actions.togglePolicy}
           onAbolish={actions.abolish}
+          collapsed={govCollapsed}
+          onToggleCollapse={() => setGovCollapsed((c) => !c)}
         />
+        <div className="map-area">
+          <WorldMap
+            map={map}
+            game={game}
+            selectedProvince={selectedProvince}
+            onSelect={setSelectedProvince}
+          />
+        </div>
+        <ProvincePanel map={map} game={game} selectedProvince={selectedProvince} />
       </main>
       {savedFlash && <div className="toast">已保存到本机</div>}
       {oldSaveNotice && (
         <div className="toast old-save-toast" onClick={() => setOldSaveNotice(false)}>
-          ⚠ 检测到 v0.3 旧存档（不兼容 v0.4：税制与八国重分），已开启新局；点击关闭
+          ⚠ 检测到 v0.4/v0.5 旧存档（不兼容 v0.6：国界重绘/人口缩放），已开启新局；点击关闭
         </div>
       )}
       {showNationPicker && (
         <div className="modal-overlay" onClick={() => setShowNationPicker(false)}>
           <div className="nation-picker" onClick={(e) => e.stopPropagation()}>
             <h3>选择你的国家（8 国全可玩）</h3>
-            <p className="dim">新历 1023 年 · 工业革命前夜。各国人口/识字率/政体/资源禀赋各异（详见世界观点）</p>
+            <p className="dim">新历 1023 年 · 工业革命前夜。人口按地图住房容量缩放（v0.5），各国政体/识字率/资源禀赋各异</p>
             <div className="nation-picker-grid">
               {NATION_LIST.map((d) => (
                 <button key={d.id} className="nation-pick-card" onClick={() => actions.startNewGame(d.id)}>
                   <span className="nation-pick-dot" style={{ background: d.color }} />
                   <b>{d.name}</b>
-                  <em className="dim">{d.gov} · {d.popWan} 万 · 识字 {(d.literacy * 100).toFixed(0)}%</em>
+                  <em className="dim">{d.gov} · 开局 {Math.round(scaledNationPop(map, d.id))} 万 · 识字 {(d.literacy * 100).toFixed(0)}%</em>
                   <span className="dim">{NATIONS[d.id].economy}</span>
                 </button>
               ))}

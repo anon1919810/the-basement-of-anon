@@ -8,9 +8,9 @@
  *  - 帝国 10 年冒烟：废农奴制
  * 运行：npx.cmd tsx scripts/sim.ts
  */
-import { loadMap, mapStats } from '../src/game/map';
+import { loadMap, mapStats, provinceOwnerTable } from '../src/game/map';
 import type { GameMap } from '../src/game/map';
-import { newGameState, tickDay, allFinite, abolishSerfdom, setPolicy } from '../src/game/state';
+import { newGameState, tickDay, allFinite, abolishSerfdom, setPolicy, scaledNationPops, nationHousingCap } from '../src/game/state';
 import type { GameState } from '../src/game/state';
 import { NATIONS, NATION_LIST } from '../src/game/nations';
 import { Rng } from '../src/game/rng';
@@ -25,7 +25,7 @@ import type { MarketInput, MarketState } from '../src/game/market';
 import { BUILDING_DEFS, BUILDING_KINDS, buildingUnlock, cancelInvestment, nationHasGood, startInvestment } from '../src/game/buildings';
 import { MANUAL_EVENTS } from '../src/game/manualEvents';
 import type { GoodId, NationId } from '../src/game/types';
-import { provinceResources, resourceStats, RESOURCE_LABEL, provinceHasResource } from '../src/game/resources';
+import { provinceHasResource } from '../src/game/resources';
 
 let failures = 0;
 let checks = 0;
@@ -216,10 +216,12 @@ function assertMonthlyConservation(state: GameState, map: GameMap, snap: Snapsho
     natMixSum += natMix[c];
   }
   check(Math.abs(natMixSum - n.popWan) < 0.05, `七级总和 = 总人口（${at}: ${natMixSum.toFixed(2)} vs ${n.popWan.toFixed(2)}）`);
+  // v0.5 迁移软化：省人口可临时超容（≤容量×1.1）；月迁移上限（单省 2% 容量）生效
+  const natCap = nationHousingCap(map, state.playerNation);
   for (const p of map.provinces) {
     if (p.owner !== state.playerNation || p.isUndiscovered) continue;
     const ps = state.provinces[p.id];
-    check(ps.popTotal <= ps.housingCap + 1e-6, `省人口 ≤ 住房容量（${at}: 行省#${p.id + 1} ${ps.popTotal.toFixed(2)} ≤ ${ps.housingCap.toFixed(2)}）`);
+    check(ps.popTotal <= ps.housingCap * 1.1 + 1e-6, `省人口 ≤ 容量×1.1（${at}: 行省#${p.id + 1} ${ps.popTotal.toFixed(2)} ≤ ${(ps.housingCap * 1.1).toFixed(2)}）`);
     let provSum = 0;
     for (const pop of ps.pops) {
       check(pop.size >= -1e-9, `POP size ≥ 0（${at}: 行省#${p.id + 1} ${JOB_LABEL[pop.job]}/${CLASS_LABEL[pop.class]} ${pop.size.toFixed(4)}）`);
@@ -227,6 +229,11 @@ function assertMonthlyConservation(state: GameState, map: GameMap, snap: Snapsho
     }
     check(Math.abs(provSum - ps.popTotal) < 1e-6, `省阶级总和 = 省人口（${at}: 行省#${p.id + 1}）`);
   }
+  check(n.monthly.migrationOut <= natCap * 0.02 + 1e-6,
+    `迁移月上限生效（${at}: 迁出 ${n.monthly.migrationOut.toFixed(3)} ≤ 容量×2% ${(natCap * 0.02).toFixed(2)}）`);
+  check(n.emigration <= natCap * 0.02 + 1e-6,
+    `流民不超月上限（${at}: ${n.emigration.toFixed(3)} ≤ ${(natCap * 0.02).toFixed(2)}）`);
+  check(n.monthly.migrationOut >= -1e-9 && n.monthly.migrationIn >= -1e-9, `迁移账非负（${at}）`);
   // 建筑账目：进度合法、技能要求生效（0 技能 POP → 产能 0）、输入可用系数 0-1
   for (const pr of n.projects) {
     check(pr.monthsLeft >= 0 && pr.monthsLeft <= pr.duration, `建筑进度合法（${at}: ${BUILDING_DEFS[pr.kind].label} 剩余 ${pr.monthsLeft}/${pr.duration} 月）`);
@@ -262,6 +269,7 @@ function simulate(
   const id = state.playerNation;
   const n = state.nations[id];
   const days = years * DAYS_PER_YEAR;
+  const startPop = n.popWan; // v0.5 存活断言基准
 
   let minTreasury = Infinity;
   let minStability = Infinity;
@@ -385,6 +393,9 @@ function simulate(
   // 无事件系统：人工事件列表为空 → 休眠检查点 no-op；状态中不存在事件队列
   check(MANUAL_EVENTS.length === 0, `人工事件列表为空（${MANUAL_EVENTS.length} 条，休眠检查点 no-op）`);
   check(!('eventQueue' in state) && !('stats' in state), '状态中无事件队列/事件统计（事件系统已移除）');
+  // v0.5 人口修复：10 年（及 50 年）后人口不得塌缩到起始 40% 以下（伊尼亚斯/奥兰治等小国）
+  check(n.popWan > startPop * 0.4,
+    `终局人口 > 起始 40%（${NATIONS[nation].name} ${years} 年: ${n.popWan.toFixed(1)} > ${(startPop * 0.4).toFixed(1)}）`);
   assertFiniteState(state, '终局');
   return { state, costAcc, ironCostAt15 };
 }
@@ -442,24 +453,6 @@ function assertSaveRoundtrip(state: GameState): void {
     check(JSON.stringify(parsed) === text, '存档 JSON 往返逐字节一致');
   } catch {
     check(false, '存档 JSON 序列化无异常');
-  }
-}
-
-/** 各国资源禀赋（打印 + 断言：资源数据与省 id 对齐） */
-function nationResourceReport(map: GameMap): void {
-  console.log('== 各国资源禀赋（按大陆块 × 省份）==');
-  for (const id of Object.keys(NATIONS) as NationId[]) {
-    const provs = map.provinces.filter((p) => p.owner === id && !p.isUndiscovered);
-    const stat = resourceStats(provs);
-    const lines = Object.entries(stat)
-      .map(([r, c]) => `${RESOURCE_LABEL[r as keyof typeof RESOURCE_LABEL]}×${c}`)
-      .join(' · ');
-    console.log(`  ${NATIONS[id].name}: ${provs.length} 行省 → ${lines || '—'}`);
-  }
-  for (const p of map.provinces) {
-    if (p.isUndiscovered) continue;
-    const res = provinceResources(p);
-    check(Array.isArray(res), `行省 #${p.id + 1} 资源集可读（${res.length} 项）`);
   }
 }
 
@@ -535,18 +528,35 @@ function commodityTaxTransmissionTest(): void {
 
 function main(): void {
   const map = loadMap();
-  console.log('== 地图导入统计（v0.4 八国重分）==');
+  console.log('== 地图导入统计（v0.5 国界重绘 + 海峡判定）==');
   console.log(JSON.stringify(mapStats(map), null, 2));
-  nationResourceReport(map);
-  console.log('== 国家初始辖区 ==');
+
+  console.log('\n== v0.5 初始人口按住房容量缩放（8 国）==');
+  const fresh = newGameState('lorraine', 42, map);
+  const scaled = scaledNationPops(map);
+  for (const def of NATION_LIST) {
+    const cap = nationHousingCap(map, def.id);
+    const pop = scaled[def.id];
+    check(pop <= cap * 1.1 + 1e-6, `初始人口 ≤ 容量×1.1（${def.name} ${pop.toFixed(1)} 万 ≤ ${(cap * 1.1).toFixed(1)} 万）`);
+    check(fresh.nations[def.id].popWan <= cap * 1.1 + 1e-6, `开局状态人口 ≤ 容量×1.1（${def.name} ${fresh.nations[def.id].popWan.toFixed(1)}）`);
+    console.log(`  ${def.name}: 初始 ${pop.toFixed(0)} 万 / 容量 ${cap.toFixed(0)} 万（${(pop / cap * 100).toFixed(0)}% · 世界观 ${def.popWan} 万）`);
+  }
+
+  console.log('\n== v0.5 省份-归属表（id/质心/格数/沿海/海峡/属国）==');
+  for (const r of provinceOwnerTable(map)) {
+    console.log(`  #${r.id + 1}(${r.id}) (${r.x},${r.y}) ${r.cells}格 沿海${r.coastal ? 'Y' : 'N'} 海峡${r.strait ? 'Y' : 'N'} → ${r.owner}`);
+  }
+
+  console.log('\n== 各国辖区与要道（海峡省份）==');
   for (const def of NATION_LIST) {
     const provs = map.provinces.filter((p) => p.owner === def.id && !p.isUndiscovered);
     const cells = provs.reduce((s, p) => s + p.cellIds.length, 0);
     const counties = provs.reduce((s, p) => s + p.counties.length, 0);
-    console.log(`  ${def.name}: ${provs.length} 行省 / ${counties} 县 / ${cells} 格 · 人口 ${def.popWan} 万 · 识字 ${(def.literacy * 100).toFixed(0)}%`);
+    const straits = provs.filter((p) => p.isStrait).map((p) => `#${p.id + 1}`).join(',');
+    console.log(`  ${def.name}: ${provs.length} 行省 / ${counties} 县 / ${cells} 格 · 海峡要道[${straits || '—'}]`);
   }
   console.log(`  （未探明新大陆: ${map.provinces.filter((p) => p.isUndiscovered).length} 行省）`);
-  console.log(`  （v0.4：8 国可玩 · 立体税制六税种 · 17 商品 · 13 建筑 · 7 级阶级；事件系统仍休眠）`);
+  console.log(`  （v0.5：国界重绘/地形底图/经纬线/人口缩放/迁移软化；事件系统仍休眠）`);
 
   console.log('\n== 50 年沙盒（洛林，seed 42）==');
   const runA = simulate(42, 'lorraine', 50);
