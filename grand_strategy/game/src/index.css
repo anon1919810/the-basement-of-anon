@@ -110,6 +110,16 @@ button.active {
   font-size: 12px;
 }
 
+.tb-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.tb-btn:disabled:hover {
+  border-color: var(--line);
+  color: inherit;
+}
+
 .tb-stats {
   display: flex;
   gap: 14px;
@@ -1093,4 +1103,214 @@ button.active {
   border-radius: 3px;
   display: inline-block;
   margin-bottom: 2px;
+}
+
+/* ---- v0.6 视图选择器 / 图例 / 编辑模式 ---- */
+.view-selector {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  gap: 4px;
+  background: rgba(10, 22, 38, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+  padding: 3px;
+  z-index: 20;
+}
+
+.view-btn {
+  font-size: 12px;
+  padding: 2px 10px;
+  border: none;
+  border-radius: 3px;
+  color: rgba(230, 235, 240, 0.8);
+}
+
+.view-btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.view-btn.active {
+  background: rgba(47, 125, 69, 0.85);
+  color: #fff;
+  font-weight: 600;
+}
+
+.legend-bar {
+  position: absolute;
+  top: 52px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(10, 22, 38, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: rgba(230, 235, 240, 0.9);
+  z-index: 20;
+}
+
+.legend-label {
+  font-weight: 600;
+  margin-right: 2px;
+}
+
+.legend-min,
+.legend-max {
+  color: rgba(230, 235, 240, 0.65);
+  font-variant-numeric: tabular-nums;
+}
+
+.legend-gradient {
+  width: 90px;
+  height: 8px;
+  border-radius: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.legend-unit {
+  color: rgba(230, 235, 240, 0.5);
+}
+
+/* 编辑模式 */
+.edit-banner {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 25;
+  font-size: 12px;
+  color: #f5e6c8;
+  background: rgba(120, 60, 20, 0.85);
+  border: 1px solid rgba(255, 200, 120, 0.5);
+  border-radius: 4px;
+  padding: 4px 14px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.edit-bar {
+  position: absolute;
+  top: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 40px);
+  background: rgba(16, 22, 30, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 5px;
+  padding: 6px 10px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
+  flex-wrap: wrap;
+}
+
+.edit-bar-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 1px;
+  border-right: 1px solid rgba(255, 255, 255, 0.2);
+  padding-right: 8px;
+}
+
+.edit-nations {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.edit-nation-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 2px 8px;
+  color: #dfe6ee;
+  border-color: rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.edit-nation-btn:hover {
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.edit-nation-btn.active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.edit-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.edit-actions {
+  display: flex;
+  gap: 4px;
+  border-left: 1px solid rgba(255, 255, 255, 0.2);
+  padding-left: 8px;
+}
+
+.edit-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 2px 8px;
+  color: #dfe6ee;
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.edit-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.edit-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.edit-count {
+  font-size: 11px;
+  color: rgba(230, 235, 240, 0.6);
+  border-left: 1px solid rgba(255, 255, 255, 0.2);
+  padding-left: 8px;
+}
+
+/* 顶栏编辑模式按钮 */
+.edit-mode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.edit-mode-btn.active {
+  border-color: var(--warn);
+  color: var(--warn);
+  background: rgba(181, 71, 47, 0.08);
+}
+
+/* 治理面板分区图标 */
+.gov-sec-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.gov-sec-icon {
+  color: var(--accent);
+  flex: none;
 }

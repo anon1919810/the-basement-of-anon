@@ -1,5 +1,5 @@
 /**
- * v0.5 新行政图数据导出：省份多边形 + 属国 + 省界/国界标记 → game/scripts/admin_v05.json，
+ * v0.6 新行政图数据导出：省份多边形 + 属国 + 省界/国界标记 → game/scripts/admin_v06.json，
  * 由 tools/render_admin_v05.py 渲染 PNG。单一数据源 = map.ts 的归属逻辑（loadMap）。
  * 运行：npx.cmd tsx scripts/export_admin.ts
  */
@@ -39,6 +39,6 @@ const out = {
   height: map.height,
   provinces,
 };
-const path = 'scripts/admin_v05.json';
+const path = 'scripts/admin_v06.json';
 writeFileSync(path, JSON.stringify(out));
 console.log(`已导出 ${path}（${provinces.length} 省 / ${map.landCellIds.length} 陆地格）`);

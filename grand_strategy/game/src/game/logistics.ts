@@ -1,9 +1,11 @@
 /**
- * 物流运输（v0.1）：
+ * 物流运输（v0.1 / v0.6 循环地图）：
  *  - 跨省调运运费 = 距离 × 地形系数（山地贵、沿海便宜），同省内免运费
  *  - 基建（道路/港口）降运费：运费 /= (1 + roads*0.03 + ports*0.02)
  *  - 运费经「可负担系数」压低 POP 幸福度 → 效率 → 产能（基建 → 良性循环）
+ *  - v0.6：所有省距按「东西环绕」计算（dx = min(|x1-x2|, W-|x1-x2|)）
  */
+import { wrappedDx } from './map';
 import type { GameMap, County, Province } from './map';
 import type { NationState } from './state';
 import type { TerrainKind } from './types';
@@ -18,9 +20,9 @@ export const TERRAIN_FREIGHT: Record<TerrainKind, number> = {
 export const COASTAL_FREIGHT = 0.85;
 export const INLAND_FREIGHT = 1.15;
 
-/** 各省距首都的像素距离 / 100（抽象距离单位） */
-export function provinceDistance(_map: GameMap, a: Province, b: Province): number {
-  const dx = a.centroid.x - b.centroid.x;
+/** 各省距首都的环绕像素距离 / 100（抽象距离单位；东西环绕） */
+export function provinceDistance(map: GameMap, a: Province, b: Province): number {
+  const dx = wrappedDx(a.centroid.x, b.centroid.x, map.width);
   const dy = a.centroid.y - b.centroid.y;
   return Math.sqrt(dx * dx + dy * dy) / 100;
 }
@@ -57,7 +59,7 @@ export function provinceFreightFactor(
 }
 
 /**
- * 县省内运费系数（v0.2 区域市场）：县质心 → 省质心距离 × 地形 × 海陆，除以基建减免。
+ * 县省内运费系数（v0.2 区域市场）：县质心 → 省质心环绕距离 × 地形 × 海陆，除以基建减免。
  * 用于县↔省调运定价（本地市场自身无运费）。
  */
 export function countyFreightFactor(
@@ -66,7 +68,7 @@ export function countyFreightFactor(
   prov: Province,
   infra: NationState['infra'],
 ): number {
-  const dx = county.center.x - prov.centroid.x;
+  const dx = wrappedDx(county.center.x, prov.centroid.x, map.width);
   const dy = county.center.y - prov.centroid.y;
   const dist = Math.sqrt(dx * dx + dy * dy) / 100;
   const coastal = isCoastal(map, prov);

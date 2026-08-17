@@ -4,6 +4,8 @@
  * 右侧区域让位给 地图 + 选中省份详情（ProvincePanel）。
  */
 import { useState } from 'react';
+import type { ComponentType } from 'react';
+import { Coins, LineChart, BadgePercent, Users2, Users, ScrollText, Factory, Newspaper } from 'lucide-react';
 import type { GameMap, Province } from '../game/map';
 import type { GameState } from '../game/state';
 import type { ClassId, GoodId } from '../game/types';
@@ -598,11 +600,14 @@ function TaxTab({ game, map, onTaxRate, onGoodsTax }: {
   );
 }
 
-/** 手风琴分区头部 */
-function SectionHead({ title, open, onToggle }: { title: string; open: boolean; onToggle: () => void }) {
+/** 手风琴分区头部（v0.6：各分区配 Lucide 图标） */
+function SectionHead({ title, icon: Icon, open, onToggle }: { title: string; icon: ComponentType<{ size?: number | string; className?: string }>; open: boolean; onToggle: () => void }) {
   return (
     <button className={`gov-sec-head ${open ? 'active' : ''}`} onClick={onToggle}>
-      <span>{title}</span>
+      <span className="gov-sec-title">
+        <Icon size={14} className="gov-sec-icon" />
+        {title}
+      </span>
       <span className="gov-caret">{open ? '▾' : '▸'}</span>
     </button>
   );
@@ -637,7 +642,7 @@ export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSp
       {!collapsed && (
         <div className="gov-body">
           {/* ---- 经济 ---- */}
-          <SectionHead title="经济" open={open.economy} onToggle={() => toggle('economy')} />
+          <SectionHead title="经济" icon={Coins} open={open.economy} onToggle={() => toggle('economy')} />
           {open.economy && (
             <div className="gov-sec-body">
               <section className="p-sec">
@@ -735,7 +740,7 @@ export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSp
           )}
 
           {/* ---- 市场 ---- */}
-          <SectionHead title="市场" open={open.market} onToggle={() => toggle('market')} />
+          <SectionHead title="市场" icon={LineChart} open={open.market} onToggle={() => toggle('market')} />
           {open.market && (
             <div className="gov-sec-body">
               <section className="p-sec">
@@ -751,17 +756,17 @@ export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSp
           )}
 
           {/* ---- 税收 ---- */}
-          <SectionHead title="税收" open={open.tax} onToggle={() => toggle('tax')} />
+          <SectionHead title="税收" icon={BadgePercent} open={open.tax} onToggle={() => toggle('tax')} />
           {open.tax && (
             <TaxTab game={game} map={map} onTaxRate={onTaxRate} onGoodsTax={onGoodsTax} />
           )}
 
           {/* ---- 阶级 ---- */}
-          <SectionHead title="阶级" open={open.class} onToggle={() => toggle('class')} />
+          <SectionHead title="阶级" icon={Users2} open={open.class} onToggle={() => toggle('class')} />
           {open.class && <ClassTab game={game} map={map} />}
 
           {/* ---- 人口 ---- */}
-          <SectionHead title="人口" open={open.pop} onToggle={() => toggle('pop')} />
+          <SectionHead title="人口" icon={Users} open={open.pop} onToggle={() => toggle('pop')} />
           {open.pop && (
             <div className="gov-sec-body">
               <section className="p-sec">
@@ -823,7 +828,7 @@ export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSp
           )}
 
           {/* ---- 政策 ---- */}
-          <SectionHead title="政策" open={open.policy} onToggle={() => toggle('policy')} />
+          <SectionHead title="政策" icon={ScrollText} open={open.policy} onToggle={() => toggle('policy')} />
           {open.policy && (
             <div className="gov-sec-body">
               <section className="p-sec">
@@ -863,13 +868,13 @@ export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSp
           )}
 
           {/* ---- 投资 ---- */}
-          <SectionHead title="投资" open={open.invest} onToggle={() => toggle('invest')} />
+          <SectionHead title="投资" icon={Factory} open={open.invest} onToggle={() => toggle('invest')} />
           {open.invest && (
             <InvestTab game={game} map={map} ownedProvs={ownedProvs} onInvest={onInvest} onCancelInvest={onCancelInvest} />
           )}
 
           {/* ---- 大事记 ---- */}
-          <SectionHead title="大事记" open={open.log} onToggle={() => toggle('log')} />
+          <SectionHead title="大事记" icon={Newspaper} open={open.log} onToggle={() => toggle('log')} />
           {open.log && (
             <div className="gov-sec-body">
               <section className="p-sec">

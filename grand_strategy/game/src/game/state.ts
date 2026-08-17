@@ -27,10 +27,10 @@ import { MANUAL_EVENTS } from './manualEvents';
 import { defaultNationTax } from './tax';
 import type { NationTax } from './tax';
 
-export const SAVE_VERSION = 6;
-export const SAVE_KEY = 'kalt-save-v6';
-/** 旧存档键（v0.5 起存档不兼容，提示用） */
-export const OLD_SAVE_KEYS = ['kalt-save-v5', 'kalt-save-v4', 'kalt-save-v3'];
+export const SAVE_VERSION = 7;
+export const SAVE_KEY = 'kalt-save-v7';
+/** 旧存档键（v0.6 起存档不兼容，提示用） */
+export const OLD_SAVE_KEYS = ['kalt-save-v6', 'kalt-save-v5', 'kalt-save-v4', 'kalt-save-v3'];
 
 /** 国家政策（v0.3）：作用于当前国，写入状态与存档 */
 export interface NationPolicies {

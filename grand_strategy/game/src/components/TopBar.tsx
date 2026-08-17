@@ -3,6 +3,7 @@ import type { NationId, Speed } from '../game/types';
 import { NATIONS, NATION_LIST } from '../game/nations';
 import { SPEED_LABEL, dateLabel } from '../game/clock';
 import { weightedTaxRate } from '../game/tax';
+import { Pencil } from 'lucide-react';
 
 interface Props {
   game: GameState;
@@ -10,6 +11,9 @@ interface Props {
   onNation: (id: NationId) => void;
   onSave: () => void;
   onNewGame: () => void;
+  /** v0.6 独立编辑模式 */
+  editMode: boolean;
+  onToggleEdit: () => void;
 }
 
 function fmt(n: number): string {
@@ -17,7 +21,7 @@ function fmt(n: number): string {
   return Math.round(n).toLocaleString('zh-CN');
 }
 
-export default function TopBar({ game, onSpeed, onNation, onSave, onNewGame }: Props) {
+export default function TopBar({ game, onSpeed, onNation, onSave, onNewGame, editMode, onToggleEdit }: Props) {
   const n = game.nations[game.playerNation];
   const def = NATIONS[game.playerNation];
   const taxPct = weightedTaxRate(n.tax) * 100;
@@ -25,7 +29,7 @@ export default function TopBar({ game, onSpeed, onNation, onSave, onNewGame }: P
     <header className="topbar">
       <div className="brand">
         <span className="brand-mark">《卡尔特》</span>
-        <span className="brand-sub">v0.5.0 八国可玩 · 地形底图 · 立体税制</span>
+        <span className="brand-sub">v0.6.0 八国可玩 · 循环地图 · 视图切换 · 国界编辑器</span>
       </div>
 
       <div className="tb-clock">
@@ -36,7 +40,8 @@ export default function TopBar({ game, onSpeed, onNation, onSave, onNewGame }: P
               key={s}
               className={`tb-btn ${game.speed === s ? 'active' : ''}`}
               onClick={() => onSpeed(s)}
-              title={s === 0 ? '暂停' : `${s} 倍速`}
+              disabled={editMode}
+              title={editMode ? '编辑模式中时钟暂停' : s === 0 ? '暂停' : `${s} 倍速`}
             >
               {SPEED_LABEL[s]}
             </button>
@@ -69,11 +74,21 @@ export default function TopBar({ game, onSpeed, onNation, onSave, onNewGame }: P
       </div>
 
       <div className="tb-right">
+        <button
+          className={`tb-btn edit-mode-btn ${editMode ? 'active' : ''}`}
+          onClick={onToggleEdit}
+          title={editMode ? '退出编辑模式（恢复游戏时钟）' : '进入编辑模式（游戏暂停，点击省份改属）'}
+        >
+          <Pencil size={12} />
+          {editMode ? '编辑中·退出' : '编辑模式'}
+        </button>
         <label className="tb-nation">
           扮演
           <select
             value={game.playerNation}
             onChange={(e) => onNation(e.target.value as NationId)}
+            disabled={editMode}
+            title={editMode ? '编辑模式下不可切换国家' : '切换扮演国家'}
           >
             {NATION_LIST.map((d) => (
               <option key={d.id} value={d.id}>
@@ -82,10 +97,10 @@ export default function TopBar({ game, onSpeed, onNation, onSave, onNewGame }: P
             ))}
           </select>
         </label>
-        <button className="tb-btn" onClick={onSave} title="手动存档">
+        <button className="tb-btn" onClick={onSave} title="手动存档" disabled={editMode}>
           存档
         </button>
-        <button className="tb-btn" onClick={onNewGame} title="开始新游戏">
+        <button className="tb-btn" onClick={onNewGame} title="开始新游戏" disabled={editMode}>
           新游戏
         </button>
       </div>

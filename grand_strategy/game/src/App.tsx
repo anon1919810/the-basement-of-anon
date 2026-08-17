@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type { GameMap } from './game/map';
-import { loadMap } from './game/map';
+import { applyBorderOverrides, loadMap } from './game/map';
 import type { GameState } from './game/state';
 import { loadGame, newGameState, tickDay, saveGame, clearSave, setPolicy, abolishSerfdom, hasOldSave, scaledNationPop } from './game/state';
-import type { NationId, Speed } from './game/types';
+import type { NationId, ProvinceOwner, Speed } from './game/types';
 import type { TaxKind } from './game/tax';
 import type { GoodId } from './game/types';
 import { monthIndex, daysPerSecond } from './game/clock';
@@ -16,6 +16,31 @@ import WorldMap from './components/WorldMap';
 import TopBar from './components/TopBar';
 import GovernancePanel from './components/GovernancePanel';
 import ProvincePanel from './components/ProvincePanel';
+import BorderEditor from './components/BorderEditor';
+
+/** v0.6 国界编辑 localStorage 键（保存/加载覆盖表 {provinceId: nationId}） */
+export const BORDER_EDIT_KEY = 'kalt-border-edits';
+
+function loadBorderEdits(): Record<number, ProvinceOwner> {
+  if (typeof localStorage === 'undefined') return {};
+  try {
+    const text = localStorage.getItem(BORDER_EDIT_KEY);
+    if (!text) return {};
+    const parsed = JSON.parse(text) as Record<number, ProvinceOwner>;
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveBorderEdits(o: Record<number, ProvinceOwner>): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(BORDER_EDIT_KEY, JSON.stringify(o));
+  } catch {
+    // 忽略（隐私模式等）
+  }
+}
 
 export default function App() {
   const mapRef = useRef<GameMap | null>(null);
@@ -35,7 +60,29 @@ export default function App() {
   const [govCollapsed, setGovCollapsed] = useState(false); // v0.5 左侧治理面板可折叠
   const flashTimer = useRef<number | null>(null);
 
-  // 实时时钟：rAF + dt 驱动（暂停 / 1x / 2x / 3x）
+  // ---- v0.6 独立编辑模式（国界重绘） ----
+  const [editMode, setEditMode] = useState(false);
+  const editModeRef = useRef(editMode);
+  editModeRef.current = editMode;
+  const [editNation, setEditNation] = useState<ProvinceOwner>('empire');
+  const [borderOverrides, setBorderOverrides] = useState<Record<number, ProvinceOwner>>(() => loadBorderEdits());
+  const [history, setHistory] = useState<Record<number, ProvinceOwner>[]>(() => [loadBorderEdits()]);
+  const [histIndex, setHistIndex] = useState(0);
+  const [editStamp, setEditStamp] = useState(0);
+  // 开局应用 localStorage 覆盖（仅一次；map 为进程内单例）
+  const appliedRef = useRef(false);
+  useEffect(() => {
+    if (appliedRef.current) return;
+    appliedRef.current = true;
+    const saved = loadBorderEdits();
+    if (Object.keys(saved).length > 0) {
+      applyBorderOverrides(map, saved);
+      setEditStamp((x) => x + 1); // 触发画布按覆盖后归属重绘
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 实时时钟：rAF + dt 驱动（暂停 / 1x / 2x / 3x；编辑模式下不推进）
   useEffect(() => {
     let raf = 0;
     let last = performance.now();
@@ -44,7 +91,7 @@ export default function App() {
       const dt = Math.min(0.1, (now - last) / 1000);
       last = now;
       const s = gameRef.current;
-      if (s.speed > 0) {
+      if (s.speed > 0 && !editModeRef.current) {
         acc += dt * daysPerSecond(s.speed);
         while (acc >= 1) {
           tickDay(s, map);
@@ -149,13 +196,107 @@ export default function App() {
     },
   };
 
+  // ---- v0.6 编辑模式操作 ----
+  const applySnapshot = (snap: Record<number, ProvinceOwner>) => {
+    applyBorderOverrides(map, snap);
+    setBorderOverrides(snap);
+    setEditStamp((x) => x + 1);
+  };
+  const pushSnapshot = (snap: Record<number, ProvinceOwner>) => {
+    const h = history.slice(0, histIndex + 1);
+    h.push(snap);
+    setHistory(h);
+    setHistIndex(h.length - 1);
+    applySnapshot(snap);
+  };
+  const paintProvince = (provId: number) => {
+    if (editNation === 'undiscovered') return; // 迷雾锁：不绘制
+    const prov = map.provinceById.get(provId);
+    if (!prov || prov.isUndiscovered) return; // 迷雾省份不可点
+    if (prov.owner === editNation) return;
+    // 改回默认归属时删除覆盖条目（保持导出配置最小）
+    const next = { ...borderOverrides };
+    if (editNation === map.defaultOwners.get(provId)) delete next[provId];
+    else next[provId] = editNation;
+    pushSnapshot(next);
+  };
+  const undoEdits = () => {
+    if (histIndex <= 0) return;
+    const prev = history[histIndex - 1];
+    setHistIndex(histIndex - 1);
+    applySnapshot(prev);
+  };
+  const redoEdits = () => {
+    if (histIndex >= history.length - 1) return;
+    const next = history[histIndex + 1];
+    setHistIndex(histIndex + 1);
+    applySnapshot(next);
+  };
+  const clearEdits = () => {
+    const base: Record<number, ProvinceOwner> = {};
+    for (const [pid, owner] of map.defaultOwners) base[pid] = owner;
+    applyBorderOverrides(map, base);
+    pushSnapshot({});
+  };
+  const saveEdits = () => {
+    saveBorderEdits(borderOverrides);
+    flash();
+  };
+  const exportEdits = () => {
+    const blob = new Blob([JSON.stringify(borderOverrides, null, 1)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'kalt-border-edits.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    flash();
+  };
+  const toggleEdit = () => {
+    const g = gameRef.current;
+    if (!editModeRef.current) {
+      // 进入编辑模式：游戏时钟暂停（记住原速度），防误触
+      if (g.speed > 0) g.prevSpeed = g.speed;
+      g.speed = 0;
+      setGame({ ...g });
+      setEditMode(true);
+    } else {
+      // 退出：恢复游戏
+      g.speed = g.prevSpeed || 1;
+      setGame({ ...g });
+      setEditMode(false);
+      setSelectedProvince(null);
+    }
+  };
+
   // v0.5 键盘快捷键：空格=暂停/继续、1/2/3=速度、S=存档、N=新游戏（带确认）
+  // v0.6 编辑模式下：Ctrl+Z=撤销 / Ctrl+Y=重做；其余快捷键禁用（防误触）
   const actionsRef = useRef(actions);
   actionsRef.current = actions;
+  const editActionsRef = useRef({ undoEdits, redoEdits });
+  editActionsRef.current = { undoEdits, redoEdits };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
+      if (editModeRef.current) {
+        if (e.ctrlKey || e.metaKey) {
+          const key = e.key.toLowerCase();
+          if (key === 'z' && !e.shiftKey) {
+            e.preventDefault();
+            editActionsRef.current.undoEdits();
+          } else if (key === 'z' && e.shiftKey) {
+            e.preventDefault();
+            editActionsRef.current.redoEdits();
+          } else if (key === 'y') {
+            e.preventDefault();
+            editActionsRef.current.redoEdits();
+          }
+        }
+        return;
+      }
       const a = actionsRef.current;
       switch (e.key) {
         case ' ':
@@ -195,6 +336,8 @@ export default function App() {
         onNation={actions.setNation}
         onSave={actions.save}
         onNewGame={actions.newGame}
+        editMode={editMode}
+        onToggleEdit={toggleEdit}
       />
       <main className="main">
         <GovernancePanel
@@ -212,11 +355,34 @@ export default function App() {
           onToggleCollapse={() => setGovCollapsed((c) => !c)}
         />
         <div className="map-area">
+          {editMode && (
+            <>
+              <div className="edit-banner">
+                ⚠ 编辑模式：游戏时钟已暂停 · 选择国家后点击地图省份改属 · 迷雾区锁定不可编辑 · Ctrl+Z/Y 撤销/重做
+              </div>
+              <BorderEditor
+                nation={editNation}
+                onNation={setEditNation}
+                canUndo={histIndex > 0}
+                canRedo={histIndex < history.length - 1}
+                onUndo={undoEdits}
+                onRedo={redoEdits}
+                onClear={clearEdits}
+                onSave={saveEdits}
+                onExport={exportEdits}
+                overrideCount={Object.keys(borderOverrides).length}
+              />
+            </>
+          )}
           <WorldMap
             map={map}
             game={game}
             selectedProvince={selectedProvince}
             onSelect={setSelectedProvince}
+            editMode={editMode}
+            editNation={editNation}
+            onPaintProvince={paintProvince}
+            editStamp={editStamp}
           />
         </div>
         <ProvincePanel map={map} game={game} selectedProvince={selectedProvince} />
@@ -224,14 +390,14 @@ export default function App() {
       {savedFlash && <div className="toast">已保存到本机</div>}
       {oldSaveNotice && (
         <div className="toast old-save-toast" onClick={() => setOldSaveNotice(false)}>
-          ⚠ 检测到 v0.4/v0.5 旧存档（不兼容 v0.6：国界重绘/人口缩放），已开启新局；点击关闭
+          ⚠ 检测到 v0.5/v0.6 旧存档（不兼容 v0.6：省份重构/循环地图/国界编辑器），已开启新局；点击关闭
         </div>
       )}
       {showNationPicker && (
         <div className="modal-overlay" onClick={() => setShowNationPicker(false)}>
           <div className="nation-picker" onClick={(e) => e.stopPropagation()}>
             <h3>选择你的国家（8 国全可玩）</h3>
-            <p className="dim">新历 1023 年 · 工业革命前夜。人口按地图住房容量缩放（v0.5），各国政体/识字率/资源禀赋各异</p>
+            <p className="dim">新历 1023 年 · 工业革命前夜。人口按地图住房容量缩放，各国政体/识字率/资源禀赋各异</p>
             <div className="nation-picker-grid">
               {NATION_LIST.map((d) => (
                 <button key={d.id} className="nation-pick-card" onClick={() => actions.startNewGame(d.id)}>

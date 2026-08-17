@@ -1,15 +1,18 @@
 /**
- * 无头模拟（v0.4，tsx 运行）：
+ * 无头模拟（v0.6，tsx 运行）：
  *  - 洛林 50 年沙盒断言（seed 42，随机策略：税率滑块/支出/转职/建筑投资/政策）
  *  - 8 国冒烟：每国 10 年（随机策略）不崩、无 NaN、守恒
  *  - 洛林 50 年全断言：守恒（含六税种收入与传导账）、价格恒正 clamp、阶级恒正、
  *    单一商品税生效（煤炭税 15% → 煤有效价↑、炼铁成本↑、钢材价↑，含单元级传导测试）、
  *    确定性（同种子两次快照一致）、存档往返
  *  - 帝国 10 年冒烟：废农奴制
+ *  - v0.6 新增断言：省份均匀化（所有省规模 ∈ [8, 90]）、环绕距离正确（跨边界 < W/2）、
+ *    国界编辑器导出/加载往返一致（导出 JSON → 加载 → 归属一致 → 清空还原）
  * 运行：npx.cmd tsx scripts/sim.ts
  */
-import { loadMap, mapStats, provinceOwnerTable } from '../src/game/map';
+import { loadMap, mapStats, provinceOwnerTable, wrappedDistance, applyBorderOverrides, PROVINCE_SIZE_MIN, PROVINCE_SIZE_MAX } from '../src/game/map';
 import type { GameMap } from '../src/game/map';
+import { provinceDistance } from '../src/game/logistics';
 import { newGameState, tickDay, allFinite, abolishSerfdom, setPolicy, scaledNationPops, nationHousingCap } from '../src/game/state';
 import type { GameState } from '../src/game/state';
 import { NATIONS, NATION_LIST } from '../src/game/nations';
@@ -24,7 +27,7 @@ import { newMarket, PRICE_CLAMP_MAX, PRICE_CLAMP_MIN, settleMarket, zeroGoods } 
 import type { MarketInput, MarketState } from '../src/game/market';
 import { BUILDING_DEFS, BUILDING_KINDS, buildingUnlock, cancelInvestment, nationHasGood, startInvestment } from '../src/game/buildings';
 import { MANUAL_EVENTS } from '../src/game/manualEvents';
-import type { GoodId, NationId } from '../src/game/types';
+import type { GoodId, NationId, ProvinceOwner } from '../src/game/types';
 import { provinceHasResource } from '../src/game/resources';
 
 let failures = 0;
@@ -457,6 +460,43 @@ function assertSaveRoundtrip(state: GameState): void {
 }
 
 /**
+ * v0.6 国界编辑器往返测试：
+ * 编辑覆盖表 → 导出 JSON（{provinceId: nationId}，与 PROVINCE_OWNER_OVERRIDES 兼容）
+ * → 加载（JSON.parse + applyBorderOverrides）→ 归属一致 → 清空到默认还原。
+ */
+function editorRoundTripTest(map: GameMap): void {
+  const base = new Map<number, ProvinceOwner>(map.defaultOwners);
+  const overrides: Record<number, ProvinceOwner> = {};
+  const lor = map.provinces.find((p) => p.owner === 'lorraine' && !p.isUndiscovered);
+  const emp = map.provinces.find((p) => p.owner === 'empire' && !p.isUndiscovered);
+  const ang = map.provinces.find((p) => p.owner === 'angland' && !p.isUndiscovered);
+  if (lor) overrides[lor.id] = 'orange';
+  if (emp) overrides[emp.id] = 'angland';
+  if (ang) overrides[ang.id] = 'normandy';
+  check(Object.keys(overrides).length === 3, `编辑器测试覆盖 3 省（洛林#${lor?.id}/帝国#${emp?.id}/盎格伦撒#${ang?.id}）`);
+
+  // 导出 JSON → 加载（解析）→ 应用
+  const exported = JSON.stringify(overrides);
+  const parsed = JSON.parse(exported) as Record<number, ProvinceOwner>;
+  applyBorderOverrides(map, parsed);
+  for (const key of Object.keys(parsed)) {
+    const pid = Number(key);
+    check(map.provinceById.get(pid)?.owner === parsed[pid], `编辑导出/加载往返归属一致（#${pid} → ${parsed[pid]}）`);
+  }
+
+  // 清空到默认：还原 defaultOwners
+  const baseRec: Record<number, ProvinceOwner> = {};
+  for (const [pid, o] of base) baseRec[pid] = o;
+  applyBorderOverrides(map, baseRec);
+  let restored = 0;
+  for (const p of map.provinces) {
+    if (p.owner === base.get(p.id)) restored++;
+  }
+  check(restored === map.provinces.length, `清空到默认还原全部 ${map.provinces.length} 省归属（还原 ${restored}）`);
+  console.log(`  编辑器往返：导出 ${Object.keys(parsed).length} 省 → 加载一致 → 清空还原 ✓`);
+}
+
+/**
  * 商品税传导测试（v0.4 核心验证）：
  *  - 单元级：合成市场输入直接测 settleMarket 的成本传导机制（煤炭税 15% → 铁/钢传导 + 商品税收入）
  *  - 集成级：洛林 quiet 24 个月，确定性建 炼铁厂→炼钢厂，煤炭税 15% vs 对照组：
@@ -528,8 +568,36 @@ function commodityTaxTransmissionTest(): void {
 
 function main(): void {
   const map = loadMap();
-  console.log('== 地图导入统计（v0.5 国界重绘 + 海峡判定）==');
+  console.log('== 地图导入统计（v0.6 省份重构 + 环绕 + 海峡判定）==');
   console.log(JSON.stringify(mapStats(map), null, 2));
+
+  console.log('\n== v0.6 省份均匀化断言（规模分布）==');
+  const provSizes = map.provinces.map((p) => p.cellIds.length);
+  console.log(
+    `  省数 ${map.provinces.length} · 最小 ${Math.min(...provSizes)} · 最大 ${Math.max(...provSizes)} · 平均 ${(provSizes.reduce((a, b) => a + b, 0) / provSizes.length).toFixed(1)}`,
+  );
+  const dist = mapStats(map).provSizeDist as Record<string, number>;
+  console.log(`  分布 <8:${dist.under8}  8-29:${dist.eightTo29}  30-60:${dist.thirtyTo60}  61-90:${dist.sixtyOneTo90}  >90:${dist.over90}`);
+  for (const p of map.provinces) {
+    check(
+      p.cellIds.length >= PROVINCE_SIZE_MIN && p.cellIds.length <= PROVINCE_SIZE_MAX,
+      `省#${p.id} 规模 ∈ [${PROVINCE_SIZE_MIN}, ${PROVINCE_SIZE_MAX}]（${p.cellIds.length} 格, ${p.owner}）`,
+    );
+  }
+
+  console.log('\n== v0.6 环绕距离断言（东西环绕）==');
+  const west = [...map.provinces].sort((a, b) => a.centroid.x - b.centroid.x)[0];
+  const east = [...map.provinces].sort((a, b) => b.centroid.x - a.centroid.x)[0];
+  const wrapD = wrappedDistance(west.centroid, east.centroid, map.width);
+  const rawD = Math.hypot(west.centroid.x - east.centroid.x, west.centroid.y - east.centroid.y);
+  check(wrapD < map.width / 2, `跨边界两点环绕距离 < W/2（${wrapD.toFixed(1)} < ${map.width / 2}，省#${west.id}↔#${east.id}）`);
+  check(wrapD <= rawD, `环绕距离 ≤ 直距（${wrapD.toFixed(1)} ≤ ${rawD.toFixed(1)}）`);
+  const pd = provinceDistance(map, west, east);
+  check(pd * 100 < map.width / 2, `logistics.provinceDistance 已用环绕距离（${(pd * 100).toFixed(1)} < ${map.width / 2}）`);
+  console.log(`  最西 #${west.id}(x=${west.centroid.x.toFixed(0)}) ↔ 最东 #${east.id}(x=${east.centroid.x.toFixed(0)})：直距 ${rawD.toFixed(1)} → 环绕 ${wrapD.toFixed(1)}`);
+
+  console.log('\n== v0.6 国界编辑器导出/加载往返 ==');
+  editorRoundTripTest(map);
 
   console.log('\n== v0.5 初始人口按住房容量缩放（8 国）==');
   const fresh = newGameState('lorraine', 42, map);
@@ -542,7 +610,7 @@ function main(): void {
     console.log(`  ${def.name}: 初始 ${pop.toFixed(0)} 万 / 容量 ${cap.toFixed(0)} 万（${(pop / cap * 100).toFixed(0)}% · 世界观 ${def.popWan} 万）`);
   }
 
-  console.log('\n== v0.5 省份-归属表（id/质心/格数/沿海/海峡/属国）==');
+  console.log('\n== v0.6 省份-归属表（id/质心/格数/沿海/海峡/属国）==');
   for (const r of provinceOwnerTable(map)) {
     console.log(`  #${r.id + 1}(${r.id}) (${r.x},${r.y}) ${r.cells}格 沿海${r.coastal ? 'Y' : 'N'} 海峡${r.strait ? 'Y' : 'N'} → ${r.owner}`);
   }
@@ -556,7 +624,7 @@ function main(): void {
     console.log(`  ${def.name}: ${provs.length} 行省 / ${counties} 县 / ${cells} 格 · 海峡要道[${straits || '—'}]`);
   }
   console.log(`  （未探明新大陆: ${map.provinces.filter((p) => p.isUndiscovered).length} 行省）`);
-  console.log(`  （v0.5：国界重绘/地形底图/经纬线/人口缩放/迁移软化；事件系统仍休眠）`);
+  console.log(`  （v0.6：省份重构/循环地图/国界编辑器/视图切换；事件系统仍休眠）`);
 
   console.log('\n== 50 年沙盒（洛林，seed 42）==');
   const runA = simulate(42, 'lorraine', 50);
