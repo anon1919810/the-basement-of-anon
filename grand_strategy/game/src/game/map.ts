@@ -558,6 +558,88 @@ function mergeProvinces(
   return provinces;
 }
 
+/** 格列表质心（多边形顶点均值） */
+function centroidOf(cids: number[], cellsById: Map<number, CellData>): Point {
+  let sx = 0, sy = 0;
+  for (const cid of cids) {
+    const cell = cellsById.get(cid);
+    if (!cell) continue;
+    let cx = 0, cy = 0;
+    for (const p of cell.polygon) {
+      cx += p.x;
+      cy += p.y;
+    }
+    sx += cx / cell.polygon.length;
+    sy += cy / cell.polygon.length;
+  }
+  return { x: sx / cids.length, y: sy / cids.length };
+}
+
+/**
+ * v0.4 八国划分（按大陆块 id + 省质心，确定性；与实测地图对齐）：
+ *  - 右侧新大陆 x >= 0.6W 保持未探明（不动）
+ *  - LM0 北大陆：南端（y>=0.65H）→ 诺曼尼亚，其余 → 帝国；北境群岛（LM1/2/3/4/6/7）→ 帝国
+ *  - LM13/16/17/18/20 西岸 → 洛林
+ *  - LM24/26/27/29/32/33/34/35 南西岸低地 → 奥兰治（沿海低地）
+ *  - LM19 中央块：西端（x<=0.43W）或南端（y>=0.63H）→ 诺曼尼亚；北（y<0.47H）→ 北扎拉克；其余 → 南扎拉克
+ *  - LM21/30/31 东岸工业岛 → 伊尼亚斯；LM9/12/14/15 东部群岛 → 盎格伦撒
+ */
+function assignProvinceOwner(lmId: number, c: Point, width: number, height: number): ProvinceOwner {
+  if (c.x >= width * FOG_X_RATIO) return 'undiscovered';
+  switch (lmId) {
+    case 0:
+      return c.y >= height * 0.65 ? 'normandy' : 'empire';
+    case 1:
+    case 2:
+    case 3:
+    case 4:
+    case 6:
+    case 7:
+      return 'empire';
+    case 5:
+    case 8:
+    case 10:
+    case 11:
+    case 22:
+    case 23:
+    case 25:
+    case 28:
+    case 36:
+    case 37:
+    case 38:
+      return 'undiscovered';
+    case 9:
+    case 12:
+    case 14:
+    case 15:
+      return 'angland';
+    case 13:
+    case 16:
+    case 17:
+    case 18:
+    case 20:
+      return 'lorraine';
+    case 19:
+      if (c.x <= width * 0.43) return 'normandy';
+      if (c.y >= height * 0.63) return 'normandy';
+      return c.y < height * 0.47 ? 'zalakN' : 'zalakS';
+    case 21:
+    case 30:
+    case 31:
+      return 'ianys';
+    case 24:
+    case 26:
+    case 27:
+    case 29:
+    case 32:
+    case 33:
+    case 34:
+    case 35:
+      return 'orange';
+  }
+  return 'lorraine';
+}
+
 function buildMap(raw: RawMap): GameMap {
   const width = raw.info?.width ?? 1920;
   const height = raw.info?.height ?? 1080;
@@ -630,43 +712,6 @@ function buildMap(raw: RawMap): GameMap {
           queue.push(nb);
         }
       }
-    }
-  }
-
-  // 大陆块质心与规模（国家分配用，与 v0.0.0 一致）
-  const centroidOf = (cids: number[]): Point => {
-    let sx = 0, sy = 0;
-    for (const cid of cids) {
-      const cell = cellsById.get(cid);
-      if (!cell) continue;
-      let cx = 0, cy = 0;
-      for (const p of cell.polygon) {
-        cx += p.x;
-        cy += p.y;
-      }
-      sx += cx / cell.polygon.length;
-      sy += cy / cell.polygon.length;
-    }
-    return { x: sx / cids.length, y: sy / cids.length };
-  };
-  const lmCentroid = landmasses.map(centroidOf);
-  const lmSize = landmasses.map((list) => list.length);
-  const lmSorted = lmSize.map((s, i) => ({ i, s })).sort((a, b) => b.s - a.s);
-
-  // 国家分配（render_admin 规则的 3 国简化版，v0.0.0 原样保留）
-  const ownerOfLandmass = new Map<number, ProvinceOwner>();
-  for (const { i, s } of lmSorted) {
-    const c = lmCentroid[i];
-    if (c.x >= width * FOG_X_RATIO) {
-      ownerOfLandmass.set(i, 'undiscovered');
-    } else if (i === lmSorted[0].i || s >= 120) {
-      ownerOfLandmass.set(i, 'empire'); // 中央/大块 → 帝国
-    } else if (c.x < width * 0.42 && c.y < height * 0.7) {
-      ownerOfLandmass.set(i, 'lorraine'); // 左 → 洛林
-    } else if (c.x > width * 0.45 && c.y < height * 0.72) {
-      ownerOfLandmass.set(i, 'ianys'); // 中央右 → 伊尼亚斯
-    } else {
-      ownerOfLandmass.set(i, 'lorraine'); // 其余 → 洛林占位
     }
   }
 
@@ -757,12 +802,14 @@ function buildMap(raw: RawMap): GameMap {
     const terrain = (Object.keys(terrCount) as TerrainKind[]).reduce((a, b) =>
       terrCount[b] > terrCount[a] ? b : a,
     );
+    const cent = centroidOf(cellIds, cellsById);
+    const owner = assignProvinceOwner(lmId, cent, width, height);
     return {
       id: pid,
       counties: provCounties,
       countyIds: countyIdxList,
       cellIds,
-      centroid: centroidOf(cellIds),
+      centroid: cent,
       climate,
       climateCells,
       avgTemp: tSum / cellIds.length,
@@ -771,8 +818,8 @@ function buildMap(raw: RawMap): GameMap {
       terrain,
       grainMod: gSum / cellIds.length,
       productivity: eSum / cellIds.length,
-      isUndiscovered: ownerOfLandmass.get(lmId) === 'undiscovered',
-      owner: ownerOfLandmass.get(lmId) ?? 'lorraine',
+      isUndiscovered: owner === 'undiscovered',
+      owner,
       landmassId: lmId,
     };
   });
@@ -789,9 +836,14 @@ function buildMap(raw: RawMap): GameMap {
 /** 调试统计（sim 用） */
 export function mapStats(map: GameMap): Record<string, unknown> {
   const nationCells: Record<NationId | 'undiscovered', number> = {
+    empire: 0,
     lorraine: 0,
     ianys: 0,
-    empire: 0,
+    orange: 0,
+    zalakN: 0,
+    zalakS: 0,
+    angland: 0,
+    normandy: 0,
     undiscovered: 0,
   };
   for (const p of map.provinces) {

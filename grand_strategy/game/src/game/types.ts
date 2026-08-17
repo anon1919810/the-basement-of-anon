@@ -1,14 +1,19 @@
-/** 可玩国家 */
-export type NationId = 'lorraine' | 'ianys' | 'empire';
+/** 可玩国家（v0.4：8 国全可玩） */
+export type NationId =
+  | 'empire' // 申斯戈维克帝国
+  | 'lorraine' // 洛林共和国
+  | 'ianys' // 伊尼亚斯王国
+  | 'orange' // 奥兰治亲王国
+  | 'zalakN' // 北扎拉克选帝侯国
+  | 'zalakS' // 南扎拉克选帝侯国
+  | 'angland' // 盎格伦撒自由城邦
+  | 'normandy'; // 诺曼尼亚帝国
 
 /** 气候区（由 temp/prec 推导） */
 export type ClimateId = 'arctic' | 'coldTemp' | 'temperate' | 'humid' | 'dry';
 
 /** 地形（由海拔 h 推导） */
 export type TerrainKind = 'plain' | 'hill' | 'mountain';
-
-/** 税率档位 */
-export type TaxLevel = 'light' | 'medium' | 'heavy' | 'oppressive';
 
 /** 时钟速度：0=暂停，1x/2x/3x */
 export type Speed = 0 | 1 | 2 | 3;

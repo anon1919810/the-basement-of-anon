@@ -2,11 +2,9 @@ import { useState } from 'react';
 import type { GameMap, Province } from '../game/map';
 import { CLIMATE_LABEL, TERRAIN_LABEL } from '../game/map';
 import type { GameState } from '../game/state';
-import type { ClassId, GoodId, NationId, TaxLevel } from '../game/types';
+import type { ClassId, GoodId, NationId } from '../game/types';
 import { NATIONS } from '../game/nations';
 import {
-  TAX_LEVELS,
-  TAX_RATES,
   nationMonthlyIncome,
   nationMonthlySpending,
   nationMonthlyGrain,
@@ -14,9 +12,14 @@ import {
   provinceGrainPerYear,
   nationClassMixOf,
   nationClassPower,
+  nationClassTaxBurden,
+  taxTransmissionHints,
 } from '../game/economy';
 import { GOODS, GOOD_LABEL, JOB_LABEL, JOBS, RACE_LABEL, provinceLuxuryPotential } from '../game/pops';
 import { CLASSES, CLASS_DEFS, classDef } from '../game/classes';
+import { TAX_KINDS, TAX_LABEL, TAX_DESC, TAX_MAX, taxPenalty, weightedTaxRate } from '../game/tax';
+import type { TaxKind } from '../game/tax';
+import { GOOD_CATEGORY } from '../game/market';
 import { nextJobThreshold } from '../game/labor';
 import { BUILDING_DEFS, BUILDING_KINDS, buildingSkillReqPop, projectProgress, buildingUnlock } from '../game/buildings';
 import type { BuildingKind } from '../game/buildings';
@@ -27,7 +30,8 @@ interface Props {
   game: GameState;
   map: GameMap;
   selectedProvince: number | null;
-  onTax: (level: TaxLevel) => void;
+  onTaxRate: (kind: TaxKind, value: number) => void;
+  onGoodsTax: (good: GoodId, value: number) => void;
   onSpending: (kind: 'military' | 'admin' | 'infra' | 'court' | 'health', value: number) => void;
   onRetrain: (provId: number, popIndex: number) => void;
   onInvest: (kind: BuildingKind, provId: number) => void;
@@ -36,7 +40,7 @@ interface Props {
   onAbolish: () => void;
 }
 
-type Tab = 'economy' | 'nation' | 'invest' | 'class' | 'log';
+type Tab = 'economy' | 'tax' | 'nation' | 'invest' | 'class' | 'log';
 type MktLevel = 'nation' | 'province' | 'county';
 
 const SPEND_LABEL: Record<'military' | 'admin' | 'infra' | 'court' | 'health', string> = {
@@ -53,6 +57,13 @@ const CATEGORY_LABEL: Record<string, string> = {
   processing: '加工',
   heavy: '重工',
   fine: '精工',
+};
+
+/** 商品类别（商品税列表筛选用） */
+const GOOD_CAT_LABEL: Record<string, string> = {
+  resource: '资源',
+  semi: '半成品',
+  finished: '成品',
 };
 
 function fmt(n: number): string {
@@ -519,7 +530,156 @@ function ClassTab({ game, map, onTogglePolicy, onAbolish }: {
   );
 }
 
-export default function NationPanel({ game, map, selectedProvince, onTax, onSpending, onRetrain, onInvest, onCancelInvest, onTogglePolicy, onAbolish }: Props) {
+/** 税收页（v0.4 立体税制）：六税种滑块 + 全部商品税列表 + 实收 + 阶级负担 + 传导提示 */
+function TaxTab({ game, map, onTaxRate, onGoodsTax }: {
+  game: GameState;
+  map: GameMap;
+  onTaxRate: Props['onTaxRate'];
+  onGoodsTax: Props['onGoodsTax'];
+}) {
+  const id = game.playerNation;
+  const n = game.nations[id];
+  const tax = n.tax;
+  const ledger = n.monthly;
+  const [filter, setFilter] = useState<'all' | 'resource' | 'semi' | 'finished'>('all');
+  const burden = nationClassTaxBurden(map, game, id);
+  const hints = taxTransmissionHints(game);
+  const total = ledger.pollTax + ledger.landTax + ledger.consumptionTax + ledger.tariff + ledger.otherTax + ledger.goodsTax;
+
+  return (
+    <div className="tab-body">
+      <section className="p-sec">
+        <h4>税制概览</h4>
+        <table className="mini-table">
+          <tbody>
+            <tr><td>综合税负</td><td>{(weightedTaxRate(tax) * 100).toFixed(1)}%（0-30% 连续滑块）</td></tr>
+            <tr><td>稳定度惩罚</td><td className="neg">-{taxPenalty(tax).toFixed(1)}</td></tr>
+            <tr><td>上月税收合计</td><td className="pos">+{total.toFixed(1)} 万₭/月</td></tr>
+          </tbody>
+        </table>
+        <p className="dim">六税种 = 五类直接税（土地/人头/消费/关税/特别）+ 单一商品税（全部 17 商品可选，可多选叠加）。</p>
+      </section>
+
+      <section className="p-sec">
+        <h4>五类直接税（阶级负担矩阵 · 连续滑块 0%-30%）</h4>
+        {TAX_KINDS.map((k) => (
+          <label key={k} className="slider-row">
+            <span className="slider-label" title={TAX_DESC[k]}>{TAX_LABEL[k]}</span>
+            <input
+              type="range"
+              min={0}
+              max={TAX_MAX}
+              step={0.005}
+              value={tax.rates[k]}
+              onChange={(e) => onTaxRate(k, Number(e.target.value))}
+            />
+            <span className="slider-value">{(tax.rates[k] * 100).toFixed(0)}%</span>
+          </label>
+        ))}
+        <p className="dim">
+          {TAX_KINDS.map((k) => `${TAX_LABEL[k]}：${TAX_DESC[k]}`).join('；')}
+        </p>
+        {n.policies.progressiveTax && <p className="dim pos">累进税生效：土地/人头/消费税上层↑下层↓</p>}
+      </section>
+
+      <section className="p-sec">
+        <h4>单一商品税（全部商品可选 · 买方支付 市价×(1+税率)）</h4>
+        <div className="mkt-pick">
+          <label>筛选：</label>
+          <select value={filter} onChange={(e) => setFilter(e.target.value as typeof filter)}>
+            <option value="all">全部</option>
+            <option value="resource">资源</option>
+            <option value="semi">半成品</option>
+            <option value="finished">成品</option>
+          </select>
+        </div>
+        {GOODS.filter((g) => filter === 'all' || GOOD_CATEGORY[g] === filter).map((g) => (
+          <label key={g} className="slider-row">
+            <span className="slider-label" title={`${GOOD_CAT_LABEL[GOOD_CATEGORY[g]]} · 市价 ${n.market[g].price.toFixed(2)} → 有效价 ${n.market[g].effPrice.toFixed(2)}`}>
+              {GOOD_LABEL[g]}
+            </span>
+            <input
+              type="range"
+              min={0}
+              max={TAX_MAX}
+              step={0.005}
+              value={tax.goods[g]}
+              onChange={(e) => onGoodsTax(g, Number(e.target.value))}
+            />
+            <span className="slider-value">{(tax.goods[g] * 100).toFixed(0)}%</span>
+          </label>
+        ))}
+        <p className="dim">有效价 = 市价 × (1+税率)；收入 = 税率 × 成交量（国内消费+进口+建筑消耗）进国库；输入品征税 → 下游成本↑ → 成品价↑。</p>
+      </section>
+
+      <section className="p-sec">
+        <h4>各税种实收（上月 · 万₭/月）</h4>
+        <table className="mini-table">
+          <tbody>
+            <tr><td>土地税（持地者）</td><td>+{ledger.landTax.toFixed(1)}</td></tr>
+            <tr><td>人头税（自由民）</td><td>+{ledger.pollTax.toFixed(1)}</td></tr>
+            <tr><td>消费税（消费者）</td><td>+{ledger.consumptionTax.toFixed(1)}</td></tr>
+            <tr><td>关税（贸易者）</td><td>+{ledger.tariff.toFixed(1)}</td></tr>
+            <tr><td>特别税（运力/港口/印花）</td><td>+{ledger.otherTax.toFixed(1)}</td></tr>
+            <tr><td>单一商品税</td><td>+{ledger.goodsTax.toFixed(1)}</td></tr>
+            <tr className="sum"><td>税收合计</td><td>+{total.toFixed(1)}</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section className="p-sec">
+        <h4>阶级负担明细（谁在交多少 · 上月）</h4>
+        <div className="mkt-scroll">
+          <table className="mini-table burden-table">
+            <thead>
+              <tr>
+                <th>阶级</th>
+                <th>土地</th><th>人头</th><th>消费</th><th>关税</th><th>特别</th><th>商品税</th><th>合计</th>
+              </tr>
+            </thead>
+            <tbody>
+              {CLASSES.map((c) => {
+                const r = burden[c];
+                const rowTotal = r.land + r.poll + r.consumption + r.tariff + r.other + r.goods;
+                return (
+                  <tr key={c}>
+                    <td>{CLASS_DEFS[c].label}</td>
+                    <td>{r.land.toFixed(1)}</td>
+                    <td>{r.poll.toFixed(1)}</td>
+                    <td>{r.consumption.toFixed(1)}</td>
+                    <td>{r.tariff.toFixed(1)}</td>
+                    <td>{r.other.toFixed(1)}</td>
+                    <td>{r.goods.toFixed(1)}</td>
+                    <td className={rowTotal > 0 ? '' : 'dim'}>{rowTotal.toFixed(1)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <p className="dim">土地税压在持地者（地主/大贵族/富农/自耕农）；人头/消费税打在下层（奴隶免征）；关税/特别税由商人/资本家承担。</p>
+      </section>
+
+      <section className="p-sec">
+        <h4>产业链传导提示（输入品税 → 下游成本）</h4>
+        {hints.length === 0 ? (
+          <p className="dim">尚未对商品征税。试试对「煤炭」或「铁矿」征收商品税，看下游炼铁/炼钢/工具/武器成本如何上升。</p>
+        ) : (
+          <ul className="log-list">
+            {hints.map((h, i) => (
+              <li key={i}>
+                <span className="log-title">{GOOD_LABEL[h.from]}税 {((tax.goods[h.from]) * 100).toFixed(0)}%</span>
+                <span className="log-choice">→ {GOOD_LABEL[h.to]}成本 +{h.pct.toFixed(0)}%{h.depth > 1 ? `（第${h.depth}级）` : ''}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
+  );
+}
+
+export default function NationPanel({ game, map, selectedProvince, onTaxRate, onGoodsTax, onSpending, onRetrain, onInvest, onCancelInvest, onTogglePolicy, onAbolish }: Props) {
   const [tab, setTab] = useState<Tab>('economy');
   const n = game.nations[game.playerNation];
   const def = NATIONS[game.playerNation];
@@ -552,39 +712,25 @@ export default function NationPanel({ game, map, selectedProvince, onTax, onSpen
   return (
     <aside className="panel">
       <div className="panel-tabs">
-        {(['economy', 'nation', 'invest', 'class', 'log'] as Tab[]).map((t) => (
+        {(['economy', 'tax', 'nation', 'invest', 'class', 'log'] as Tab[]).map((t) => (
           <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>
-            {t === 'economy' ? '经济' : t === 'nation' ? '国家' : t === 'invest' ? '投资' : t === 'class' ? '阶级' : '大事记'}
+            {t === 'economy' ? '经济' : t === 'tax' ? '税收' : t === 'nation' ? '国家' : t === 'invest' ? '投资' : t === 'class' ? '阶级' : '大事记'}
           </button>
         ))}
       </div>
 
       {tab === 'economy' && (
         <div className="tab-body">
-          {/* 税率 */}
+          {/* 税率（v0.4 立体税制入口） */}
           <section className="p-sec">
-            <h4>税率（土地 / 人头 / 关税 / 盐税 · 阶级负担）</h4>
-            <div className="tax-row">
-              {TAX_LEVELS.map((l) => (
-                <button
-                  key={l}
-                  className={`tax-btn ${n.taxLevel === l ? 'active' : ''}`}
-                  onClick={() => onTax(l)}
-                  title={`稳定度惩罚 -${TAX_RATES[l].penalty}`}
-                >
-                  {TAX_RATES[l].label}
-                  <em>{(TAX_RATES[l].rate * 100).toFixed(0)}%</em>
-                </button>
-              ))}
-            </div>
-            <div className="tax-detail">
-              {(() => {
-                const r = TAX_RATES[n.taxLevel].rates;
-                return `土地 ${(r.land * 100).toFixed(0)}% · 人头 ${(r.poll * 100).toFixed(0)}% · 关税 ${(r.tariff * 100).toFixed(0)}% · 盐税 ${(r.salt * 100).toFixed(0)}%`;
-              })()}
+            <h4>税制（六税种 · 连续滑块 0%-30%）</h4>
+            <p>
+              综合税负 <b>{(weightedTaxRate(n.tax) * 100).toFixed(1)}%</b> · 上月税收{' '}
+              <b>{(ledger.pollTax + ledger.landTax + ledger.consumptionTax + ledger.tariff + ledger.otherTax + ledger.goodsTax).toFixed(1)}</b> 万₭
               {n.policies.progressiveTax && <span className="pos"> · 累进税生效</span>}
-            </div>
-            <p className="dim">人头/盐税按阶级负担系数征收：苛税打在下层，上层可豁免；上层另有地税负担。</p>
+            </p>
+            <p className="dim">土地税（持地者）/ 人头税（自由民）/ 消费税（消费者）/ 关税（贸易者）/ 特别税（运力港口印花）+ 单一商品税（全部商品可选，含传导）。</p>
+            <button className="retrain-btn" onClick={() => setTab('tax')}>前往「税收」页精细调节 →</button>
           </section>
 
           {/* 支出滑杆 */}
@@ -612,10 +758,12 @@ export default function NationPanel({ game, map, selectedProvince, onTax, onSpen
             <h4>财政结算（上月）</h4>
             <table className="mini-table">
               <tbody>
-                <tr><td>人头税（阶级加权）</td><td>+{ledger.pollTax.toFixed(1)}</td></tr>
+                <tr><td>人头税（自由民）</td><td>+{ledger.pollTax.toFixed(1)}</td></tr>
                 <tr><td>土地税（按地主持有）</td><td>+{ledger.landTax.toFixed(1)}</td></tr>
-                <tr><td>盐税</td><td>+{ledger.saltTax.toFixed(1)}</td></tr>
+                <tr><td>消费税（消费者）</td><td>+{ledger.consumptionTax.toFixed(1)}</td></tr>
                 <tr><td>关税</td><td>+{ledger.tariff.toFixed(1)}</td></tr>
+                <tr><td>特别税（运力/港口/印花）</td><td>+{ledger.otherTax.toFixed(1)}</td></tr>
+                <tr><td>单一商品税</td><td>+{ledger.goodsTax.toFixed(1)}</td></tr>
                 <tr><td>建筑回报</td><td className={ledger.investReturn >= 0 ? 'pos' : 'neg'}>{ledger.investReturn >= 0 ? '+' : ''}{ledger.investReturn.toFixed(1)}</td></tr>
                 <tr><td>投资支出 / 退款</td><td className={netInvest >= 0 ? 'pos' : 'neg'}>{netInvest >= 0 ? '+' : ''}{netInvest.toFixed(1)}</td></tr>
                 <tr><td>支出合计</td><td>-{ledger.spending.toFixed(1)}</td></tr>
@@ -739,6 +887,10 @@ export default function NationPanel({ game, map, selectedProvince, onTax, onSpen
             {n.emigration > 0 && <p className="warn">⚠ 人口外流 {fmt(n.emigration)} 万：住房拥挤或民生恶化</p>}
           </section>
         </div>
+      )}
+
+      {tab === 'tax' && (
+        <TaxTab game={game} map={map} onTaxRate={onTaxRate} onGoodsTax={onGoodsTax} />
       )}
 
       {tab === 'nation' && (

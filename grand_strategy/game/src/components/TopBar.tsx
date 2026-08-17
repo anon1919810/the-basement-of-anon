@@ -2,7 +2,7 @@ import type { GameState } from '../game/state';
 import type { NationId, Speed } from '../game/types';
 import { NATIONS, NATION_LIST } from '../game/nations';
 import { SPEED_LABEL, dateLabel } from '../game/clock';
-import { TAX_RATES } from '../game/economy';
+import { weightedTaxRate } from '../game/tax';
 
 interface Props {
   game: GameState;
@@ -20,11 +20,12 @@ function fmt(n: number): string {
 export default function TopBar({ game, onSpeed, onNation, onSave, onNewGame }: Props) {
   const n = game.nations[game.playerNation];
   const def = NATIONS[game.playerNation];
+  const taxPct = weightedTaxRate(n.tax) * 100;
   return (
     <header className="topbar">
       <div className="brand">
         <span className="brand-mark">《卡尔特》</span>
-        <span className="brand-sub">v0.3.0 产业链 · 阶级 · 政策</span>
+        <span className="brand-sub">v0.4.0 八国可玩 · 立体税制</span>
       </div>
 
       <div className="tb-clock">
@@ -89,8 +90,8 @@ export default function TopBar({ game, onSpeed, onNation, onSave, onNewGame }: P
         </button>
       </div>
 
-      <div className="tb-tax" title="当前税率档">
-        税率：{TAX_RATES[n.taxLevel].label}
+      <div className="tb-tax" title="综合税负 = 五税种均值×0.7 + 商品税均值×0.3（0%-30% 连续滑块）">
+        综合税负 {taxPct.toFixed(1)}%
       </div>
       <span className="tb-nation-info">{def.name} · {def.gov}</span>
     </header>

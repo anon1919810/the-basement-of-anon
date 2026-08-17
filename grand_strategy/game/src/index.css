@@ -861,3 +861,82 @@ button.active {
   background: var(--warn);
   cursor: pointer;
 }
+
+/* ---- v0.4 税收页 / 国家选择器 ---- */
+.burden-table td,
+.burden-table th {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+
+.burden-table td:first-child,
+.burden-table th:first-child {
+  text-align: left;
+}
+
+.nation-picker {
+  width: 620px;
+  max-width: 94vw;
+  max-height: 86vh;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--accent);
+  border-radius: 4px;
+  padding: 18px 20px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.3);
+}
+
+.nation-picker h3 {
+  margin: 0 0 4px;
+  font-size: 17px;
+  letter-spacing: 1px;
+}
+
+.nation-picker-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.nation-pick-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg);
+}
+
+.nation-pick-card:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.nation-pick-card b {
+  font-size: 14px;
+}
+
+.nation-pick-card em {
+  font-style: normal;
+  font-size: 11.5px;
+}
+
+.nation-pick-card span:last-child {
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
+.nation-pick-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  display: inline-block;
+  margin-bottom: 2px;
+}

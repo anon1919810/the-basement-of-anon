@@ -138,11 +138,15 @@ export function classDef(c: ClassId): ClassDef {
   return CLASS_DEFS[c];
 }
 
-// ---- 各国初始阶级分布（世界观） ----
+// ---- 各国初始阶级分布（世界观，v0.4 八国） ----
 /**
  * 申斯戈维克帝国：农奴制 → 大量 奴隶/佃农 + 地主/大贵族，少量 官僚/技术阶层
  * 洛林共和国：市民/工人/资本家/官僚/技术阶层 为主，少贵族，无奴隶
  * 伊尼亚斯王国：工人/工匠/资本家/地主 + 贵族议会传统
+ * 奥兰治亲王国：市民/商人工匠 为主，滨海商业阶层
+ * 北/南扎拉克：工业萌芽 + 民族主义 → 工人/工匠/农民为主，选帝侯贵族少量
+ * 盎格伦撒自由城邦：市民/商人/资本家/大银行家 为顶，金融阶层庞大
+ * 诺曼尼亚帝国：地主/官僚 + 农奴残留，守旧落后
  */
 export const INITIAL_CLASS_MIX: Record<NationId, Record<JobId, Partial<Record<ClassId, number>>>> = {
   lorraine: {
@@ -162,6 +166,36 @@ export const INITIAL_CLASS_MIX: Record<NationId, Record<JobId, Partial<Record<Cl
     miner: { 5: 0.3, 6: 0.4, 7: 0.3 },
     artisan: { 3: 0.2, 4: 0.45, 5: 0.35 },
     engineer: { 1: 0.2, 2: 0.3, 3: 0.5 },
+  },
+  orange: {
+    farmer: { 4: 0.4, 5: 0.4, 6: 0.2 },
+    miner: { 4: 0.2, 5: 0.8 },
+    artisan: { 2: 0.15, 3: 0.35, 4: 0.5 },
+    engineer: { 1: 0.05, 2: 0.4, 3: 0.55 },
+  },
+  zalakN: {
+    farmer: { 4: 0.15, 5: 0.4, 6: 0.45 },
+    miner: { 4: 0.25, 5: 0.75 },
+    artisan: { 3: 0.3, 4: 0.7 },
+    engineer: { 1: 0.05, 2: 0.3, 3: 0.65 },
+  },
+  zalakS: {
+    farmer: { 4: 0.2, 5: 0.42, 6: 0.38 },
+    miner: { 4: 0.3, 5: 0.7 },
+    artisan: { 3: 0.35, 4: 0.65 },
+    engineer: { 1: 0.08, 2: 0.35, 3: 0.57 },
+  },
+  angland: {
+    farmer: { 3: 0.15, 4: 0.45, 5: 0.4 },
+    miner: { 4: 0.5, 5: 0.5 },
+    artisan: { 2: 0.25, 3: 0.4, 4: 0.35 },
+    engineer: { 1: 0.1, 2: 0.5, 3: 0.4 },
+  },
+  normandy: {
+    farmer: { 3: 0.2, 4: 0.1, 5: 0.2, 6: 0.3, 7: 0.2 },
+    miner: { 5: 0.4, 6: 0.4, 7: 0.2 },
+    artisan: { 3: 0.3, 4: 0.5, 5: 0.2 },
+    engineer: { 1: 0.15, 2: 0.3, 3: 0.55 },
   },
 };
 

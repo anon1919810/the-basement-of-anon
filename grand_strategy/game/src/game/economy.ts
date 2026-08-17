@@ -1,6 +1,9 @@
 /**
- * 财政与经济全循环（v0.3）：
- *  - 税种：土地/人头/关税/盐税 × 税率档 × 阶级负担系数（苛税打在下层，上层可豁免）
+ * 财政与经济全循环（v0.4）：
+ *  - 立体税制：六税种连续滑块 0%-30%（土地/人头/消费/关税/特别 + 单一商品税全部商品可选）
+ *    · 阶级负担矩阵（tax.ts CLASS_TAX_MATRIX）：各税种按阶级征收系数
+ *    · 单一商品税：买方支付有效价 = 市价 × (1+税率)；收入 = 税率 × 成交量进国库
+ *    · 产业链传导：输入品征税 → 下游建筑按税后价计成本 → 成品价格随成本上升（market.ts costPush）
  *  - 支出：军/行政/基建/宫廷/卫生 滑杆 → 行政提识字率、卫生提健康、基建提产能与降运费
  *  - 三级市场（17 商品：资源→半成品→成品）+ 国际贸易 + 建筑输入/产出接入
  *  - 产业链建筑：技能要求（无对应职业 POP → 产能打折）、输入消耗、加工损耗、产出进市场
@@ -9,13 +12,13 @@
  *  - 阶级流动：识字率 + 财富驱动（labor.applyClassMobility，确定性）
  *  - 月度结算顺序（确定性，无随机）：
  *    基建演化 → 物流运费 → 生产/消费（含省资源与奢侈品）→ 建筑进度与运营（预扣输入）
- *    → 三级市场+贸易 → 建筑现金 → 工资 → POP 投资收入 → 幸福度/动乱/效率
- *    → 人口增长+迁移 → 阶级流动 → 财政（含建筑现金流）→ 识字率/健康 → 稳定度
+ *    → 三级市场+贸易（含成本传导与商品税）→ 建筑现金（按税后输入价）→ 工资 → POP 投资收入
+ *    → 幸福度/动乱/效率 → 人口增长+迁移 → 阶级流动 → 财政（六税种，含建筑现金流）→ 识字率/健康 → 稳定度
  */
 import type { GameMap } from './map';
 import type { GameState, NationState } from './state';
 import { addChronicle } from './state';
-import type { GoodId, JobId, NationId, TaxLevel } from './types';
+import type { GoodId, JobId, NationId } from './types';
 import type { ClassId } from './types';
 import { NATIONS } from './nations';
 import {
@@ -28,7 +31,6 @@ import {
   LUXURY_NEED_BASE,
   LUXURY_OUTPUT_PER_WAN,
   NEED_PER_WAN,
-  POLICY_GROWTH,
   RETRAIN_OUTPUT_PENALTY,
   clamp,
   classDef,
@@ -37,31 +39,19 @@ import {
   minerOutput,
   provinceLuxuryPotential,
 } from './pops';
-import { classPoliticalWeight, classTaxCoef, PROGRESSIVE_HAPPINESS, SUFFRAGE_HAPPINESS } from './classes';
+import { classPoliticalWeight, PROGRESSIVE_HAPPINESS, SUFFRAGE_HAPPINESS } from './classes';
+import { classTaxCoefFor, taxPenalty, policyGrowthCoef } from './tax';
+import type { NationTax } from './tax';
 import { LABOR_DEMAND_PER_CELL, applyClassMobility, computeWages } from './labor';
 import { settleMarket } from './market';
 import type { CountyFlow, MarketState } from './market';
-import { zeroGoods } from './market';
+import { BASE_PRICE, zeroGoods } from './market';
 import { countyFreightFactor, provinceFreightFactor } from './logistics';
 import { BUILDING_DEFS, buildingSkillReqPop } from './buildings';
 import type { InvestmentProject } from './buildings';
 import { provinceHasResource } from './resources';
 
-// ---- 税率档（v0.0.0 四档扩展：rate 保留用于显示；rates 为四税种细率） ----
-export interface TaxRates {
-  land: number;
-  poll: number;
-  tariff: number;
-  salt: number;
-}
-export const TAX_RATES: Record<TaxLevel, { label: string; rate: number; penalty: number; rates: TaxRates }> = {
-  light: { label: '轻税', rate: 0.2, penalty: 0, rates: { land: 0.15, poll: 0.15, tariff: 0.1, salt: 0.1 } },
-  medium: { label: '中税', rate: 0.3, penalty: 5, rates: { land: 0.25, poll: 0.3, tariff: 0.15, salt: 0.2 } },
-  heavy: { label: '重税', rate: 0.42, penalty: 15, rates: { land: 0.35, poll: 0.42, tariff: 0.22, salt: 0.3 } },
-  oppressive: { label: '苛税', rate: 0.55, penalty: 28, rates: { land: 0.45, poll: 0.55, tariff: 0.3, salt: 0.4 } },
-};
-
-export const TAX_LEVELS: TaxLevel[] = ['light', 'medium', 'heavy', 'oppressive'];
+// ---- 税率（v0.4 连续滑块 0%-30%，见 tax.ts；TAX_RATES/TAX_LEVELS 已移除） ----
 
 /** 人均年收入（₭/人/年）≈ 1780 年代水平 */
 export const PER_CAPITA_INCOME = 3.0;
@@ -71,8 +61,6 @@ export const GRAIN_PER_WAN_PERSON = 0.09;
 export const CELL_GRAIN_BASE = 0.9;
 /** 每格土地年价值（万₭/格/年，× 产出修正） */
 export const LAND_VALUE_PER_CELL = 2.4;
-/** 人均盐税基数（₭/人/年） */
-export const SALT_BASE = 0.25;
 /** 破产触发阈值（国库万₭，允许负但记入大事记） */
 export const BANKRUPTCY_THRESHOLD = -2000;
 export const BANKRUPTCY_COOLDOWN = 12; // 月
@@ -89,14 +77,34 @@ export const CAPITAL_POOL_INDUSTRY = 0.5; // 建筑工业利润计入比例
 /** 农奴制效率惩罚（未废奴且存在奴隶 → 产出 ×0.9） */
 export const SERFDOM_PENALTY = 0.9;
 
+/**
+ * 建筑成本结构表（market.ts 成本传导用，避免 market↔buildings 循环依赖）：
+ * 商品 → 生产该商品的建筑 { 每单位输出所需输入量, 满产产能 }。
+ */
+export const GOOD_PRODUCERS: Partial<Record<GoodId, { inputs: Partial<Record<GoodId, number>>; capacity: number }>> = (() => {
+  const out: Partial<Record<GoodId, { inputs: Partial<Record<GoodId, number>>; capacity: number }>> = {};
+  for (const kind of Object.keys(BUILDING_DEFS) as (keyof typeof BUILDING_DEFS)[]) {
+    const def = BUILDING_DEFS[kind];
+    out[def.output] = { inputs: { ...def.inputs }, capacity: def.capacity };
+  }
+  return out;
+})();
+
 /** 月度账本（结算后写入 nation.monthly，UI 与守恒断言读取） */
 export interface MonthlyLedger {
   income: number;
   spending: number;
+  // ---- v0.4 六税种实收（万₭/月） ----
   pollTax: number;
   landTax: number;
-  saltTax: number;
+  /** 消费税（市民/工匠/工人等消费者） */
+  consumptionTax: number;
+  /** 关税（进出口额） */
   tariff: number;
+  /** 其他特别税（运力/港口/印花，按贸易与运输量） */
+  otherTax: number;
+  /** 单一商品税（Σ 税率 × 成交量，全部商品可选） */
+  goodsTax: number;
   exportValue: number;
   importValue: number;
   tradeBalance: number;
@@ -119,7 +127,7 @@ export interface MonthlyLedger {
 
 export function zeroLedger(): MonthlyLedger {
   return {
-    income: 0, spending: 0, pollTax: 0, landTax: 0, saltTax: 0, tariff: 0,
+    income: 0, spending: 0, pollTax: 0, landTax: 0, consumptionTax: 0, tariff: 0, otherTax: 0, goodsTax: 0,
     exportValue: 0, importValue: 0, tradeBalance: 0,
     foodProd: 0, foodConsumed: 0, foodSurplus: 0, growthRate: 0,
     investIncome: 0, investReturn: 0, investCost: 0, investRefund: 0,
@@ -237,7 +245,8 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
   const id = state.playerNation;
   const n = state.nations[id];
   const def = NATIONS[id];
-  const tax = TAX_RATES[n.taxLevel];
+  const tax: NationTax = n.tax;
+  const penalty = taxPenalty(tax);
   const provIds = map.provinces
     .filter((p) => p.owner === id && !p.isUndiscovered)
     .map((p) => p.id);
@@ -429,6 +438,8 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
       stocks: n.stocks,
       routeCoef: routeCoef(n),
       tariffRate: tax.rates.tariff,
+      goodsTax: tax.goods,
+      producers: GOOD_PRODUCERS,
       crossFreight,
       natFreight: avgFreight,
     },
@@ -436,7 +447,7 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
   );
   n.foodStock = n.stocks.food; // 镜像到 v0.0.0 字段
 
-  // ---- 7. 建筑现金：产出 × 结算后市价 − 输入 × 结算后市价 − 运营成本（闲置维护费） ----
+  // ---- 7. 建筑现金：产出 × 结算后市价 − 输入 × 税后有效价（传导账）− 运营成本（闲置维护费） ----
   let investReturn = 0;
   for (const p of n.projects) {
     if (p.status === 'active' && !newlyCompleted.has(p.id)) {
@@ -444,7 +455,8 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
       p.lastRevenue = p.lastOutput * n.market[def.output].price;
       let inputCost = 0;
       for (const g of Object.keys(p.lastInputUsed) as GoodId[]) {
-        inputCost += (p.lastInputUsed[g] ?? 0) * n.market[g].price;
+        // v0.4 传导账：输入按「税后有效价」（含商品税与上游成本传导）
+        inputCost += (p.lastInputUsed[g] ?? 0) * n.market[g].effPrice;
       }
       p.lastInputCost = inputCost;
       const idleScale = 0.3 + 0.7 * p.lastRunFactor * p.lastSkillFactor;
@@ -489,10 +501,10 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
   }
 
   // ---- 10. 幸福度 & 效率（按省：三级市场消费/需求；阶级基础幸福/税负/政策修正；奴隶恒低） ----
+  // v0.4 税负基数：综合惩罚 + 人头/消费税档（按阶级负担矩阵分摊；累进税改写）
   const taxBurdenBase =
-    tax.penalty * 0.6 +
-    tax.rates.poll * 100 * 0.1 +
-    tax.rates.salt * 100 * 0.04;
+    penalty * 0.6 +
+    (tax.rates.poll + tax.rates.consumption) * 100 * 0.08;
   const freightPenalty = Math.min(12, avgFreight * 3);
   let happSum = 0;
   for (const pid of provIds) {
@@ -520,8 +532,12 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
       const wageFactor = effWage / BASE_WAGE[pop.job];
       const needsSat = 0.35 * satFood + 0.2 * satCloth + 0.15 * satFuel + 0.3 * housingSat;
       pop.sat = { food: satFood, clothing: satCloth, housing: housingSat, fuel: satFuel };
-      // 苛税打在下层：税负 × 阶级系数（上层低/下层高；累进税改写）
-      const taxBurden = taxBurdenBase * classTaxCoef(pop.class, n.policies.progressiveTax);
+      // 苛税打在下层：税负 × 阶级负担矩阵（人头+消费均摊；累进税改写上层↑下层↓）
+      const tc =
+        (classTaxCoefFor('poll', pop.class, n.policies.progressiveTax) +
+          classTaxCoefFor('consumption', pop.class, n.policies.progressiveTax)) /
+        2;
+      const taxBurden = taxBurdenBase * tc;
       const polHap =
         (n.policies.progressiveTax ? PROGRESSIVE_HAPPINESS[pop.class] : 0) +
         (n.policies.universalSuffrage ? SUFFRAGE_HAPPINESS[pop.class] : 0);
@@ -560,7 +576,7 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
   const foodSupplyEff = prodAgg.food + n.market.food.imported;
   const foodSurplusRatio = clamp((foodSupplyEff - foodConsumed) / Math.max(foodConsumed, 1e-9), -1, 1);
   const peaceCoef = n.stability / 100;
-  const policyCoef = POLICY_GROWTH[n.taxLevel];
+  const policyCoef = policyGrowthCoef(tax);
   const annualGrowth = foodSurplusRatio * peaceCoef * policyCoef * 0.045;
   for (const pid of provIds) {
     const ps = state.provinces[pid];
@@ -607,9 +623,9 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
   }
   n.popWan = provIds.reduce((s, pid) => s + state.provinces[pid].popTotal, 0);
 
-  // ---- 13. 财政（含建筑现金流；投资成本/退款已在操作发生时入账；阶级税负） ----
+  // ---- 13. 财政（v0.4 六税种：土地/人头/消费/关税/特别/商品税；含建筑现金流） ----
   let pollTax = 0;
-  let saltTax = 0;
+  let consumptionTax = 0;
   let landOwnerW = 0;
   let landPopTotal = 0;
   let landValue = 0;
@@ -617,17 +633,22 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
     const prov = map.provinceById.get(pid);
     if (prov) landValue += prov.cellIds.length * LAND_VALUE_PER_CELL * prov.productivity;
     for (const pop of state.provinces[pid].pops) {
-      const tc = classTaxCoef(pop.class, n.policies.progressiveTax);
-      pollTax += (pop.size * PER_CAPITA_INCOME * tax.rates.poll * tc) / 12;
-      saltTax += (pop.size * SALT_BASE * tax.rates.salt * tc) / 12;
-      landOwnerW += pop.size * classDef(pop.class).landCoef;
+      // 人头税：全体自由民（奴隶系数 0 免征）；消费税：消费者按阶级系数
+      pollTax +=
+        (pop.size * PER_CAPITA_INCOME * tax.rates.poll * classTaxCoefFor('poll', pop.class, n.policies.progressiveTax)) / 12;
+      consumptionTax +=
+        (pop.size * PER_CAPITA_INCOME * tax.rates.consumption * classTaxCoefFor('consumption', pop.class, n.policies.progressiveTax)) / 12;
+      landOwnerW += pop.size * classTaxCoefFor('land', pop.class, n.policies.progressiveTax);
       landPopTotal += pop.size;
     }
   }
   const landOwnerFactor = landPopTotal > 1e-9 ? landOwnerW / landPopTotal : 1;
   const landTax = (landValue * tax.rates.land * landOwnerFactor) / 12;
   const tariff = snap.tariff;
-  const income = pollTax + landTax + saltTax + tariff;
+  // 其他特别税：运力/港口/印花——按贸易与运输量（进出口额 × 1.2 作运输量代理）
+  const otherTax = tax.rates.other * (snap.exportValue + snap.importValue) * 1.2;
+  const goodsTax = snap.commodityTax;
+  const income = pollTax + landTax + consumptionTax + tariff + otherTax + goodsTax;
   const spending = n.spending.military + n.spending.admin + n.spending.infra + n.spending.court + n.spending.health;
 
   const investCost = n.investCostAcc;
@@ -642,8 +663,10 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
     spending,
     pollTax,
     landTax,
-    saltTax,
+    consumptionTax,
     tariff,
+    otherTax,
+    goodsTax,
     exportValue: snap.exportValue,
     importValue: snap.importValue,
     tradeBalance: snap.exportValue - snap.importValue,
@@ -663,12 +686,12 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
   n.literacy = clamp(0, 1, n.literacy + (0.003 + 0.005 * adminRatio) / 12);
   n.health = clamp(0, 1, n.health + (0.002 + 0.004 * healthRatio) / 12);
 
-  // ---- 15. 稳定度漂移（税率 + 缺粮 + 低幸福度 + 下层动乱） ----
+  // ---- 15. 稳定度漂移（综合税负 + 缺粮 + 低幸福度 + 下层动乱） ----
   const satFoodNat = n.market.food.demand > 0 ? clamp(n.market.food.consumed / n.market.food.demand, 0, 1) : 1;
   const foodPenalty = (1 - satFoodNat) * 25;
   const happPenalty = Math.max(0, (55 - avgHappiness) * 0.25);
   const unrestPenalty = n.unrest * 10;
-  const target = clamp(15, 100, 72 - tax.penalty - foodPenalty - happPenalty - unrestPenalty);
+  const target = clamp(15, 100, 72 - penalty - foodPenalty - happPenalty - unrestPenalty);
   n.stability += (target - n.stability) * 0.05;
   n.stability = clamp(0, 100, n.stability);
 }
@@ -683,3 +706,111 @@ export function activeBuildingProjects(n: NationState): InvestmentProject[] {
 
 /** 省份是否有某资源（economy 便捷导出，供 UI 复用） */
 export { provinceHasResource };
+
+// ---- v0.4 税制 UI 辅助（阶级负担明细 / 传导提示） ----
+
+export interface ClassTaxBurdenRow {
+  land: number;
+  poll: number;
+  consumption: number;
+  tariff: number;
+  other: number;
+  goods: number;
+}
+
+/**
+ * 阶级负担明细：各阶级在六税种下各交多少（万₭/月）。
+ * 与财政结算同公式；关税/特别税/商品税按上月账本总额按阶级权重分摊（显示用）。
+ */
+export function nationClassTaxBurden(
+  map: GameMap,
+  state: GameState,
+  nationId: NationId,
+): Record<ClassId, ClassTaxBurdenRow> {
+  const n = state.nations[nationId];
+  const tax = n.tax;
+  const prog = n.policies.progressiveTax;
+  const zero = (): ClassTaxBurdenRow => ({ land: 0, poll: 0, consumption: 0, tariff: 0, other: 0, goods: 0 });
+  const rows: Record<ClassId, ClassTaxBurdenRow> = { 1: zero(), 2: zero(), 3: zero(), 4: zero(), 5: zero(), 6: zero(), 7: zero() };
+  const landW: Record<ClassId, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0 };
+  const tariffW: Record<ClassId, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0 };
+  const otherW: Record<ClassId, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0 };
+  const goodsW: Record<ClassId, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0 };
+  let landValue = 0;
+  for (const p of map.provinces) {
+    if (p.owner !== nationId || p.isUndiscovered) continue;
+    const prov = map.provinceById.get(p.id);
+    if (prov) landValue += prov.cellIds.length * LAND_VALUE_PER_CELL * prov.productivity;
+    const ps = state.provinces[p.id];
+    if (!ps) continue;
+    for (const pop of ps.pops) {
+      const c = pop.class;
+      rows[c].poll +=
+        (pop.size * PER_CAPITA_INCOME * tax.rates.poll * classTaxCoefFor('poll', c, prog)) / 12;
+      rows[c].consumption +=
+        (pop.size * PER_CAPITA_INCOME * tax.rates.consumption * classTaxCoefFor('consumption', c, prog)) / 12;
+      landW[c] += pop.size * classTaxCoefFor('land', c, prog);
+      tariffW[c] += pop.size * classTaxCoefFor('tariff', c, prog);
+      otherW[c] += pop.size * classTaxCoefFor('other', c, prog);
+      goodsW[c] += pop.size * classDef(c).consumptionMult;
+    }
+  }
+  const wSum = (w: Record<ClassId, number>): number => {
+    let s = 0;
+    for (const c of [1, 2, 3, 4, 5, 6, 7] as ClassId[]) s += w[c];
+    return s;
+  };
+  const landTotal = (landValue * tax.rates.land) / 12;
+  const landWSum = wSum(landW);
+  const tariffWSum = wSum(tariffW);
+  const otherWSum = wSum(otherW);
+  const goodsWSum = wSum(goodsW);
+  for (const c of [1, 2, 3, 4, 5, 6, 7] as ClassId[]) {
+    rows[c].land = landWSum > 1e-9 ? landTotal * (landW[c] / landWSum) : 0;
+    rows[c].tariff = tariffWSum > 1e-9 ? n.monthly.tariff * (tariffW[c] / tariffWSum) : 0;
+    rows[c].other = otherWSum > 1e-9 ? n.monthly.otherTax * (otherW[c] / otherWSum) : 0;
+    rows[c].goods = goodsWSum > 1e-9 ? n.monthly.goodsTax * (goodsW[c] / goodsWSum) : 0;
+  }
+  return rows;
+}
+
+export interface TransmissionHint {
+  from: GoodId;
+  to: GoodId;
+  pct: number;
+  depth: number;
+}
+
+/**
+ * 传导提示：对每个已征税商品，沿产业链（建筑输入链）BFS 找下游受影响商品，
+ * 估算成本上浮百分比（如「煤炭税 15% → 钢材成本 +12%」）。显示用，最多返回 12 条。
+ */
+export function taxTransmissionHints(state: GameState): TransmissionHint[] {
+  const n = state.nations[state.playerNation];
+  const tax = n.tax;
+  const hints: TransmissionHint[] = [];
+  for (const from of GOODS) {
+    const r = tax.goods[from];
+    if (r <= 0.0001) continue;
+    const queue: { g: GoodId; weight: number; depth: number }[] = [];
+    for (const to of GOODS) {
+      const prod = GOOD_PRODUCERS[to];
+      if (!prod || !(prod.inputs[from] ?? 0)) continue;
+      queue.push({ g: to, weight: (prod.inputs[from] ?? 0) / Math.max(1e-9, prod.capacity), depth: 1 });
+    }
+    while (queue.length > 0) {
+      const cur = queue.shift() as { g: GoodId; weight: number; depth: number };
+      const prod = GOOD_PRODUCERS[cur.g];
+      const base = BASE_PRICE[cur.g];
+      const pct = r * cur.weight * (n.market[from].price / Math.max(1e-9, base)) * 100;
+      if (pct > 0.05) hints.push({ from, to: cur.g, pct, depth: cur.depth });
+      if (cur.depth >= 3 || !prod) continue;
+      for (const next of GOODS) {
+        const np = GOOD_PRODUCERS[next];
+        if (!np || !(np.inputs[cur.g] ?? 0)) continue;
+        queue.push({ g: next, weight: cur.weight * ((np.inputs[cur.g] ?? 0) / Math.max(1e-9, np.capacity)), depth: cur.depth + 1 });
+      }
+    }
+  }
+  return hints.sort((a, b) => b.pct - a.pct).slice(0, 12);
+}

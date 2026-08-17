@@ -1,33 +1,31 @@
 /**
- * 无头模拟（v0.3，tsx 运行）：50 年沙盒断言（洛林，seed 42）。
- *  - 随机策略：每月随机调税率/五类支出/偶尔转职/随机建筑投资（含取消）/随机开关政策
- *  - 断言：
- *    1) 无 NaN/±∞（全状态有限，含建筑/阶级字段）
- *    2) 国库守恒（Δ国库 = 收入 - 支出 + 建筑回报 - 投资成本 + 取消退款，逐月 + 全程累计）
- *    3) 17 商品守恒（生产 + 进口 = 消费 + 出口 + Δ库存 + 建筑消耗，容差 1%）
- *    4) 价格恒正且在 clamp 范围（0.4~2.5 × 基础价）——国家/区域/本地三级
- *    5) 阶级规模恒正、七级总和 = 总人口；奴隶 > 0 仅限帝国初始（洛林无奴隶）
- *    6) 建筑账目一致：成本/退款 ≤ 投入；技能要求生效（无对应职业 POP → 产能打折）
- *    7) 确定性：同种子两次 50 年快照完全一致
- *    8) 存档 JSON 往返一致；帝国 10 年冒烟：废农奴制（奴隶归零 → 佃农/自耕农）
+ * 无头模拟（v0.4，tsx 运行）：
+ *  - 洛林 50 年沙盒断言（seed 42，随机策略：税率滑块/支出/转职/建筑投资/政策）
+ *  - 8 国冒烟：每国 10 年（随机策略）不崩、无 NaN、守恒
+ *  - 洛林 50 年全断言：守恒（含六税种收入与传导账）、价格恒正 clamp、阶级恒正、
+ *    单一商品税生效（煤炭税 15% → 煤有效价↑、炼铁成本↑、钢材价↑，含单元级传导测试）、
+ *    确定性（同种子两次快照一致）、存档往返
+ *  - 帝国 10 年冒烟：废农奴制
  * 运行：npx.cmd tsx scripts/sim.ts
  */
 import { loadMap, mapStats } from '../src/game/map';
 import type { GameMap } from '../src/game/map';
 import { newGameState, tickDay, allFinite, abolishSerfdom, setPolicy } from '../src/game/state';
 import type { GameState } from '../src/game/state';
-import { NATIONS } from '../src/game/nations';
+import { NATIONS, NATION_LIST } from '../src/game/nations';
 import { Rng } from '../src/game/rng';
 import { DAYS_PER_MONTH, DAYS_PER_YEAR, monthIndex } from '../src/game/clock';
-import { BANKRUPTCY_THRESHOLD, TAX_LEVELS, nationClassMixOf, nationSlavePop } from '../src/game/economy';
+import { BANKRUPTCY_THRESHOLD, nationClassMixOf, nationSlavePop, GOOD_PRODUCERS } from '../src/game/economy';
 import { GOODS, GOOD_LABEL, JOB_LABEL } from '../src/game/pops';
 import { CLASSES, CLASS_LABEL } from '../src/game/classes';
+import { TAX_KINDS, TAX_MAX } from '../src/game/tax';
 import { retrainPop } from '../src/game/labor';
-import { PRICE_CLAMP_MAX, PRICE_CLAMP_MIN } from '../src/game/market';
+import { newMarket, PRICE_CLAMP_MAX, PRICE_CLAMP_MIN, settleMarket, zeroGoods } from '../src/game/market';
+import type { MarketInput, MarketState } from '../src/game/market';
 import { BUILDING_DEFS, BUILDING_KINDS, buildingUnlock, cancelInvestment, nationHasGood, startInvestment } from '../src/game/buildings';
 import { MANUAL_EVENTS } from '../src/game/manualEvents';
 import type { GoodId, NationId } from '../src/game/types';
-import { provinceResources, resourceStats, RESOURCE_LABEL } from '../src/game/resources';
+import { provinceResources, resourceStats, RESOURCE_LABEL, provinceHasResource } from '../src/game/resources';
 
 let failures = 0;
 let checks = 0;
@@ -57,11 +55,22 @@ interface Snapshot {
   day: number;
 }
 
-/** 月初随机调整税率与支出 + 随机开关政策（确定性：经 rng） */
+/** 月初随机调整税率滑块与支出 + 随机开关政策（确定性：经 rng） */
 function adjustPolicy(state: GameState, map: GameMap, rng: Rng): void {
   const id = state.playerNation;
   const n = state.nations[id];
-  n.taxLevel = TAX_LEVELS[rng.int(0, TAX_LEVELS.length)];
+  // v0.4 立体税制：60% 概率随机调一个税种（0-30%，0.5% 步进），40% 概率随机调 1-2 个商品税
+  if (rng.chance(0.6)) {
+    const kind = TAX_KINDS[rng.int(0, TAX_KINDS.length)];
+    n.tax.rates[kind] = rng.int(0, 61) / 200;
+  } else {
+    const nGoods = 1 + rng.int(0, 2);
+    for (let i = 0; i < nGoods; i++) {
+      const g = GOODS[rng.int(0, GOODS.length)];
+      n.tax.goods[g] = rng.int(0, 61) / 200;
+    }
+  }
+  check(Object.values(n.tax.rates).every((v) => v >= 0 && v <= TAX_MAX), `五税种税率在 0-30%（${JSON.stringify(n.tax.rates)}）`);
   const max = NATIONS[id].sliderMax;
   // 总预算内随机分配五类支出：上限 = min(滑杆上限, 上月收入×1.3 + 60) —— 随机会超支但不至于永久破产
   const cap = Math.min(max + 1, Math.max(60, Math.floor(n.monthly.income * 1.3) + 1));
@@ -155,7 +164,7 @@ function buildingUsedOf(n: { projects: { lastInputUsed: Record<GoodId, number> }
 /** 月度结算守恒断言（在 tickDay 结算前后） */
 function assertMonthlyConservation(state: GameState, map: GameMap, snap: Snapshot, at: string): void {
   const n = state.nations[state.playerNation];
-  // 国库守恒：Δ = 收入 - 支出 + 建筑回报 - 投资成本 + 取消退款
+  // 国库守恒：Δ = 收入 - 支出 + 建筑回报 - 投资成本 + 取消退款（收入含六税种）
   const expT =
     snap.treasury +
     n.monthly.income -
@@ -164,6 +173,11 @@ function assertMonthlyConservation(state: GameState, map: GameMap, snap: Snapsho
     n.monthly.investCost +
     n.monthly.investRefund;
   check(Math.abs(n.treasury - expT) < 1e-6, `国库守恒（${at}: ${expT.toFixed(1)} vs ${n.treasury.toFixed(1)}）`);
+  // 税制账本：收入 = 六税种之和（土地+人头+消费+关税+特别+商品税）
+  const taxSum =
+    n.monthly.pollTax + n.monthly.landTax + n.monthly.consumptionTax +
+    n.monthly.tariff + n.monthly.otherTax + n.monthly.goodsTax;
+  check(Math.abs(n.monthly.income - taxSum) < 1e-6, `税制账本一致（收入 ${n.monthly.income.toFixed(2)} = 六税种 ${taxSum.toFixed(2)}）`);
   // 商品守恒：生产 + 进口 = 消费 + 出口 + Δ库存 + 建筑消耗（容差 1%）；价格恒正且在 clamp 范围
   for (const g of GOODS) {
     const m = n.market[g];
@@ -175,6 +189,7 @@ function assertMonthlyConservation(state: GameState, map: GameMap, snap: Snapsho
     check(Math.abs(lhs - rhs) <= 0.01 * volume + 1e-6, `商品「${GOOD_LABEL[g]}」守恒（${at}: 产+进 ${lhs.toFixed(3)} vs 消+出+Δ+建 ${rhs.toFixed(3)}）`);
     check(m.price > 0 && m.price <= m.basePrice * PRICE_CLAMP_MAX + 1e-9 && m.price >= m.basePrice * PRICE_CLAMP_MIN - 1e-9,
       `国家价在 clamp 范围（${at}: ${g} ${m.price.toFixed(2)} ∈ [${(m.basePrice * PRICE_CLAMP_MIN).toFixed(2)}, ${(m.basePrice * PRICE_CLAMP_MAX).toFixed(2)}]）`);
+    check(Number.isFinite(m.effPrice) && Number.isFinite(m.costPush), `有效价/传导有限（${at}: ${g}）`);
   }
   // 区域（省）/ 本地（县）价格同样 clamp 内
   for (const pid of Object.keys(n.provinceMarkets)) {
@@ -228,10 +243,24 @@ function assertMonthlyConservation(state: GameState, map: GameMap, snap: Snapsho
   assertFiniteState(state, at);
 }
 
-function simulate(seed: number, nation: NationId, years: number, opts?: { abolishAtMonth?: number }): { state: GameState; costAcc: { cost: number; refund: number } } {
+/**
+ * 主模拟循环。
+ * opts:
+ *  - abolishAtMonth: 指定月份执行废农奴制（帝国冒烟）
+ *  - quiet: 不做随机策略/随机投资（确定性传导测试用）；配合 coalTax/forceChain
+ *  - coalTax: quiet 模式下每月固定煤炭税（0 = 对照组）
+ *  - forceChain: quiet 模式下确定性建造 炼铁厂→炼钢厂（洛林煤省；测试产业链传导）
+ */
+function simulate(
+  seed: number,
+  nation: NationId,
+  years: number,
+  opts?: { abolishAtMonth?: number; quiet?: boolean; coalTax?: number; forceChain?: boolean },
+): { state: GameState; costAcc: { cost: number; refund: number }; ironCostAt15: number | null } {
   const map = loadMap();
   const state = newGameState(nation, seed, map);
   const id = state.playerNation;
+  const n = state.nations[id];
   const days = years * DAYS_PER_YEAR;
 
   let minTreasury = Infinity;
@@ -242,49 +271,101 @@ function simulate(seed: number, nation: NationId, years: number, opts?: { abolis
   // 全程累计（终局账目一致断言）
   let accIncomeSpending = 0;
   let accReturn = 0;
+  // 传导测试记录（第 15 月：炼铁厂首个运行月）
+  let ironCostAt15: number | null = null;
+  let injectedTreasury = 0;
+  const ironChain = opts?.quiet && opts.forceChain === true;
+  if (ironChain) {
+    // 测试注入：洛林无铁矿资源（煤税测试需确定性产铁），补充 煤炭/铁矿 库存与国库
+    n.stocks.coal += 200;
+    n.stocks.ironOre += 100;
+    injectedTreasury = 2000;
+    n.treasury += injectedTreasury;
+    n.spending = { military: 40, admin: 30, infra: 60, court: 15, health: 10 };
+  }
+  let ironStarted = false;
+  let steelStarted = false;
 
   for (let d = 0; d < days; d++) {
     const mod = state.day % DAYS_PER_MONTH;
     const mi = monthIndex(state.day);
     if (mod === 1) {
-      // 月初：随机策略（税率/支出/转职/政策）
-      const rng = new Rng(state.rngState);
-      adjustPolicy(state, map, rng);
-      // 帝国冒烟：指定月份执行废农奴制
-      if (opts?.abolishAtMonth !== undefined && mi === opts.abolishAtMonth - 1) {
-        const before = nationSlavePop(map, state, id);
-        check(before > 0, `废农奴制前奴隶 > 0（${before.toFixed(1)} 万）`);
-        const stabBefore = state.nations[id].stability;
-        const ok = abolishSerfdom(state, map);
-        check(ok, '废农奴制政策执行成功');
-        check(state.nations[id].stability <= stabBefore - 10, `废农奴制短期稳定度下降（${stabBefore.toFixed(1)} → ${state.nations[id].stability.toFixed(1)}）`);
-        check(nationSlavePop(map, state, id) <= 1e-6, '废农奴制后奴隶归零');
+      if (!opts?.quiet) {
+        // 月初：随机策略（税率滑块/支出/转职/政策）
+        const rng = new Rng(state.rngState);
+        adjustPolicy(state, map, rng);
+        // 帝国冒烟：指定月份执行废农奴制
+        if (opts?.abolishAtMonth !== undefined && mi === opts.abolishAtMonth - 1) {
+          const before = nationSlavePop(map, state, id);
+          check(before > 0, `废农奴制前奴隶 > 0（${before.toFixed(1)} 万）`);
+          const stabBefore = state.nations[id].stability;
+          const ok = abolishSerfdom(state, map);
+          check(ok, '废农奴制政策执行成功');
+          check(state.nations[id].stability <= stabBefore - 10, `废农奴制短期稳定度下降（${stabBefore.toFixed(1)} → ${state.nations[id].stability.toFixed(1)}）`);
+          check(nationSlavePop(map, state, id) <= 1e-6, '废农奴制后奴隶归零');
+        }
+        state.rngState = rng.state;
+      } else if ((opts?.coalTax ?? 0) > 0) {
+        // quiet 模式：固定煤炭税
+        n.tax.goods.coal = opts.coalTax as number;
       }
-      state.rngState = rng.state;
     }
     if (mod === DAYS_PER_MONTH - 1) {
       // 月末前快照（结算发生在 tickDay 后 day%30==0）
-      const n = state.nations[id];
-      snap = { treasury: n.treasury, stocks: { ...n.stocks }, day: state.day };
-      // 随机建筑投资（快照后、结算前，成本/退款即时入账）
-      const rng = new Rng(state.rngState);
-      investRandom(state, map, rng, costAcc);
-      state.rngState = rng.state;
+      const n2 = state.nations[id];
+      snap = { treasury: n2.treasury, stocks: { ...n2.stocks }, day: state.day };
+      if (!opts?.quiet) {
+        // 随机建筑投资（快照后、结算前，成本/退款即时入账）
+        const rng = new Rng(state.rngState);
+        investRandom(state, map, rng, costAcc);
+        state.rngState = rng.state;
+      }
+      // quiet 传导链：确定性建造 炼铁厂（第 6 月，道路达标）→ 炼钢厂（第 14 月，已有铁锭库存）。
+      // 与 investRandom 同窗口（快照后、结算前），保证守恒断言口径一致；成本计入 costAcc。
+      if (ironChain) {
+        if (!ironStarted && mi >= 6) {
+          const prov = map.provinces.find((p) => p.owner === nation && !p.isUndiscovered && provinceHasResource(p, 'coal'));
+          if (prov) {
+            const p = startInvestment(state, map, 'ironWorks', prov.id);
+            if (p) {
+              ironStarted = true;
+              costAcc.cost += BUILDING_DEFS.ironWorks.cost;
+            }
+          }
+        }
+        if (!steelStarted && mi >= 14) {
+          const view = { stocks: n.stocks, projects: n.projects, literacy: n.literacy };
+          if (nationHasGood(view, 'iron')) {
+            const prov = map.provinces.find((p) => p.owner === nation && !p.isUndiscovered);
+            if (prov) {
+              const p = startInvestment(state, map, 'steelWorks', prov.id);
+              if (p) {
+                steelStarted = true;
+                costAcc.cost += BUILDING_DEFS.steelWorks.cost;
+              }
+            }
+          }
+        }
+      }
     }
     tickDay(state, map);
     if (mod === DAYS_PER_MONTH - 1 && snap) {
       // 结算守恒校验
       assertMonthlyConservation(state, map, snap, `第 ${state.day} 日`);
-      const n = state.nations[id];
-      accIncomeSpending += n.monthly.income - n.monthly.spending;
-      accReturn += n.monthly.investReturn;
-      minTreasury = Math.min(minTreasury, n.treasury);
-      minStability = Math.min(minStability, n.stability);
-      minFood = Math.min(minFood, n.foodStock);
+      const n2 = state.nations[id];
+      accIncomeSpending += n2.monthly.income - n2.monthly.spending;
+      accReturn += n2.monthly.investReturn;
+      minTreasury = Math.min(minTreasury, n2.treasury);
+      minStability = Math.min(minStability, n2.stability);
+      minFood = Math.min(minFood, n2.foodStock);
+      // 传导测试：第 15 月（炼铁厂首个完整运行月）记录输入成本
+      if (ironChain && mi === 14) {
+        const iw = n2.projects.find((p) => p.kind === 'ironWorks' && p.status === 'active');
+        if (iw) ironCostAt15 = iw.lastInputCost;
+      }
     }
   }
 
-  const n = state.nations[id];
   // 终局断言
   check(Number.isFinite(minTreasury), `国库从未出现 NaN/±∞（最低 ${minTreasury.toFixed(1)} 万₭）`);
   check(minStability >= 0 && minStability <= 100, `稳定度全程 0-100（最低 ${minStability.toFixed(1)}）`);
@@ -293,9 +374,9 @@ function simulate(seed: number, nation: NationId, years: number, opts?: { abolis
     const bankruptLogged = state.chronicle.some((e) => e.title === '国库破产');
     check(bankruptLogged, `国库跌破下限记入大事记（最低 ${minTreasury.toFixed(0)} < ${BANKRUPTCY_THRESHOLD}）`);
   }
-  // 建筑账目一致：全程累计 国库终值 = 初始 + Σ(收支差 + 回报) - Σ成本 + Σ退款
+  // 建筑账目一致：全程累计 国库终值 = 初始（含测试注入） + Σ(收支差 + 回报) - Σ成本 + Σ退款
   const expFinal =
-    NATIONS[nation].treasury + accIncomeSpending + accReturn - costAcc.cost + costAcc.refund;
+    NATIONS[nation].treasury + injectedTreasury + accIncomeSpending + accReturn - costAcc.cost + costAcc.refund;
   check(Math.abs(n.treasury - expFinal) < 1e-4, `建筑账目一致（终局国库 ${n.treasury.toFixed(1)} vs 累计推算 ${expFinal.toFixed(1)}）`);
   const activeCount = n.projects.filter((p) => p.status === 'active').length;
   const buildingCount = n.projects.filter((p) => p.status === 'building').length;
@@ -305,7 +386,7 @@ function simulate(seed: number, nation: NationId, years: number, opts?: { abolis
   check(MANUAL_EVENTS.length === 0, `人工事件列表为空（${MANUAL_EVENTS.length} 条，休眠检查点 no-op）`);
   check(!('eventQueue' in state) && !('stats' in state), '状态中无事件队列/事件统计（事件系统已移除）');
   assertFiniteState(state, '终局');
-  return { state, costAcc };
+  return { state, costAcc, ironCostAt15 };
 }
 
 function snapshotOf(state: GameState): string {
@@ -335,9 +416,12 @@ function snapshotOf(state: GameState): string {
     unrest: n.unrest,
     slavePop: n.slavePop,
     policies: n.policies,
+    tax: n.tax,
     classMix: mix,
     stocks: n.stocks,
     prices: Object.fromEntries(GOODS.map((g) => [g, n.market[g].price])),
+    effPrices: Object.fromEntries(GOODS.map((g) => [g, n.market[g].effPrice])),
+    costPushes: Object.fromEntries(GOODS.map((g) => [g, n.market[g].costPush])),
     provSample,
     countySample,
     infra: n.infra,
@@ -361,7 +445,7 @@ function assertSaveRoundtrip(state: GameState): void {
   }
 }
 
-/** 各国资源禀赋（打印 + 断言：矿藏省才能建矿场——资源修正生效） */
+/** 各国资源禀赋（打印 + 断言：资源数据与省 id 对齐） */
 function nationResourceReport(map: GameMap): void {
   console.log('== 各国资源禀赋（按大陆块 × 省份）==');
   for (const id of Object.keys(NATIONS) as NationId[]) {
@@ -372,7 +456,6 @@ function nationResourceReport(map: GameMap): void {
       .join(' · ');
     console.log(`  ${NATIONS[id].name}: ${provs.length} 行省 → ${lines || '—'}`);
   }
-  // 断言：资源数据与省 id 对齐（每个省都能查到资源集；矿藏省可建矿场）
   for (const p of map.provinces) {
     if (p.isUndiscovered) continue;
     const res = provinceResources(p);
@@ -380,21 +463,90 @@ function nationResourceReport(map: GameMap): void {
   }
 }
 
+/**
+ * 商品税传导测试（v0.4 核心验证）：
+ *  - 单元级：合成市场输入直接测 settleMarket 的成本传导机制（煤炭税 15% → 铁/钢传导 + 商品税收入）
+ *  - 集成级：洛林 quiet 24 个月，确定性建 炼铁厂→炼钢厂，煤炭税 15% vs 对照组：
+ *      煤有效价↑（= 市价×1.15）、炼铁厂输入成本↑（按税后价）、钢材价↑（传导进市场定价）
+ */
+function commodityTaxTransmissionTest(): void {
+  const coalTax = 0.15;
+  // ---- 单元级 ----
+  {
+    const markets: MarketState = { national: newMarket(), province: {}, county: {} };
+    const goodsTax = zeroGoods();
+    goodsTax.coal = coalTax;
+    const input: MarketInput = {
+      counties: [],
+      factorySupply: zeroGoods(),
+      govDemand: zeroGoods(),
+      buildingDemand: zeroGoods(),
+      buildingConsumed: zeroGoods(),
+      stocks: zeroGoods(),
+      routeCoef: 1,
+      tariffRate: 0.1,
+      goodsTax,
+      producers: GOOD_PRODUCERS,
+      crossFreight: {},
+      natFreight: 1,
+    };
+    input.factorySupply.coal = 10;
+    input.govDemand.coal = 10;
+    input.buildingConsumed.coal = 2;
+    const snap = settleMarket(input, markets);
+    const nat = snap.goods;
+    check(Math.abs(nat.coal.effPrice - nat.coal.price * (1 + coalTax)) < 1e-9,
+      `单元：煤有效价 = 市价×(1+15%)（${nat.coal.effPrice.toFixed(3)} vs ${(nat.coal.price * 1.15).toFixed(3)}）`);
+    check(nat.iron.costPush > 0, `单元：铁锭成本传导 > 0（煤炭税 → 炼铁成本 ${nat.iron.costPush.toFixed(4)}）`);
+    check(nat.steel.costPush > nat.iron.costPush, `单元：钢材传导放大（钢 ${nat.steel.costPush.toFixed(4)} > 铁 ${nat.iron.costPush.toFixed(4)}）`);
+    check(nat.tools.costPush > 0, `单元：工具传导 > 0（钢 → 工具 ${nat.tools.costPush.toFixed(4)}）`);
+    check(Math.abs(snap.commodityTax - coalTax * (10 + 0 + 2)) < 1e-9,
+      `单元：商品税收入 = 税率×成交量（${snap.commodityTax.toFixed(3)} = ${coalTax}×12）`);
+    console.log(`  单元：煤有效价 ${nat.coal.effPrice.toFixed(3)} · 铁传导 +${nat.iron.costPush.toFixed(4)} · 钢传导 +${nat.steel.costPush.toFixed(4)} · 工具传导 +${nat.tools.costPush.toFixed(4)} · 商品税收入 ${snap.commodityTax.toFixed(2)}/月`);
+  }
+
+  // ---- 集成级：对照组 vs 煤炭税 15% ----
+  const ctrl = simulate(42, 'lorraine', 2, { quiet: true, coalTax: 0, forceChain: true });
+  const test = simulate(42, 'lorraine', 2, { quiet: true, coalTax, forceChain: true });
+  const cm = ctrl.state.nations.lorraine.market;
+  const tm = test.state.nations.lorraine.market;
+  const tN = test.state.nations.lorraine;
+
+  check(Math.abs(tm.coal.effPrice - tm.coal.price * (1 + coalTax)) < 1e-6,
+    `集成：煤有效价 = 市价×1.15（${tm.coal.effPrice.toFixed(3)} vs ${(tm.coal.price * 1.15).toFixed(3)}）`);
+  check(tm.coal.effPrice > cm.coal.effPrice, `集成：煤有效价高于对照组（${tm.coal.effPrice.toFixed(3)} > ${cm.coal.effPrice.toFixed(3)}）`);
+  check(tm.iron.costPush > cm.iron.costPush, `集成：铁锭传导高于对照组（${tm.iron.costPush.toFixed(4)} > ${cm.iron.costPush.toFixed(4)}）`);
+  check(tm.steel.costPush > cm.steel.costPush, `集成：钢材传导高于对照组（${tm.steel.costPush.toFixed(4)} > ${cm.steel.costPush.toFixed(4)}）`);
+  check(tm.steel.price >= cm.steel.price - 1e-9, `集成：钢材价随成本上升（${tm.steel.price.toFixed(2)} ≥ ${cm.steel.price.toFixed(2)}）`);
+  check(tm.tools.price >= cm.tools.price - 1e-9, `集成：工具价随成本上升（${tm.tools.price.toFixed(2)} ≥ ${cm.tools.price.toFixed(2)}）`);
+  check(tN.monthly.goodsTax > 0, `集成：商品税收入 > 0（${tN.monthly.goodsTax.toFixed(2)} 万₭/月）`);
+  // 炼铁厂输入成本（按税后价）：第 15 月记录
+  if (ctrl.ironCostAt15 !== null && test.ironCostAt15 !== null) {
+    check(test.ironCostAt15 > ctrl.ironCostAt15,
+      `集成：炼铁厂输入成本↑（煤税后价：${test.ironCostAt15.toFixed(3)} > 对照 ${ctrl.ironCostAt15.toFixed(3)}）`);
+  } else {
+    check(false, '集成：第 15 月炼铁厂在产记录缺失');
+  }
+  console.log(`  集成：煤 市价 ${tm.coal.price.toFixed(2)} → 有效价 ${tm.coal.effPrice.toFixed(2)}（对照 ${cm.coal.effPrice.toFixed(2)}）`);
+  console.log(`       铁锭 市价 ${tm.iron.price.toFixed(2)}（对照 ${cm.iron.price.toFixed(2)}）· 传导 +${tm.iron.costPush.toFixed(4)}（对照 +${cm.iron.costPush.toFixed(4)}）`);
+  console.log(`       钢材 市价 ${tm.steel.price.toFixed(2)}（对照 ${cm.steel.price.toFixed(2)}）· 传导 +${tm.steel.costPush.toFixed(4)}（对照 +${cm.steel.costPush.toFixed(4)}）`);
+  console.log(`       工具 市价 ${tm.tools.price.toFixed(2)}（对照 ${cm.tools.price.toFixed(2)}）· 商品税收入 ${tN.monthly.goodsTax.toFixed(2)} 万₭/月`);
+}
+
 function main(): void {
   const map = loadMap();
-  console.log('== 地图导入统计（v0.1 三级制）==');
+  console.log('== 地图导入统计（v0.4 八国重分）==');
   console.log(JSON.stringify(mapStats(map), null, 2));
   nationResourceReport(map);
   console.log('== 国家初始辖区 ==');
-  for (const id of Object.keys(NATIONS) as NationId[]) {
-    const def = NATIONS[id];
-    const provs = map.provinces.filter((p) => p.owner === id && !p.isUndiscovered);
+  for (const def of NATION_LIST) {
+    const provs = map.provinces.filter((p) => p.owner === def.id && !p.isUndiscovered);
     const cells = provs.reduce((s, p) => s + p.cellIds.length, 0);
     const counties = provs.reduce((s, p) => s + p.counties.length, 0);
-    console.log(`  ${def.name}: ${provs.length} 行省 / ${counties} 县 / ${cells} 格`);
+    console.log(`  ${def.name}: ${provs.length} 行省 / ${counties} 县 / ${cells} 格 · 人口 ${def.popWan} 万 · 识字 ${(def.literacy * 100).toFixed(0)}%`);
   }
   console.log(`  （未探明新大陆: ${map.provinces.filter((p) => p.isUndiscovered).length} 行省）`);
-  console.log(`  （v0.3：产业链 13 建筑 · 17 商品 · 7 级阶级 · 3 政策；事件系统仍休眠）`);
+  console.log(`  （v0.4：8 国可玩 · 立体税制六税种 · 17 商品 · 13 建筑 · 7 级阶级；事件系统仍休眠）`);
 
   console.log('\n== 50 年沙盒（洛林，seed 42）==');
   const runA = simulate(42, 'lorraine', 50);
@@ -404,7 +556,8 @@ function main(): void {
   console.log(`  终局：${stateA.day} 日（新历 ${1023 + Math.floor(stateA.day / DAYS_PER_YEAR)} 年）`);
   console.log(`  国库 ${nA.treasury.toFixed(0)} 万₭ · 粮食 ${nA.foodStock.toFixed(0)} 万吨 · 稳定度 ${nA.stability.toFixed(1)} · 人口 ${nA.popWan.toFixed(0)} 万`);
   console.log(`  识字率 ${(nA.literacy * 100).toFixed(1)}% · 健康 ${(nA.health * 100).toFixed(1)}% · 基建 路${nA.infra.roads.toFixed(0)}/港${nA.infra.ports.toFixed(0)}`);
-  console.log(`  月收入 ${nA.monthly.income.toFixed(0)} · 支出 ${nA.monthly.spending.toFixed(0)} · 贸易收支 ${nA.monthly.tradeBalance.toFixed(1)} · 人口增长率 ${(nA.monthly.growthRate * 100).toFixed(2)}%/年`);
+  console.log(`  月收入 ${nA.monthly.income.toFixed(0)}（人头 ${nA.monthly.pollTax.toFixed(1)} · 土地 ${nA.monthly.landTax.toFixed(1)} · 消费 ${nA.monthly.consumptionTax.toFixed(1)} · 关税 ${nA.monthly.tariff.toFixed(1)} · 特别 ${nA.monthly.otherTax.toFixed(1)} · 商品税 ${nA.monthly.goodsTax.toFixed(1)}）`);
+  console.log(`  支出 ${nA.monthly.spending.toFixed(0)} · 贸易收支 ${nA.monthly.tradeBalance.toFixed(1)} · 人口增长率 ${(nA.monthly.growthRate * 100).toFixed(2)}%/年`);
   console.log(`  动乱 ${nA.unrest.toFixed(2)} · 政策 废奴${nA.policies.abolishedSerfdom ? '✓' : '—'} 累进${nA.policies.progressiveTax ? '✓' : '—'} 普选${nA.policies.universalSuffrage ? '✓' : '—'}`);
   console.log(`  阶级：${CLASSES.map((c) => `${CLASS_LABEL[c]} ${mixA[c].toFixed(0)}万`).join(' · ')}`);
   const activeA = nA.projects.filter((p) => p.status === 'active').length;
@@ -412,10 +565,11 @@ function main(): void {
   console.log(`  建筑：累计投入 ${runA.costAcc.cost.toFixed(0)} / 退款 ${runA.costAcc.refund.toFixed(0)} · 在产 ${activeA} / 在建 ${buildingA}`);
   console.log(`  大事记 ${stateA.chronicle.length} 条`);
 
-  console.log('\n== 市场终局样例（洛林 · 17 商品）==');
+  console.log('\n== 市场终局样例（洛林 · 17 商品：市价 → 有效价）==');
   for (const g of GOODS) {
     const m = nA.market[g];
-    console.log(`  ${GOOD_LABEL[g]}: 国价 ${m.price.toFixed(2)} (供需 ${m.demand.toFixed(1)}/${m.supply.toFixed(1)}) · 产 ${m.supply.toFixed(1)} 消 ${m.consumed.toFixed(1)} 出 ${m.exported.toFixed(1)} 进 ${m.imported.toFixed(1)} 库 ${nA.stocks[g].toFixed(1)}`);
+    const arrow = m.effPrice > m.price ? ` → ${m.effPrice.toFixed(2)}` : '';
+    console.log(`  ${GOOD_LABEL[g]}: 国价 ${m.price.toFixed(2)}${arrow} (供需 ${m.demand.toFixed(1)}/${m.supply.toFixed(1)}) · 产 ${m.supply.toFixed(1)} 消 ${m.consumed.toFixed(1)} 出 ${m.exported.toFixed(1)} 进 ${m.imported.toFixed(1)} 库 ${nA.stocks[g].toFixed(1)}`);
   }
 
   console.log('\n== 确定性：同种子两次结果一致 ==');
@@ -423,7 +577,7 @@ function main(): void {
   const sa = snapshotOf(stateA);
   const sb = snapshotOf(runB.state);
   const deterministic = sa === sb;
-  check(deterministic, '同种子（42）两次 50 年运行快照完全一致（含建筑/阶级/政策/三级市场/大事记）');
+  check(deterministic, '同种子（42）两次 50 年运行快照完全一致（含税率/建筑/阶级/政策/三级市场/大事记）');
   if (!deterministic) {
     console.error('  快照A:', sa);
     console.error('  快照B:', sb);
@@ -439,12 +593,12 @@ function main(): void {
   check(stateA.day === 50 * DAYS_PER_YEAR, `50 年 = ${50 * DAYS_PER_YEAR} 日（实际 ${stateA.day}）`);
   check(stateA.day % DAYS_PER_MONTH === 0, '结束于月末（结算完成）');
 
-  console.log('\n== 其他两国冒烟测试（各 10 年，seed 7）==');
-  for (const id of ['ianys', 'empire'] as NationId[]) {
-    const s = simulate(7, id, 10);
-    const n = s.state.nations[id];
+  console.log('\n== 8 国冒烟测试（各 10 年，seed 7 · 随机税制策略）==');
+  for (const def of NATION_LIST) {
+    const s = simulate(7, def.id, 10);
+    const n = s.state.nations[def.id];
     const active = n.projects.filter((p) => p.status === 'active').length;
-    console.log(`  ${NATIONS[id].name}: 完成 10 年 ✓ 国库 ${n.treasury.toFixed(0)} · 稳定度 ${n.stability.toFixed(1)} · 人口 ${n.popWan.toFixed(0)} 万 · 建筑 ${active} 在产`);
+    console.log(`  ${def.name}: 完成 10 年 ✓ 国库 ${n.treasury.toFixed(0)} · 稳定度 ${n.stability.toFixed(1)} · 人口 ${n.popWan.toFixed(0)} 万 · 识字 ${(n.literacy * 100).toFixed(0)}% · 建筑 ${active} 在产`);
   }
 
   console.log('\n== 帝国 10 年冒烟：废农奴制（seed 7，第 3 月执行）==');
@@ -456,6 +610,9 @@ function main(): void {
   check(mixE[6] + mixE[5] > 0, `废奴后佃农/自耕农在册（佃农 ${mixE[6].toFixed(0)} 万 / 自耕农 ${mixE[5].toFixed(0)} 万）`);
   check(emp.state.chronicle.some((e) => e.title === '废农奴制'), '大事记记录废农奴制');
   console.log(`  帝国终局：奴隶 ${nationSlavePop(map, emp.state, 'empire').toFixed(1)} 万 · 佃农 ${mixE[6].toFixed(0)} 万 · 自耕农 ${mixE[5].toFixed(0)} 万 · 稳定度 ${nE.stability.toFixed(1)}`);
+
+  console.log('\n== 商品税传导实证（煤炭税 15% → 煤有效价↑ / 炼铁成本↑ / 钢材价↑）==');
+  commodityTaxTransmissionTest();
 
   console.log(`\n== 断言汇总 ==`);
   console.log(`  通过 ${checks - failures} / ${checks}${failures === 0 ? ' — 全部通过 ✅' : ` — ${failures} 项失败 ❌`}`);

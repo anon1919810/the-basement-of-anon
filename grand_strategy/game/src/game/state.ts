@@ -6,7 +6,7 @@
  */
 import { Rng } from './rng';
 import type { GameMap } from './map';
-import type { GoodId, NationId, ProvinceOwner, Speed, TaxLevel } from './types';
+import type { GoodId, NationId, ProvinceOwner, Speed } from './types';
 import { DAYS_PER_MONTH, monthIndex } from './clock';
 import { NATIONS } from './nations';
 import {
@@ -22,11 +22,14 @@ import { newMarket, zeroGoods } from './market';
 import type { CountyMarket, MarketGood, ProvinceMarket } from './market';
 import type { InvestmentProject } from './buildings';
 import { MANUAL_EVENTS } from './manualEvents';
+// 注意：tax 必须在 economy/pops 之后导入（tax → market，避免 market 半初始化时 pops 读取 GOODS_LIST）
+import { defaultNationTax } from './tax';
+import type { NationTax } from './tax';
 
-export const SAVE_VERSION = 4;
-export const SAVE_KEY = 'kalt-save-v4';
-/** 旧存档键（v0.3 起存档不兼容，提示用） */
-export const OLD_SAVE_KEYS = ['kalt-save-v3'];
+export const SAVE_VERSION = 5;
+export const SAVE_KEY = 'kalt-save-v5';
+/** 旧存档键（v0.4 起存档不兼容，提示用） */
+export const OLD_SAVE_KEYS = ['kalt-save-v4', 'kalt-save-v3'];
 
 /** 国家政策（v0.3）：作用于当前国，写入状态与存档 */
 export interface NationPolicies {
@@ -49,7 +52,8 @@ export interface NationState {
   treasury: number; // 国库（万₭）
   foodStock: number; // 粮食储备（万吨，== stocks.food 镜像）
   stability: number; // 稳定度 0-100
-  taxLevel: TaxLevel;
+  /** v0.4 立体税制：五税种 + 单一商品税（连续滑块 0%-30%，写入存档） */
+  tax: NationTax;
   spending: { military: number; admin: number; infra: number; court: number; health: number }; // 万₭/月
   cells: number; // 所辖陆地格数（静态）
   // ---- 三级市场（v0.2/v0.3：17 商品） ----
@@ -152,7 +156,7 @@ export function newGameState(playerNation: NationId, seed: number, map: GameMap)
       treasury: def.treasury,
       foodStock: stocks.food,
       stability: def.stability,
-      taxLevel: 'medium',
+      tax: defaultNationTax(def.taxDefaults),
       spending: { ...def.defaultSpending, court: 15, health: 10 },
       cells: nationCellCount(map, id),
       stocks,
@@ -326,15 +330,23 @@ export function allFinite(state: GameState): boolean {
     const nums: number[] = [
       n.popWan, n.literacy, n.health, n.treasury, n.foodStock, n.stability,
       n.emigration, n.infra.roads, n.infra.ports, n.slavePop, n.unrest,
-      n.monthly.income, n.monthly.spending, n.monthly.tariff,
+      n.monthly.income, n.monthly.spending,
+      n.monthly.pollTax, n.monthly.landTax, n.monthly.consumptionTax, n.monthly.tariff, n.monthly.otherTax, n.monthly.goodsTax,
       n.monthly.investIncome, n.monthly.investReturn, n.monthly.investCost, n.monthly.investRefund,
       n.investCostAcc, n.investRefundAcc,
     ];
     for (const v of nums) if (!Number.isFinite(v)) return false;
+    // v0.4 税制字段
+    for (const k of Object.keys(n.tax.rates) as (keyof NationTax['rates'])[]) {
+      if (!Number.isFinite(n.tax.rates[k]) || n.tax.rates[k] < 0 || n.tax.rates[k] > 0.3) return false;
+    }
+    for (const g of Object.keys(n.tax.goods) as GoodId[]) {
+      if (!Number.isFinite(n.tax.goods[g]) || n.tax.goods[g] < 0 || n.tax.goods[g] > 0.3) return false;
+    }
     for (const g of Object.keys(n.stocks) as GoodId[]) {
       if (!Number.isFinite(n.stocks[g])) return false;
       const m = n.market[g];
-      for (const v of [m.price, m.prevPrice, m.supply, m.demand, m.consumed, m.exported, m.imported, m.unmet, m.trend]) {
+      for (const v of [m.price, m.prevPrice, m.effPrice, m.costPush, m.supply, m.demand, m.consumed, m.exported, m.imported, m.unmet, m.trend]) {
         if (!Number.isFinite(v)) return false;
       }
     }
@@ -344,7 +356,7 @@ export function allFinite(state: GameState): boolean {
       if (!pm) return false;
       for (const g of Object.keys(pm) as GoodId[]) {
         const m = pm[g];
-        for (const v of [m.price, m.prevPrice, m.supply, m.demand, m.consumed, m.unmet, m.netFlow, m.trend]) {
+        for (const v of [m.price, m.prevPrice, m.effPrice, m.costPush, m.supply, m.demand, m.consumed, m.unmet, m.netFlow, m.trend]) {
           if (!Number.isFinite(v)) return false;
         }
       }
@@ -402,7 +414,10 @@ export function loadGame(): GameState | null {
       typeof parsed.day === 'number' &&
       parsed.nations &&
       parsed.nations.lorraine &&
-      parsed.nations.lorraine.policies
+      parsed.nations.lorraine.policies &&
+      parsed.nations.lorraine.tax &&
+      parsed.nations.lorraine.tax.rates &&
+      parsed.nations.lorraine.tax.goods
     ) {
       return parsed;
     }

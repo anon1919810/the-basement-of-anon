@@ -7,7 +7,7 @@
  *  - 产出：农民产粮（沃土修正）+ 省资源附加（棉/木/渔/盐/毛皮）；矿工按矿藏省出煤/铁；工匠手工衣物；工程师微量工具
  */
 import type { GameMap, Province } from './map';
-import type { GoodId, JobId, NationId, NeedId, RaceId, TaxLevel } from './types';
+import type { GoodId, JobId, NationId, NeedId, RaceId } from './types';
 import type { ClassId } from './types';
 import { CLASSES, CLASS_DEFS, INITIAL_CLASS_MIX, classDef } from './classes';
 import { GOODS_LIST, zeroGoods } from './market';
@@ -163,7 +163,7 @@ export const LITERACY_REQ: Record<JobId, number> = {
   artisan: 0.25,
   engineer: 0.5,
 };
-/** 各国主体种族构成（初始化 POP 用） */
+/** 各国主体种族构成（v0.4 八国，初始化 POP 用；世界观种族分布） */
 export const NATION_RACE_MIX: Record<NationId, Record<RaceId, number>> = {
   lorraine: {
     feline: 0.93, liberi: 0.04, aegir: 0.02, sarkaz: 0.01,
@@ -176,6 +176,26 @@ export const NATION_RACE_MIX: Record<NationId, Record<RaceId, number>> = {
   empire: {
     ursus: 0.8, draco: 0.15, sarkaz: 0.03, zalak: 0.01, feline: 0.01,
     liberi: 0, aegir: 0, norman: 0,
+  },
+  orange: {
+    aegir: 0.8, liberi: 0.08, feline: 0.06, sarkaz: 0.04, zalak: 0.02,
+    ursus: 0, draco: 0, norman: 0,
+  },
+  zalakN: {
+    zalak: 0.95, sarkaz: 0.02, feline: 0.02, ursus: 0.01,
+    draco: 0, liberi: 0, aegir: 0, norman: 0,
+  },
+  zalakS: {
+    zalak: 0.95, sarkaz: 0.03, liberi: 0.01, feline: 0.01,
+    ursus: 0, draco: 0, aegir: 0, norman: 0,
+  },
+  angland: {
+    aegir: 0.45, sarkaz: 0.2, feline: 0.15, liberi: 0.1, zalak: 0.05, norman: 0.03,
+    ursus: 0.01, draco: 0.01,
+  },
+  normandy: {
+    norman: 0.85, sarkaz: 0.08, aegir: 0.04, liberi: 0.03,
+    ursus: 0, draco: 0, feline: 0, zalak: 0,
   },
 };
 /** 初始职业构成（工业化前夜） */
@@ -280,13 +300,7 @@ export function initProvinceEcon(
   };
 }
 
-/** 人口增长政策系数（苛税 → 增长低 → 恶性循环） */
-export const POLICY_GROWTH: Record<TaxLevel, number> = {
-  light: 1.2,
-  medium: 1.0,
-  heavy: 0.85,
-  oppressive: 0.7,
-};
+/** 人口增长政策系数已迁移至 tax.ts（policyGrowthCoef，由综合税负推导） */
 
 /** 统计省职业构成（UI 用） */
 export function provinceJobMix(p: ProvinceEcon): Record<JobId, number> {

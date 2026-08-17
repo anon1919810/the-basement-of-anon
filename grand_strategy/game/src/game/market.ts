@@ -16,7 +16,7 @@
  *      · buildingConsumed 从「未满足需求」中扣除（避免重复进口：库存已扣过的不再进口）
  *    守恒（每商品）：生产（县产 + 工厂供给）+ 进口 = 消费（县 + 政府）+ 出口 + Δ国家库存 + 建筑消耗
  */
-import type { GoodId, TaxLevel } from './types';
+import type { GoodId } from './types';
 import { clamp } from './pops';
 
 export type GoodCategory = 'resource' | 'semi' | 'finished';
@@ -105,13 +105,9 @@ export const BASE_TRADE_CAP: Record<GoodId, number> = {
   luxury: 0.6,
 };
 
-/** 关税税率档（来自税率档） */
-export const TARIFF_RATE: Record<TaxLevel, number> = {
-  light: 0.1,
-  medium: 0.15,
-  heavy: 0.22,
-  oppressive: 0.3,
-};
+/** 关税税率已迁移至 tax.ts（连续滑块，economy 传入 tariffRate） */
+/** 成本传导过手率：输入品税价差 → 成品价格上浮的比例（0.85 = 85% 传导） */
+export const COST_PUSH_PASS = 0.85;
 
 /** 价格信号跨层传导权重 */
 export const BLEND_PROV_FROM_NAT = 0.15; // 区域价格 = 本地供需比 × (1-0.15) + 国家价格信号 0.15
@@ -130,9 +126,13 @@ export function zeroGoods(): Record<GoodId, number> {
 /** 国家市场商品状态 */
 export interface MarketGood {
   basePrice: number;
-  /** 当前价（万₭/单位） */
+  /** 当前价（万₭/单位）——含成本传导（上游输入品税价差上浮），买方实际支付的基础 */
   price: number;
   prevPrice: number;
+  /** v0.4 有效价格（买方支付）= price × (1 + 商品税率)；建筑输入成本按此计价 */
+  effPrice: number;
+  /** v0.4 成本传导上浮量（万₭/单位，来自上游输入品税价差） */
+  costPush: number;
   /** 上月总供给（县产 + 工厂） */
   supply: number;
   /** 上月总需求（县消费 + 政府 + 建筑输入） */
@@ -184,6 +184,8 @@ export interface MarketSnapshot {
   provDemand: Record<number, Record<GoodId, number>>;
   /** 本月关税收入（万₭） */
   tariff: number;
+  /** v0.4 单一商品税收入（万₭/月）= Σ 税率 × 成交量（消费+进口+建筑消耗） */
+  commodityTax: number;
   exportValue: number;
   importValue: number;
   /** 工厂对国家的额外供给（单位/月，含建筑产出） */
@@ -214,7 +216,15 @@ export interface MarketInput {
   stocks: Record<GoodId, number>;
   /** 商路系数（基建/地理 → 贸易容量放大） */
   routeCoef: number;
+  /** 关税税率（v0.4 连续滑块，来自 tax.rates.tariff） */
   tariffRate: number;
+  /** v0.4 单一商品税（商品 → 税率 0-0.3；买方支付，收入 = 税率 × 成交量） */
+  goodsTax: Record<GoodId, number>;
+  /**
+   * v0.4 建筑成本结构（economy 从 BUILDING_DEFS 派生，避免 market↔buildings 循环依赖）：
+   * 商品 → 生产该商品的建筑 { 每单位输出所需输入量, 产能 }。用于成本传导（输入品税价差 → 成品价↑）。
+   */
+  producers: Partial<Record<GoodId, { inputs: Partial<Record<GoodId, number>>; capacity: number }>>;
   /** 省 → 跨省运费系数 */
   crossFreight: Record<number, number>;
   /** 全国平均跨省运费 */
@@ -234,6 +244,8 @@ export function newMarket(): Record<GoodId, MarketGood> {
       basePrice: BASE_PRICE[g],
       price: BASE_PRICE[g],
       prevPrice: BASE_PRICE[g],
+      effPrice: BASE_PRICE[g],
+      costPush: 0,
       supply: 0,
       demand: 0,
       consumed: 0,
@@ -271,6 +283,8 @@ export function newProvinceMarkets(): Record<GoodId, ProvinceMarket> {
       basePrice: BASE_PRICE[g],
       price: BASE_PRICE[g],
       prevPrice: BASE_PRICE[g],
+      effPrice: BASE_PRICE[g],
+      costPush: 0,
       supply: 0,
       demand: 0,
       consumed: 0,
@@ -311,12 +325,16 @@ export function settleMarket(input: MarketInput, markets: MarketState): MarketSn
   }
 
   let tariff = 0;
+  let commodityTax = 0;
   let exportValue = 0;
   let importValue = 0;
   const provConsumed: Record<number, Record<GoodId, number>> = {};
   const provDemand: Record<number, Record<GoodId, number>> = {};
   const factorySupply: Record<GoodId, number> = { ...input.factorySupply };
   const buildingConsumed: Record<GoodId, number> = { ...input.buildingConsumed };
+  // v0.4 成本传导：供需价（未含传导）与买方有效价（含商品税与上游传导），按 GOODS_LIST 序计算（输入必在上游）
+  const sdPriceOf = {} as Record<GoodId, number>;
+  const effPriceOf = {} as Record<GoodId, number>;
 
   for (const g of GOODS_LIST) {
     const base = BASE_PRICE[g];
@@ -332,10 +350,28 @@ export function settleMarket(input: MarketInput, markets: MarketState): MarketSn
     natSupplyGross += input.factorySupply[g];
     natDemandGross += input.govDemand[g] + input.buildingDemand[g];
     const natRatio = natDemandGross / Math.max(natSupplyGross, 1e-9);
+    const sdPrice = base * clamp(natRatio * (1 + FREIGHT_PRICE_CROSS * input.natFreight), PRICE_CLAMP_MIN, PRICE_CLAMP_MAX);
+    sdPriceOf[g] = sdPrice;
+
+    // ---- v0.4 成本传导：上游输入品税价差 → 本商品价格上浮（如 煤炭税 → 铁锭价↑ → 钢材价↑） ----
+    const prod = input.producers[g];
+    let costPush = 0;
+    if (prod) {
+      const outQty = Math.max(1e-9, prod.capacity);
+      for (const i of Object.keys(prod.inputs) as GoodId[]) {
+        const qty = prod.inputs[i] ?? 0;
+        if (qty > 0) costPush += (qty / outQty) * (effPriceOf[i] - sdPriceOf[i]);
+      }
+      costPush *= COST_PUSH_PASS;
+    }
     m.supply = natSupplyGross;
     m.demand = natDemandGross;
     m.prevPrice = m.price;
-    m.price = base * clamp(natRatio * (1 + FREIGHT_PRICE_CROSS * input.natFreight), PRICE_CLAMP_MIN, PRICE_CLAMP_MAX);
+    m.price = clamp(sdPrice + costPush, base * PRICE_CLAMP_MIN, base * PRICE_CLAMP_MAX);
+    m.costPush = costPush;
+    // 买方有效价 = 市价（含传导）× (1 + 商品税率)
+    m.effPrice = m.price * (1 + (input.goodsTax[g] ?? 0));
+    effPriceOf[g] = m.effPrice;
     m.trend = trendOf(m.price, m.prevPrice);
 
     // ---- 2. 区域价格（受国家价格信号传导）----
@@ -497,6 +533,10 @@ export function settleMarket(input: MarketInput, markets: MarketState): MarketSn
     }
     // 国家总消费 = 县消费（自产+省内调剂+国家补足）+ 政府消费（守恒公式用；建筑消耗单独计）
     m.consumed = consumed + totalCountyConsumed;
+
+    // ---- v0.4 单一商品税收入：税率 × 成交量（国内消费 + 进口 + 建筑消耗；出口为外国买方，不征） ----
+    const taxVol = m.consumed + m.imported + buildingConsumed[g];
+    commodityTax += (input.goodsTax[g] ?? 0) * taxVol;
   }
 
   return {
@@ -506,6 +546,7 @@ export function settleMarket(input: MarketInput, markets: MarketState): MarketSn
     provConsumed,
     provDemand,
     tariff,
+    commodityTax,
     exportValue,
     importValue,
     factorySupply,

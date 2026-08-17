@@ -3,11 +3,15 @@ import type { GameMap } from './game/map';
 import { loadMap } from './game/map';
 import type { GameState } from './game/state';
 import { loadGame, newGameState, tickDay, saveGame, clearSave, setPolicy, abolishSerfdom, hasOldSave } from './game/state';
-import type { NationId, Speed, TaxLevel } from './game/types';
+import type { NationId, Speed } from './game/types';
+import type { TaxKind } from './game/tax';
+import type { GoodId } from './game/types';
 import { monthIndex, daysPerSecond } from './game/clock';
 import { retrainPop } from './game/labor';
 import { cancelInvestment, startInvestment } from './game/buildings';
 import type { BuildingKind } from './game/buildings';
+import { NATIONS, NATION_LIST } from './game/nations';
+import { clampTax } from './game/tax';
 import WorldMap from './components/WorldMap';
 import TopBar from './components/TopBar';
 import NationPanel from './components/NationPanel';
@@ -26,6 +30,7 @@ export default function App() {
   const [selectedProvince, setSelectedProvince] = useState<number | null>(null);
   const [savedFlash, setSavedFlash] = useState(false);
   const [oldSaveNotice, setOldSaveNotice] = useState<boolean>(() => hasOldSave());
+  const [showNationPicker, setShowNationPicker] = useState(false);
   const flashTimer = useRef<number | null>(null);
 
   // 实时时钟：rAF + dt 驱动（暂停 / 1x / 2x / 3x）
@@ -75,9 +80,16 @@ export default function App() {
       g.playerNation = id;
       setGame({ ...g });
     },
-    setTax(level: TaxLevel) {
+    /** v0.4 五税种连续滑块（0%-30%） */
+    setTaxRate(kind: TaxKind, value: number) {
       const g = gameRef.current;
-      g.nations[g.playerNation].taxLevel = level;
+      g.nations[g.playerNation].tax.rates[kind] = clampTax(value);
+      setGame({ ...g });
+    },
+    /** v0.4 单一商品税滑块（全部商品可选，0%-30%） */
+    setGoodsTax(good: GoodId, value: number) {
+      const g = gameRef.current;
+      g.nations[g.playerNation].tax.goods[good] = clampTax(value);
       setGame({ ...g });
     },
     setSpending(kind: 'military' | 'admin' | 'infra' | 'court' | 'health', value: number) {
@@ -118,11 +130,16 @@ export default function App() {
       if (saveGame(gameRef.current)) flash();
     },
     newGame() {
+      // v0.4：新游戏保留国家选择（8 国全开放）
       if (!window.confirm('开始新游戏？当前进度将被覆盖。')) return;
-      const g = newGameState('lorraine', (Date.now() >>> 0) % 0x7fffffff, map);
+      setShowNationPicker(true);
+    },
+    startNewGame(nation: NationId) {
+      const g = newGameState(nation, (Date.now() >>> 0) % 0x7fffffff, map);
       clearSave();
       setOldSaveNotice(false);
       setSelectedProvince(null);
+      setShowNationPicker(false);
       setGame(g);
     },
   };
@@ -147,7 +164,8 @@ export default function App() {
           game={game}
           map={map}
           selectedProvince={selectedProvince}
-          onTax={actions.setTax}
+          onTaxRate={actions.setTaxRate}
+          onGoodsTax={actions.setGoodsTax}
           onSpending={actions.setSpending}
           onRetrain={actions.retrain}
           onInvest={actions.invest}
@@ -159,7 +177,25 @@ export default function App() {
       {savedFlash && <div className="toast">已保存到本机</div>}
       {oldSaveNotice && (
         <div className="toast old-save-toast" onClick={() => setOldSaveNotice(false)}>
-          ⚠ 检测到 v0.2 旧存档（不兼容 v0.3），已开启新局；点击关闭
+          ⚠ 检测到 v0.3 旧存档（不兼容 v0.4：税制与八国重分），已开启新局；点击关闭
+        </div>
+      )}
+      {showNationPicker && (
+        <div className="modal-overlay" onClick={() => setShowNationPicker(false)}>
+          <div className="nation-picker" onClick={(e) => e.stopPropagation()}>
+            <h3>选择你的国家（8 国全可玩）</h3>
+            <p className="dim">新历 1023 年 · 工业革命前夜。各国人口/识字率/政体/资源禀赋各异（详见世界观点）</p>
+            <div className="nation-picker-grid">
+              {NATION_LIST.map((d) => (
+                <button key={d.id} className="nation-pick-card" onClick={() => actions.startNewGame(d.id)}>
+                  <span className="nation-pick-dot" style={{ background: d.color }} />
+                  <b>{d.name}</b>
+                  <em className="dim">{d.gov} · {d.popWan} 万 · 识字 {(d.literacy * 100).toFixed(0)}%</em>
+                  <span className="dim">{NATIONS[d.id].economy}</span>
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       )}
     </div>
