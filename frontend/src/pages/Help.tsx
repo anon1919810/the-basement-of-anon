@@ -57,6 +57,9 @@ export default function Help() {
         </h2>
         <ul className="space-y-2 text-sm leading-6">
           <li>
+            <b>v5.1.0 撷菁新篇</b>：支持一次上传多个文献、提取历史记录、GB/T 与 RIS 引用导出、个人资料页；统计看板新增「本次提取 / 全部数据」双模式、时间趋势与条目热度榜，地图可点击省份下钻到市级
+          </li>
+          <li>
             <b>v5.0 撷菁新篇</b>：全新界面（React）上线，服务搬到自建服务器，更快更稳；
             支持注册登录、AI 工作台、统计看板、留言板
           </li>

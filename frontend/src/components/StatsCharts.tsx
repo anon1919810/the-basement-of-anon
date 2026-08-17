@@ -133,9 +133,17 @@ export default function StatsCharts({ stats }: { stats: any }) {
           window.removeEventListener('resize', onResize)
           chart.dispose()
         }
-        // 地图下钻：点击省份 → 市级分布
+        // 地图下钻：点击省份 → 市级分布（对事件里的省份名做健壮匹配，避免截断/空格）
         chart.on('click', (p: any) => {
-          if (p && p.name && p.name !== '不详') setDrill(p.name)
+          const raw = String(p?.name ?? '').trim()
+          if (!raw || raw === '不详') return
+          const keys = Object.keys(stats.province_distribution || {})
+          const full =
+            keys.find((k) => k === raw) ||
+            keys.find((k) => k.endsWith(raw)) ||
+            keys.find((k) => raw.endsWith(k)) ||
+            raw
+          setDrill(full)
         })
       })
       .catch(() => {
@@ -199,7 +207,7 @@ export default function StatsCharts({ stats }: { stats: any }) {
         {drill && (
           <div style={{ marginTop: 12 }}>
             <div className="card-title">
-              {drill} · 市级分布
+              「{drill}」市级分布
               <button className="btn btn-sm" style={{ marginLeft: 8 }} onClick={() => setDrill(null)}>
                 返回省级
               </button>

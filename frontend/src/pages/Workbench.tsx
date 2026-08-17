@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import {
   BarChart3,
   Brain,
@@ -27,6 +27,58 @@ interface Entry {
   流域?: string
   基础信息?: string
   历史文献?: string
+}
+
+const _PROV_RE = /^(.*?省|重庆市|上海市)/
+const _CITY_PROV = ['重庆市', '上海市', '北京市', '天津市']
+
+/** 从当前条目构建"本次提取"统计对象（与后端 /api/stats 同构） */
+function buildLocalStats(entries: Entry[]): any {
+  const cat: Record<string, number> = {}
+  const basin: Record<string, number> = {}
+  const prov: Record<string, number> = {}
+  const city: Record<string, Record<string, number>> = {}
+  const hot: Record<string, number> = {}
+  for (const e of entries) {
+    const c = e.类别 || '不详'
+    cat[c] = (cat[c] || 0) + 1
+    const b = e.流域 || '不详'
+    basin[b] = (basin[b] || 0) + 1
+    const n = (e.名称 || '').trim()
+    if (n) hot[n] = (hot[n] || 0) + 1
+    const sp = String(e.空间 || '')
+    const m = sp.match(_PROV_RE)
+    const p = m ? m[1] : '不详'
+    if (p !== '不详') {
+      prov[p] = (prov[p] || 0) + 1
+      let cty: string | null = null
+      if (_CITY_PROV.includes(p)) {
+        const cm = sp.match(/([\u4e00-\u9fff]{2,4}区)/)
+        cty = cm ? cm[1] : p
+      } else {
+        const cm = sp.match(/([\u4e00-\u9fff]+?市)/)
+        cty = cm ? cm[1] : p
+      }
+      if (cty) {
+        city[p] = city[p] || {}
+        city[p][cty] = (city[p][cty] || 0) + 1
+      }
+    }
+  }
+  const hotSorted = Object.entries(hot).sort((a, b) => b[1] - a[1]).slice(0, 10)
+  return {
+    total_records: 1,
+    total_entries: entries.length,
+    category_distribution: cat,
+    basin_distribution: basin,
+    province_distribution: prov,
+    city_distribution: city,
+    hot_entries: Object.fromEntries(hotSorted),
+    trend: {},
+    high_rated: [],
+    user_stats: [],
+    recent: [],
+  }
 }
 
 export default function Workbench() {
@@ -60,6 +112,9 @@ export default function Workbench() {
   const [messages, setMessages] = useState<any[]>([])
   const [msgText, setMsgText] = useState('')
   const [stats, setStats] = useState<any>(null)
+  const [statsMode, setStatsMode] = useState<'all' | 'current'>('all')
+
+  const localStats = useMemo(() => (entries ? buildLocalStats(entries) : null), [entries])
 
   // ---- 提取历史 ----
   const [history, setHistory] = useState<any[]>([])
@@ -423,8 +478,8 @@ export default function Workbench() {
                 提取结果（{entries.length} 条）
               </span>
             </h2>
-            <button className="btn btn-icon btn-sm" onClick={exportExcel}>
-              <FileSpreadsheet size={13} />
+            <button className="btn btn-accent btn-icon" onClick={exportExcel}>
+              <FileSpreadsheet size={14} />
               导出 Excel
             </button>
             <button className="btn btn-icon btn-sm" onClick={exportGbt}>
@@ -559,11 +614,42 @@ export default function Workbench() {
             统计看板
           </span>
         </h2>
-        <button className="btn btn-icon btn-sm" onClick={loadStats}>
-          <RefreshCw size={13} />
-          加载统计
-        </button>
-        {stats && <StatsCharts stats={stats} />}
+        <div className="flex flex-wrap items-center gap-2" style={{ marginBottom: 10 }}>
+          <button
+            className={`btn btn-sm ${statsMode === 'current' ? 'btn-accent' : ''}`}
+            onClick={() => setStatsMode('current')}
+          >
+            本次提取
+          </button>
+          <button
+            className={`btn btn-sm ${statsMode === 'all' ? 'btn-accent' : ''}`}
+            onClick={() => setStatsMode('all')}
+          >
+            全部数据
+          </button>
+          {statsMode === 'all' && (
+            <button className="btn btn-icon btn-sm" onClick={loadStats}>
+              <RefreshCw size={13} />
+              加载统计
+            </button>
+          )}
+        </div>
+        {statsMode === 'current' ? (
+          localStats ? (
+            <StatsCharts stats={localStats} />
+          ) : (
+            <div className="empty-state">
+              <div className="empty-icon">📊</div>
+              先完成一次提取，查看本次提取的统计
+            </div>
+          )
+        ) : stats ? (
+          <StatsCharts stats={stats} />
+        ) : (
+          <div className="muted" style={{ fontSize: 13 }}>
+            点击「加载统计」查看全部提取数据（类别 / 流域 / 地域分布）
+          </div>
+        )}
       </section>
 
       {/* ---------- 留言板 ---------- */}

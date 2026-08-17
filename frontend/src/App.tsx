@@ -72,7 +72,7 @@ export default function App() {
           >
             {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
           </button>
-          <span className="chip chip-green">v5.0 撷菁新篇</span>
+          <span className="chip chip-green">v5.1.0 撷菁新篇</span>
         </header>
         <main className="flex-1" style={{ overflowY: 'auto', padding: 20 }}>
           <div style={{ maxWidth: 980, margin: '0 auto' }}>

@@ -49,7 +49,7 @@ check("旧版无盐哈希兼容", db.verify_password("oldpass", legacy))
 # ---------- 邀请码 / 管理名单配置 ----------
 check("邀请码已配置且为 931226", env.INVITE_CODE == "931226")
 check("管理员名单可解析", isinstance(env.ADMIN_USERNAMES, set) and len(env.ADMIN_USERNAMES) >= 1)
-check("调参常量与生产一致（VERSION）", cfg.VERSION == "5.0.0")
+check("调参常量与生产一致（VERSION）", cfg.VERSION == "5.1.0")
 check("调参常量与生产一致（EXTRACTION_PASSES）", cfg.EXTRACTION_PASSES == 3)
 
 if _failed:
