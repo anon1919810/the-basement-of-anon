@@ -1,20 +1,20 @@
 /**
- * 三级市场（v0.3）：本地（县）→ 区域（省）→ 国家，外加简化国际贸易。
+ * 市场中心（v0.8：省为结算单元）。
  *
- * 层级与流向（确定性、纯函数式演化，无随机）：
- *  - 本地市场（县）：县内自产自销、无运费，价格 = 基础价 × 县内供需比（clamp 0.4~2.5）
- *  - 区域市场（省）：县间贸易，省内运费（距离 × 地形系数，见 logistics）；县盈余向上流入、缺口向下补足
- *  - 国家市场：省间调运，跨省运费更高；省盈余上缴、省缺口由国家库存补足
- *  - 国际贸易：国家盈余 → 按世界价出口（+关税）；国家缺口 → 进口补足（扣关税），容量受商路（基建）影响
- *  - 价格信号跨层传导（权重）：国家价格趋势 → 区域（15% 权重）→ 本地（20% 权重）
+ * v0.8 模型（端明ちゃん 定稿，最小实现）：
+ *  - 省为结算单元：移除「国家统一市场」实体；每省独立供需/独立价格（省价可不同）。
+ *  - 流向链条（每月结算）：
+ *      建筑产出 → 先征商品税（含运力/基建税：对运输吨位计税）→ 进入本省市场
+ *      → 省盈余按省价流入缺口省（跨省运费；运费吨位计运力/基建商品税）
+ *      → 出口权门槛：仅获权省商品可入国际市场（沿海/港口省默认获权，内陆省可授予/收回）
+ *      → 入国际市场时征关税
+ *  - 开放度：国家级布尔「开放贸易」（默认 false=不贸易；true=按世界价进出口+关税）。
+ *  - 价格差异化：同商品不同省价格可不同（省供需比各自定价，clamp 0.4~2.5）。
+ *  - 县本地市场保留为简化展示（并入省结算；守恒以省口径核算）。
+ *  - 国家 `national` 市场仅作聚合视图（省结算后派生，供 UI/历史图表读取），不是结算实体。
+ *  - 守恒（每商品每省）：生产 + 进口 + 净流入 = 消费 + 出口 + Δ库存 + 建筑消耗。
  *
- * v0.3 产业链接入：
- *  - 商品表扩展为 17 种（资源/半成品/成品），全部纳入三级供需定价与国际贸易
- *  - 建筑（投资）供给：工厂产出进入国家市场供给（factorySupply）
- *  - 建筑输入需求：建筑消耗输入从国家库存扣除（economy 预扣），此处：
- *      · buildingDemand  参与国家价格形成（需求↑ → 价格↑，稀缺信号）
- *      · buildingConsumed 从「未满足需求」中扣除（避免重复进口：库存已扣过的不再进口）
- *    守恒（每商品）：生产（县产 + 工厂供给）+ 进口 = 消费（县 + 政府）+ 出口 + Δ国家库存 + 建筑消耗
+ * 确定性：纯函数式演化，无随机；省按 id 升序处理。
  */
 import type { GoodId } from './types';
 import { clamp } from './pops';
@@ -109,12 +109,10 @@ export const BASE_TRADE_CAP: Record<GoodId, number> = {
 /** 成本传导过手率：输入品税价差 → 成品价格上浮的比例（0.85 = 85% 传导） */
 export const COST_PUSH_PASS = 0.85;
 
-/** 价格信号跨层传导权重 */
-export const BLEND_PROV_FROM_NAT = 0.15; // 区域价格 = 本地供需比 × (1-0.15) + 国家价格信号 0.15
-export const BLEND_COUNTY_FROM_PROV = 0.2; // 本地价格 = 县供需比 × (1-0.2) + 区域价格信号 0.2
-/** 运费对价格的上浮系数（跨省更高） */
+/** 价格信号跨层传导权重（v0.8：省价独立定价，仅保留县←省传导） */
+export const BLEND_COUNTY_FROM_PROV = 0.2; // 本地价格 = 县供需比 × (1-0.2) + 省价格信号 0.2
+/** 省内运费对省价的上浮系数（县 → 省集散） */
 export const FREIGHT_PRICE_INTRA = 0.15;
-export const FREIGHT_PRICE_CROSS = 0.2;
 
 /** 全零商品记录（避免逐商品字面量初始化） */
 export function zeroGoods(): Record<GoodId, number> {
@@ -123,7 +121,7 @@ export function zeroGoods(): Record<GoodId, number> {
   return out;
 }
 
-/** 国家市场商品状态 */
+/** 国家市场商品状态（v0.8 起为聚合视图：省结算后派生，非结算实体） */
 export interface MarketGood {
   basePrice: number;
   /** 当前价（万₭/单位）——含成本传导（上游输入品税价差上浮），买方实际支付的基础 */
@@ -133,7 +131,7 @@ export interface MarketGood {
   effPrice: number;
   /** v0.4 成本传导上浮量（万₭/单位，来自上游输入品税价差） */
   costPush: number;
-  /** 上月总供给（县产 + 工厂） */
+  /** 上月总供给（县产 + 建筑产出） */
   supply: number;
   /** 上月总需求（县消费 + 政府 + 建筑输入） */
   demand: number;
@@ -147,13 +145,17 @@ export interface MarketGood {
   trend: number;
 }
 
-/** 区域市场商品状态（省） */
+/** 省市场商品状态（v0.8 结算单元） */
 export interface ProvinceMarket extends MarketGood {
-  /** 省内县间净流出（>0 上缴国家）/ 净流入缺口（<0 由国家补足） */
+  /** 省际净流出 = flowOut - flowIn（>0 净流出 / <0 净流入；UI 兼容 v0.7 字段） */
   netFlow: number;
+  /** v0.8 省际流入（单位/月） */
+  flowIn: number;
+  /** v0.8 省际流出（单位/月） */
+  flowOut: number;
 }
 
-/** 本地市场商品状态（县） */
+/** 本地市场商品状态（县，展示用；并入省结算） */
 export interface CountyMarket {
   basePrice: number;
   price: number;
@@ -162,7 +164,7 @@ export interface CountyMarket {
   supply: number;
   /** 县内需求 */
   demand: number;
-  /** 实际消费（自产 + 省内调剂） */
+  /** 实际消费（自产 + 省流入补足） */
   consumed: number;
   /** 未满足需求（缺口未补足部分） */
   unmet: number;
@@ -172,11 +174,11 @@ export interface CountyMarket {
 }
 
 export interface MarketSnapshot {
-  /** 国家市场状态（UI/断言主读） */
+  /** 国家聚合市场视图（省结算后派生；UI/断言主读） */
   goods: Record<GoodId, MarketGood>;
-  /** 区域市场（省 id → 各商品） */
+  /** 省市场（省 id → 各商品；结算单元） */
   province: Record<number, Record<GoodId, ProvinceMarket>>;
-  /** 本地市场（县 id → 各商品） */
+  /** 本地市场（县 id → 各商品；展示） */
   county: Record<number, Record<GoodId, CountyMarket>>;
   /** 各省实际消费（幸福度/效率用） */
   provConsumed: Record<number, Record<GoodId, number>>;
@@ -184,14 +186,16 @@ export interface MarketSnapshot {
   provDemand: Record<number, Record<GoodId, number>>;
   /** 本月关税收入（万₭） */
   tariff: number;
-  /** v0.4 单一商品税收入（万₭/月）= Σ 税率 × 成交量（消费+进口+建筑消耗） */
+  /** v0.4 单一商品税收入（万₭/月）= Σ 税率 × 成交量（消费+进口+建筑消耗+运输吨位） */
   commodityTax: number;
   exportValue: number;
   importValue: number;
-  /** 工厂对国家的额外供给（单位/月，含建筑产出） */
+  /** 建筑对省的额外供给（单位/月，聚合视图） */
   factorySupply: Record<GoodId, number>;
-  /** 建筑输入消耗（单位/月，economy 预扣自库存；守恒断言用） */
+  /** 建筑输入消耗（单位/月，聚合视图；守恒断言用） */
   buildingConsumed: Record<GoodId, number>;
+  /** v0.8 省 → 建筑输入消耗（单位/月；按省守恒断言用） */
+  provBuildingConsumed: Record<number, Record<GoodId, number>>;
 }
 
 /** 单个县的流量输入（economy 按省分组、按县 id 升序传入） */
@@ -206,14 +210,15 @@ export interface CountyFlow {
 
 export interface MarketInput {
   counties: CountyFlow[];
-  /** 工厂对国家市场的额外供给（单位/月，含建筑产出） */
-  factorySupply: Record<GoodId, number>;
+  /** v0.8 省 → 建筑产出（单位/月，含建筑产出） */
+  provFactorySupply: Record<number, Record<GoodId, number>>;
+  /** v0.8 省 → 建筑输入需求（参与省价格形成；economy 已预扣自省库存） */
+  provBuildingDemand: Record<number, Record<GoodId, number>>;
+  /** v0.8 省 → 建筑输入实际消耗（从「未满足需求」扣除，避免重复进口） */
+  provBuildingConsumed: Record<number, Record<GoodId, number>>;
   govDemand: Record<GoodId, number>;
-  /** 建筑输入需求（参与价格形成；economy 已预扣自库存） */
-  buildingDemand: Record<GoodId, number>;
-  /** 建筑输入实际消耗（从「未满足需求」扣除，避免重复进口） */
-  buildingConsumed: Record<GoodId, number>;
-  stocks: Record<GoodId, number>;
+  /** v0.8 省库存（结算账本；原地更新，按省守恒） */
+  provStocks: Record<number, Record<GoodId, number>>;
   /** 商路系数（基建/地理 → 贸易容量放大） */
   routeCoef: number;
   /** 关税税率（v0.4 连续滑块，来自 tax.rates.tariff） */
@@ -225,10 +230,14 @@ export interface MarketInput {
    * 商品 → 生产该商品的建筑 { 每单位输出所需输入量, 产能 }。用于成本传导（输入品税价差 → 成品价↑）。
    */
   producers: Partial<Record<GoodId, { inputs: Partial<Record<GoodId, number>>; capacity: number }>>;
-  /** 省 → 跨省运费系数 */
+  /** 省 → 跨省运费系数（v0.8 仅作模型记录；省价独立定价） */
   crossFreight: Record<number, number>;
-  /** 全国平均跨省运费 */
+  /** 全国平均跨省运费（v0.8 仅作模型记录） */
   natFreight: number;
+  /** v0.8 开放贸易（false=自给不贸易；true=按世界价进出口+关税） */
+  openTrade: boolean;
+  /** v0.8 出口权：省 id → 是否获权（获权省商品可入国际市场） */
+  exportRights: Record<number, boolean>;
 }
 
 export interface MarketState {
@@ -293,6 +302,8 @@ export function newProvinceMarkets(): Record<GoodId, ProvinceMarket> {
       unmet: 0,
       trend: 0,
       netFlow: 0,
+      flowIn: 0,
+      flowOut: 0,
     };
   }
   return out;
@@ -307,22 +318,28 @@ function trendOf(price: number, prevPrice: number): number {
 }
 
 /**
- * 结算三级市场 + 国际贸易。修改传入的 markets 与 input.stocks（严格同序浮点）。
+ * 结算市场（v0.8：省为结算单元）+ 国际贸易。
+ * 修改传入的 markets 与 input.provStocks（严格同序浮点，确定性）。
  */
 export function settleMarket(input: MarketInput, markets: MarketState): MarketSnapshot {
   const nat = markets.national;
-  // 输入已按省分组、县 id 升序 → 保持确定性处理顺序（首见即入序）
+  // 省分组；省 id 升序（确定性处理顺序）
   const provCounties = new Map<number, CountyFlow[]>();
-  const provOrder: number[] = [];
+  const provIdSet = new Set<number>();
   for (const c of input.counties) {
+    provIdSet.add(c.provId);
     let list = provCounties.get(c.provId);
     if (!list) {
       list = [];
       provCounties.set(c.provId, list);
-      provOrder.push(c.provId);
     }
     list.push(c);
   }
+  for (const pid of Object.keys(input.provStocks)) provIdSet.add(Number(pid));
+  for (const pid of Object.keys(input.provFactorySupply)) provIdSet.add(Number(pid));
+  for (const pid of Object.keys(input.provBuildingDemand)) provIdSet.add(Number(pid));
+  for (const pid of Object.keys(input.exportRights)) provIdSet.add(Number(pid));
+  const provOrder = [...provIdSet].sort((a, b) => a - b);
 
   let tariff = 0;
   let commodityTax = 0;
@@ -330,213 +347,276 @@ export function settleMarket(input: MarketInput, markets: MarketState): MarketSn
   let importValue = 0;
   const provConsumed: Record<number, Record<GoodId, number>> = {};
   const provDemand: Record<number, Record<GoodId, number>> = {};
-  const factorySupply: Record<GoodId, number> = { ...input.factorySupply };
-  const buildingConsumed: Record<GoodId, number> = { ...input.buildingConsumed };
+  const factorySupply = zeroGoods();
+  const buildingConsumed = zeroGoods();
+  const provBuildingConsumed: Record<number, Record<GoodId, number>> = {};
   // v0.4 成本传导：供需价（未含传导）与买方有效价（含商品税与上游传导），按 GOODS_LIST 序计算（输入必在上游）
-  const sdPriceOf = {} as Record<GoodId, number>;
-  const effPriceOf = {} as Record<GoodId, number>;
+  const sdPriceOf = {} as Record<GoodId, Record<number, number>>;
+  const effPriceOf = {} as Record<GoodId, Record<number, number>>;
 
   for (const g of GOODS_LIST) {
     const base = BASE_PRICE[g];
-    const m = nat[g];
+    const taxRate = input.goodsTax[g] ?? 0;
 
-    // ---- 1. 国家供需与价格（含建筑输入需求：稀缺 → 涨价信号） ----
-    let natSupplyGross = 0;
-    let natDemandGross = 0;
-    for (const c of input.counties) {
-      natSupplyGross += c.production[g];
-      natDemandGross += c.demand[g];
-    }
-    natSupplyGross += input.factorySupply[g];
-    natDemandGross += input.govDemand[g] + input.buildingDemand[g];
-    const natRatio = natDemandGross / Math.max(natSupplyGross, 1e-9);
-    const sdPrice = base * clamp(natRatio * (1 + FREIGHT_PRICE_CROSS * input.natFreight), PRICE_CLAMP_MIN, PRICE_CLAMP_MAX);
-    sdPriceOf[g] = sdPrice;
-
-    // ---- v0.4 成本传导：上游输入品税价差 → 本商品价格上浮（如 煤炭税 → 铁锭价↑ → 钢材价↑） ----
-    const prod = input.producers[g];
-    let costPush = 0;
-    if (prod) {
-      const outQty = Math.max(1e-9, prod.capacity);
-      for (const i of Object.keys(prod.inputs) as GoodId[]) {
-        const qty = prod.inputs[i] ?? 0;
-        if (qty > 0) costPush += (qty / outQty) * (effPriceOf[i] - sdPriceOf[i]);
-      }
-      costPush *= COST_PUSH_PASS;
-    }
-    m.supply = natSupplyGross;
-    m.demand = natDemandGross;
-    m.prevPrice = m.price;
-    m.price = clamp(sdPrice + costPush, base * PRICE_CLAMP_MIN, base * PRICE_CLAMP_MAX);
-    m.costPush = costPush;
-    // 买方有效价 = 市价（含传导）× (1 + 商品税率)
-    m.effPrice = m.price * (1 + (input.goodsTax[g] ?? 0));
-    effPriceOf[g] = m.effPrice;
-    m.trend = trendOf(m.price, m.prevPrice);
-
-    // ---- 2. 区域价格（受国家价格信号传导）----
-    const provPrice: Record<number, number> = {};
+    // ---- 1. 省供需（产出 = 县产 + 建筑产出；需求 = 县需 + 政府分摊 + 建筑输入） ----
+    const supply: Record<number, number> = {};
+    const demand: Record<number, number> = {};
+    const countyDemand: Record<number, number> = {};
+    const intraAvg: Record<number, number> = {};
+    let totalCountyDemand = 0;
     for (const pid of provOrder) {
       const list = provCounties.get(pid) ?? [];
-      let supply = 0;
-      let demand = 0;
+      let s = 0;
+      let d = 0;
       let intraSum = 0;
       for (const c of list) {
-        supply += c.production[g];
-        demand += c.demand[g];
+        s += c.production[g];
+        d += c.demand[g];
         intraSum += c.intraFreight;
       }
-      const intra = list.length > 0 ? intraSum / list.length : 1;
-      const pm = getProvMarket(markets, pid)[g];
-      pm.supply = supply;
-      pm.demand = demand;
-      const ratio = demand / Math.max(supply, 1e-9);
-      const blend = 1 - BLEND_PROV_FROM_NAT + BLEND_PROV_FROM_NAT * (m.price / base);
-      pm.prevPrice = pm.price;
-      pm.price = base * clamp(ratio * blend * (1 + FREIGHT_PRICE_INTRA * intra), PRICE_CLAMP_MIN, PRICE_CLAMP_MAX);
-      pm.trend = trendOf(pm.price, pm.prevPrice);
-      provPrice[pid] = pm.price;
+      s += input.provFactorySupply[pid]?.[g] ?? 0;
+      const cd = d;
+      d += input.provBuildingDemand[pid]?.[g] ?? 0;
+      supply[pid] = s;
+      demand[pid] = d;
+      countyDemand[pid] = cd;
+      intraAvg[pid] = list.length > 0 ? intraSum / list.length : 1;
+      totalCountyDemand += cd;
+    }
+    // 政府需求按县需份额分摊到省（确定性）
+    const govTotal = input.govDemand[g] ?? 0;
+    for (const pid of provOrder) {
+      const share =
+        totalCountyDemand > 1e-9
+          ? countyDemand[pid] / totalCountyDemand
+          : provOrder.length > 0
+            ? 1 / provOrder.length
+            : 0;
+      demand[pid] += govTotal * share;
     }
 
-    // ---- 3. 本地价格（受区域价格信号传导）----
+    // ---- 2. 省价：供需比各自定价（clamp 0.4~2.5；省内运费小幅上浮） ----
+    const sdPrice: Record<number, number> = {};
+    for (const pid of provOrder) {
+      const ratio = demand[pid] / Math.max(supply[pid], 1e-9);
+      sdPrice[pid] = base * clamp(ratio * (1 + FREIGHT_PRICE_INTRA * intraAvg[pid]), PRICE_CLAMP_MIN, PRICE_CLAMP_MAX);
+    }
+    sdPriceOf[g] = sdPrice;
+
+    // ---- 3. 省价成本传导：上游输入品税价差 → 本省成品价上浮（如 煤炭税 → 铁锭价↑ → 钢材价↑） ----
+    const prod = input.producers[g];
+    for (const pid of provOrder) {
+      const pm = getProvMarket(markets, pid)[g];
+      let costPush = 0;
+      if (prod) {
+        const outQty = Math.max(1e-9, prod.capacity);
+        for (const i of Object.keys(prod.inputs) as GoodId[]) {
+          const qty = prod.inputs[i] ?? 0;
+          if (qty > 0) costPush += (qty / outQty) * ((effPriceOf[i]?.[pid] ?? 0) - (sdPriceOf[i]?.[pid] ?? 0));
+        }
+        costPush *= COST_PUSH_PASS;
+      }
+      pm.supply = supply[pid];
+      pm.demand = demand[pid];
+      pm.prevPrice = pm.price;
+      pm.price = clamp(sdPrice[pid] + costPush, base * PRICE_CLAMP_MIN, base * PRICE_CLAMP_MAX);
+      pm.costPush = costPush;
+      // 买方有效价 = 市价（含传导）× (1 + 商品税率)
+      pm.effPrice = pm.price * (1 + taxRate);
+      pm.trend = trendOf(pm.price, pm.prevPrice);
+      pm.flowIn = 0;
+      pm.flowOut = 0;
+      pm.exported = 0;
+      pm.imported = 0;
+      pm.unmet = 0;
+    }
+    effPriceOf[g] = {};
+    for (const pid of provOrder) effPriceOf[g][pid] = getProvMarket(markets, pid)[g].effPrice;
+
+    // ---- 4. 县本地市场（并入省结算：价格展示 + 消费展示账） ----
     for (const c of input.counties) {
       const cm = getCountyMarket(markets, c.countyId)[g];
       cm.supply = c.production[g];
       cm.demand = c.demand[g];
+      const pPrice = getProvMarket(markets, c.provId)[g].price;
       const ratio = c.demand[g] / Math.max(c.production[g], 1e-9);
-      const pProv = provPrice[c.provId] ?? base;
-      const blend = 1 - BLEND_COUNTY_FROM_PROV + BLEND_COUNTY_FROM_PROV * (pProv / base);
+      const blend = 1 - BLEND_COUNTY_FROM_PROV + BLEND_COUNTY_FROM_PROV * (pPrice / base);
       cm.prevPrice = cm.price;
       cm.price = base * clamp(ratio * blend, PRICE_CLAMP_MIN, PRICE_CLAMP_MAX);
       cm.trend = trendOf(cm.price, cm.prevPrice);
     }
 
-    // ---- 4. 流向：县自产自销 → 盈余上流 / 缺口下补 ----
-    // 4a. 县内结算
-    const selfConsumed = new Map<number, number>();
-    const surplus = new Map<number, number>();
-    const deficit = new Map<number, number>();
-    for (const c of input.counties) {
-      const self = Math.min(c.production[g], c.demand[g]);
-      selfConsumed.set(c.countyId, self);
-      surplus.set(c.countyId, c.production[g] - self);
-      deficit.set(c.countyId, c.demand[g] - self);
-    }
-    // 4b. 省内调剂：县盈余汇入省池，缺口按县 id 序贪心补足
-    const countyConsumed = new Map<number, number>();
-    const provNetSurplus: Record<number, number> = {};
-    const provNetDeficit: Record<number, number> = {};
+    // ---- 5. 省本地消费与库存账（库存 = 上月末 + 产出 − 本地消费） ----
+    const cons: Record<number, number> = {};
+    const unmet: Record<number, number> = {};
+    const stock: Record<number, number> = {};
     for (const pid of provOrder) {
-      const list = provCounties.get(pid) ?? [];
-      let provSurplus = 0;
-      let provDeficit = 0;
-      for (const c of list) {
-        provSurplus += surplus.get(c.countyId) ?? 0;
-        provDeficit += deficit.get(c.countyId) ?? 0;
+      const s0 = input.provStocks[pid]?.[g] ?? 0;
+      const available = s0 + supply[pid];
+      const c = Math.min(demand[pid], available);
+      cons[pid] = c;
+      unmet[pid] = Math.max(0, demand[pid] - c);
+      stock[pid] = available - c;
+    }
+
+    // ---- 6. 省际调运：盈余省按省价流入缺口省（运费吨位计运力/基建商品税） ----
+    const flowOut: Record<number, number> = {};
+    const flowIn: Record<number, number> = {};
+    for (const pid of provOrder) {
+      flowOut[pid] = 0;
+      flowIn[pid] = 0;
+    }
+    const surplusQ = provOrder
+      .filter((pid) => stock[pid] > 1e-9)
+      .map((pid) => ({ pid, amt: stock[pid] }));
+    const deficitQ = provOrder
+      .filter((pid) => unmet[pid] > 1e-9)
+      .map((pid) => ({ pid, amt: unmet[pid] }));
+    let qi = 0;
+    for (let si = 0; si < surplusQ.length && qi < deficitQ.length; si++) {
+      const sp = surplusQ[si];
+      while (sp.amt > 1e-9 && qi < deficitQ.length) {
+        const dq = deficitQ[qi];
+        const a = Math.min(sp.amt, dq.amt);
+        if (a > 1e-9) {
+          sp.amt -= a;
+          dq.amt -= a;
+          flowOut[sp.pid] += a;
+          flowIn[dq.pid] += a;
+        }
+        if (dq.amt <= 1e-9) qi++;
       }
-      const filled = Math.min(provSurplus, provDeficit);
-      let remaining = filled;
-      for (const c of list) {
-        const d = deficit.get(c.countyId) ?? 0;
-        const take = Math.min(d, remaining);
-        countyConsumed.set(c.countyId, (selfConsumed.get(c.countyId) ?? 0) + take);
-        remaining -= take;
+    }
+    let freightTonnage = 0;
+    for (const pid of provOrder) {
+      const out = flowOut[pid];
+      const inn = flowIn[pid];
+      if (out > 1e-9) {
+        stock[pid] -= out;
+        freightTonnage += out;
       }
-      provNetSurplus[pid] = provSurplus - filled;
-      provNetDeficit[pid] = provDeficit - filled;
+      if (inn > 1e-9) {
+        cons[pid] += inn;
+        unmet[pid] = Math.max(0, unmet[pid] - inn);
+      }
+    }
+
+    // ---- 7. 国际贸易：开放度门槛 + 出口权门槛 + 关税 ----
+    const tradeCap = BASE_TRADE_CAP[g] * input.routeCoef;
+    const hasAuthorized = provOrder.some((pid) => !!input.exportRights[pid]);
+    let exported = 0;
+    let imported = 0;
+    if (input.openTrade) {
+      // 出口：仅获权省商品可入国际市场；内陆省余量运抵口岸出口（运费吨位计税）
+      if (hasAuthorized) {
+        let rem = tradeCap;
+        for (const pid of provOrder) {
+          if (rem <= 1e-9) break;
+          if (!input.exportRights[pid]) continue;
+          const e = Math.min(stock[pid], rem);
+          if (e > 1e-9) {
+            stock[pid] -= e;
+            rem -= e;
+            exported += e;
+            getProvMarket(markets, pid)[g].exported = e;
+          }
+        }
+        for (const pid of provOrder) {
+          if (rem <= 1e-9) break;
+          if (input.exportRights[pid]) continue;
+          const e = Math.min(stock[pid], rem);
+          if (e > 1e-9) {
+            stock[pid] -= e;
+            rem -= e;
+            exported += e;
+            freightTonnage += e; // 内陆 → 口岸 的运力吨位
+            getProvMarket(markets, pid)[g].exported = e;
+          }
+        }
+      }
+      // 进口：缺口省按 id 序补足（入省库存）
+      let remI = tradeCap;
+      for (const pid of provOrder) {
+        if (remI <= 1e-9) break;
+        if (unmet[pid] <= 1e-9) continue;
+        const imp = Math.min(unmet[pid], remI);
+        if (imp > 1e-9) {
+          stock[pid] += imp;
+          unmet[pid] -= imp;
+          remI -= imp;
+          imported += imp;
+          getProvMarket(markets, pid)[g].imported = imp;
+        }
+      }
+    }
+    tariff += (exported + imported) * WORLD_PRICE[g] * input.tariffRate;
+    exportValue += exported * WORLD_PRICE[g];
+    importValue += imported * WORLD_PRICE[g];
+
+    // ---- 8. 回写省市场/省库存/省账本（幸福度 + 守恒断言数据） ----
+    let sumSupply = 0;
+    let sumDemand = 0;
+    let sumCons = 0;
+    let sumExported = 0;
+    let sumImported = 0;
+    let sumUnmet = 0;
+    let priceW = 0;
+    let priceWSum = 0;
+    let costPushW = 0;
+    for (const pid of provOrder) {
       const pm = getProvMarket(markets, pid)[g];
-      pm.netFlow = provNetSurplus[pid] - provNetDeficit[pid];
-    }
-    // 4c. 国家市场：库存承接省盈余，补省缺口，政府/建筑需求优先
-    let nationSupply = 0;
-    let nationDemand = 0;
-    for (const pid of provOrder) {
-      nationSupply += provNetSurplus[pid];
-      nationDemand += provNetDeficit[pid];
-    }
-    nationSupply += input.factorySupply[g];
-    nationDemand += input.govDemand[g] + input.buildingDemand[g];
-
-    let stock = input.stocks[g] + nationSupply;
-    const govConsumed = Math.min(input.govDemand[g], stock);
-    stock -= govConsumed;
-    let remainingStock = stock;
-    const natFill: Record<number, number> = {};
-    for (const pid of provOrder) {
-      const need = provNetDeficit[pid];
-      const fill = Math.min(need, remainingStock);
-      natFill[pid] = fill;
-      remainingStock -= fill;
-    }
-    stock = remainingStock; // 国家库存被省缺口消耗（守恒关键）
-    const consumed = govConsumed + provOrder.reduce((s, pid) => s + natFill[pid], 0);
-    m.consumed = consumed;
-    m.exported = 0;
-    m.imported = 0;
-    // 未满足需求：建筑输入已由 economy 预扣自库存，此处扣除避免重复进口
-    let unmet = nationDemand - consumed - input.buildingConsumed[g];
-    if (unmet > 0) {
-      const cap = BASE_TRADE_CAP[g] * input.routeCoef;
-      const imported = Math.min(unmet, cap);
-      m.imported = imported;
-      stock += imported;
-      unmet -= imported;
-    }
-    m.unmet = Math.max(0, unmet);
-    if (stock > 0) {
-      const cap = BASE_TRADE_CAP[g] * input.routeCoef;
-      const exported = Math.min(stock, cap);
-      m.exported = exported;
-      stock -= exported;
-    }
-    input.stocks[g] = stock;
-
-    tariff += (m.exported + m.imported) * WORLD_PRICE[g] * input.tariffRate;
-    exportValue += m.exported * WORLD_PRICE[g];
-    importValue += m.imported * WORLD_PRICE[g];
-
-    // ---- 5. 区域/县消费回写（幸福度用）----
-    let totalCountyConsumed = 0;
-    for (const pid of provOrder) {
-      const list = provCounties.get(pid) ?? [];
-      let consumedSum = natFill[pid];
-      let demandSum = 0;
-      // 县剩余缺口（国家补足按比例分摊到县，仅展示用；守恒仍以省/国口径计）
-      let dLeftTotal = 0;
-      const dLeft = new Map<number, number>();
-      for (const c of list) {
-        const cc = countyConsumed.get(c.countyId) ?? 0;
-        const self = selfConsumed.get(c.countyId) ?? 0;
-        const dl = Math.max(0, (deficit.get(c.countyId) ?? 0) - (cc - self));
-        dLeft.set(c.countyId, dl);
-        dLeftTotal += dl;
-      }
-      for (const c of list) {
-        const cc = countyConsumed.get(c.countyId) ?? 0;
-        const natShare = dLeftTotal > 1e-12 ? (natFill[pid] * (dLeft.get(c.countyId) ?? 0)) / dLeftTotal : 0;
-        consumedSum += cc;
-        totalCountyConsumed += cc;
-        demandSum += c.demand[g];
-        const cm = getCountyMarket(markets, c.countyId)[g];
-        cm.consumed = cc + natShare;
-        cm.unmet = Math.max(0, cm.demand - cm.consumed);
-        // 净流 = 产出 - 消费（>0 盈余外流 / <0 缺口由上级补足）
-        cm.netFlow = c.production[g] - cm.consumed;
-      }
-      const pm = getProvMarket(markets, pid)[g];
-      pm.consumed = consumedSum;
-      pm.unmet = Math.max(0, demandSum - consumedSum);
+      pm.consumed = cons[pid];
+      pm.unmet = Math.max(0, unmet[pid]);
+      pm.netFlow = flowOut[pid] - flowIn[pid];
+      pm.flowIn = flowIn[pid];
+      pm.flowOut = flowOut[pid];
+      if (!input.provStocks[pid]) input.provStocks[pid] = zeroGoods();
+      input.provStocks[pid][g] = stock[pid];
+      sumSupply += supply[pid];
+      sumDemand += demand[pid];
+      sumCons += cons[pid];
+      sumExported += pm.exported;
+      sumImported += pm.imported;
+      sumUnmet += pm.unmet;
+      priceW += pm.price * supply[pid];
+      priceWSum += supply[pid];
+      costPushW += pm.costPush * supply[pid];
       provConsumed[pid] = provConsumed[pid] ?? {};
       provDemand[pid] = provDemand[pid] ?? {};
-      provConsumed[pid][g] = consumedSum;
-      provDemand[pid][g] = demandSum;
+      provConsumed[pid][g] = cons[pid];
+      provDemand[pid][g] = countyDemand[pid];
+      const bc = input.provBuildingConsumed[pid]?.[g] ?? 0;
+      provBuildingConsumed[pid] = provBuildingConsumed[pid] ?? {};
+      provBuildingConsumed[pid][g] = bc;
+      buildingConsumed[g] += bc;
+      factorySupply[g] += input.provFactorySupply[pid]?.[g] ?? 0;
     }
-    // 国家总消费 = 县消费（自产+省内调剂+国家补足）+ 政府消费（守恒公式用；建筑消耗单独计）
-    m.consumed = consumed + totalCountyConsumed;
 
-    // ---- v0.4 单一商品税收入：税率 × 成交量（国内消费 + 进口 + 建筑消耗；出口为外国买方，不征） ----
-    const taxVol = m.consumed + m.imported + buildingConsumed[g];
-    commodityTax += (input.goodsTax[g] ?? 0) * taxVol;
+    // ---- 9. 国家聚合视图（省结算后派生；UI/历史图表读取，非结算实体） ----
+    const m = nat[g];
+    const natPrice =
+      priceWSum > 1e-9
+        ? priceW / priceWSum
+        : provOrder.length > 0
+          ? provOrder.reduce((s, pid) => s + getProvMarket(markets, pid)[g].price, 0) / provOrder.length
+          : base;
+    m.supply = sumSupply;
+    m.demand = sumDemand;
+    m.prevPrice = m.price;
+    m.price = clamp(natPrice, base * PRICE_CLAMP_MIN, base * PRICE_CLAMP_MAX);
+    m.costPush = priceWSum > 1e-9 ? costPushW / priceWSum : 0;
+    m.effPrice = m.price * (1 + taxRate);
+    m.consumed = sumCons;
+    m.exported = sumExported;
+    m.imported = sumImported;
+    m.unmet = sumUnmet;
+    m.trend = trendOf(m.price, m.prevPrice);
+
+    // ---- 10. 单一商品税（含运力/基建税：对运输吨位计税；出口为外国买方不征） ----
+    let bCons = 0;
+    for (const pid of provOrder) bCons += input.provBuildingConsumed[pid]?.[g] ?? 0;
+    const taxVol = sumCons + sumImported + bCons + freightTonnage;
+    commodityTax += taxRate * taxVol;
   }
 
   return {
@@ -551,6 +631,7 @@ export function settleMarket(input: MarketInput, markets: MarketState): MarketSn
     importValue,
     factorySupply,
     buildingConsumed,
+    provBuildingConsumed,
   };
 }
 

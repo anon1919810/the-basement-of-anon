@@ -9,6 +9,7 @@ import type { GameMap } from './map';
 import type { GoodId, NationId, ProvinceOwner, Speed } from './types';
 import { DAYS_PER_MONTH, monthIndex, yearOf } from './clock';
 import { NATIONS } from './nations';
+import { isCoastal } from './logistics';
 import { BASE_HOUSING_PER_CELL } from './pops';
 import {
   BANKRUPTCY_COOLDOWN,
@@ -21,7 +22,7 @@ import {
 import type { MonthlyLedger } from './economy';
 import { initProvinceEcon } from './pops';
 import type { Pop } from './pops';
-import { newMarket, zeroGoods } from './market';
+import { GOODS_LIST, newMarket, zeroGoods } from './market';
 import type { CountyMarket, MarketGood, ProvinceMarket } from './market';
 import type { InvestmentProject } from './buildings';
 import { MANUAL_EVENTS } from './manualEvents';
@@ -30,10 +31,10 @@ import { CLASSES } from './classes';
 import { defaultNationTax } from './tax';
 import type { NationTax } from './tax';
 
-export const SAVE_VERSION = 8;
-export const SAVE_KEY = 'kalt-save-v8';
-/** 旧存档键（v0.7 起存档不兼容，提示用；含 v0.6 的 v7 键） */
-export const OLD_SAVE_KEYS = ['kalt-save-v7', 'kalt-save-v6', 'kalt-save-v5', 'kalt-save-v4', 'kalt-save-v3'];
+export const SAVE_VERSION = 9;
+export const SAVE_KEY = 'kalt-save-v9';
+/** 旧存档键（v0.8 起存档不兼容，提示用；含 v0.7 的 v8 键） */
+export const OLD_SAVE_KEYS = ['kalt-save-v8', 'kalt-save-v7', 'kalt-save-v6', 'kalt-save-v5', 'kalt-save-v4', 'kalt-save-v3'];
 
 /** 国家政策（v0.3）：作用于当前国，写入状态与存档 */
 export interface NationPolicies {
@@ -60,11 +61,17 @@ export interface NationState {
   tax: NationTax;
   spending: { military: number; admin: number; infra: number; court: number; health: number }; // 万₭/月
   cells: number; // 所辖陆地格数（静态）
-  // ---- 三级市场（v0.2/v0.3：17 商品） ----
-  stocks: Record<GoodId, number>; // 国家市场库存（单位）
-  market: Record<GoodId, MarketGood>; // 国家市场状态（价格/供需/趋势）
-  provinceMarkets: Record<number, Record<GoodId, ProvinceMarket>>; // 区域市场（省）
-  countyMarkets: Record<number, Record<GoodId, CountyMarket>>; // 本地市场（县）
+  // ---- 三级市场（v0.2/v0.3：17 商品；v0.8 省为结算单元） ----
+  stocks: Record<GoodId, number>; // 国家聚合库存（= Σ 省库存；UI/建筑解锁显示）
+  market: Record<GoodId, MarketGood>; // 国家聚合市场视图（省结算后派生，非结算实体）
+  provinceMarkets: Record<number, Record<GoodId, ProvinceMarket>>; // 省市场（v0.8 结算单元）
+  countyMarkets: Record<number, Record<GoodId, CountyMarket>>; // 本地市场（县，展示）
+  /** v0.8 省库存（真正结算账本；守恒按省核算） */
+  provStocks: Record<number, Record<GoodId, number>>;
+  /** v0.8 开放贸易（false=自给不贸易；true=按世界价进出口+关税） */
+  openTrade: boolean;
+  /** v0.8 出口权：省 id → 是否获权（沿海/港口省默认获权，内陆省可授予/收回） */
+  exportRights: Record<number, boolean>;
   // ---- 投资（v0.3 产业链建筑） ----
   projects: InvestmentProject[]; // 在建/已投产项目
   nextProjectId: number;
@@ -298,7 +305,23 @@ export function newGameState(playerNation: NationId, seed: number, map: GameMap)
   (Object.keys(NATIONS) as NationId[]).forEach((id) => {
     const def = NATIONS[id];
     const popWan = scaledPops[id];
-    const stocks = initialStocks(popWan, def.foodMonths);
+    // v0.8 初始库存按省拆分（按格数分摊）+ 出口权（沿海/港口省默认获权）
+    const initial = initialStocks(popWan, def.foodMonths);
+    const provStocks: Record<number, Record<GoodId, number>> = {};
+    const exportRights: Record<number, boolean> = {};
+    const ownedProvs = map.provinces.filter((p) => p.owner === id && !p.isUndiscovered);
+    const totalCells = Math.max(1, ownedProvs.reduce((s, p) => s + p.cellIds.length, 0));
+    for (const p of ownedProvs) {
+      const share = p.cellIds.length / totalCells;
+      const ps = zeroGoods();
+      for (const g of GOODS_LIST) ps[g] = initial[g] * share;
+      provStocks[p.id] = ps;
+      exportRights[p.id] = isCoastal(map, p);
+    }
+    const stocks = zeroGoods();
+    for (const pid of Object.keys(provStocks)) {
+      for (const g of GOODS_LIST) stocks[g] += provStocks[Number(pid)][g];
+    }
     nations[id] = {
       popWan,
       literacy: def.literacy,
@@ -313,6 +336,9 @@ export function newGameState(playerNation: NationId, seed: number, map: GameMap)
       market: newMarket(),
       provinceMarkets: {},
       countyMarkets: {},
+      provStocks,
+      openTrade: false,
+      exportRights,
       projects: [],
       nextProjectId: 1,
       investCostAcc: 0,
@@ -504,13 +530,22 @@ export function allFinite(state: GameState): boolean {
         if (!Number.isFinite(v)) return false;
       }
     }
+    // v0.8 省库存（结算账本）与开放度
+    for (const pid of Object.keys(n.provStocks)) {
+      const ps = n.provStocks[Number(pid)];
+      if (!ps) return false;
+      for (const g of Object.keys(ps) as GoodId[]) {
+        if (!Number.isFinite(ps[g])) return false;
+      }
+    }
+    if (typeof n.openTrade !== 'boolean') return false;
     // 区域市场（省）
     for (const pid of Object.keys(n.provinceMarkets)) {
       const pm = n.provinceMarkets[Number(pid)];
       if (!pm) return false;
       for (const g of Object.keys(pm) as GoodId[]) {
         const m = pm[g];
-        for (const v of [m.price, m.prevPrice, m.effPrice, m.costPush, m.supply, m.demand, m.consumed, m.unmet, m.netFlow, m.trend]) {
+        for (const v of [m.price, m.prevPrice, m.effPrice, m.costPush, m.supply, m.demand, m.consumed, m.exported, m.imported, m.unmet, m.netFlow, m.flowIn, m.flowOut, m.trend]) {
           if (!Number.isFinite(v)) return false;
         }
       }
@@ -582,7 +617,9 @@ export function loadGame(): GameState | null {
       parsed.nations.lorraine.policies &&
       parsed.nations.lorraine.tax &&
       parsed.nations.lorraine.tax.rates &&
-      parsed.nations.lorraine.tax.goods
+      parsed.nations.lorraine.tax.goods &&
+      parsed.nations.lorraine.provStocks &&
+      typeof parsed.nations.lorraine.openTrade === 'boolean'
     ) {
       return parsed;
     }

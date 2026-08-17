@@ -45,7 +45,7 @@ import type { NationTax } from './tax';
 import { LABOR_DEMAND_PER_CELL, applyClassMobility, computeWages } from './labor';
 import { settleMarket } from './market';
 import type { CountyFlow, MarketState } from './market';
-import { BASE_PRICE, zeroGoods } from './market';
+import { BASE_PRICE, GOODS_LIST, zeroGoods } from './market';
 import { countyFreightFactor, provinceFreightFactor } from './logistics';
 import { BUILDING_DEFS, buildingSkillReqPop } from './buildings';
 import type { InvestmentProject } from './buildings';
@@ -387,10 +387,18 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
     }
   }
 
-  // ---- 5. 建筑进度与运营（v0.3 产业链） ----
-  const factorySupply = zeroGoods();
-  const buildingDemand = zeroGoods();
-  const buildingConsumed = zeroGoods();
+  // ---- 5. 建筑进度与运营（v0.3 产业链；v0.8 产出/输入消耗按省入账） ----
+  const provFactorySupply: Record<number, Record<GoodId, number>> = {};
+  const provBuildingDemand: Record<number, Record<GoodId, number>> = {};
+  const provBuildingConsumed: Record<number, Record<GoodId, number>> = {};
+  const provGoods = (m: Record<number, Record<GoodId, number>>, pid: number): Record<GoodId, number> => {
+    let r = m[pid];
+    if (!r) {
+      r = zeroGoods();
+      m[pid] = r;
+    }
+    return r;
+  };
   const newlyCompleted = new Set<number>();
   for (const p of n.projects) {
     if (p.status === 'building') {
@@ -404,7 +412,7 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
       }
     }
   }
-  // 已投产（含上月投产）的建筑：技能要求 → 预扣输入 → 产出进国家市场供给
+  // 已投产（含上月投产）的建筑：技能要求 → 从本省库存预扣输入 → 产出进本省市场供给
   for (const p of n.projects) {
     if (p.status !== 'active' || newlyCompleted.has(p.id)) continue;
     const def = BUILDING_DEFS[p.kind];
@@ -412,31 +420,33 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
     let skillPop = 0;
     if (ps) for (const pop of ps.pops) if (pop.job === def.skill) skillPop += pop.size;
     const skillFactor = clamp(skillPop / buildingSkillReqPop(def), 0, 1);
-    // 输入可用性：按当前库存（建筑按项目 id 序确定性占用）
+    // 输入可用性：按本省库存（建筑按项目 id 序确定性占用）
+    const provStock = n.provStocks[p.provId] ?? (n.provStocks[p.provId] = zeroGoods());
     let avail = 1;
     const inputGoods = Object.keys(def.inputs) as GoodId[];
     for (const g of inputGoods) {
       const need = (def.inputs[g] ?? 0) * skillFactor;
       if (need > 0) {
-        const have = Math.max(0, n.stocks[g] ?? 0);
+        const have = Math.max(0, provStock[g] ?? 0);
         avail = Math.min(avail, have / need);
       }
     }
     avail = clamp(avail, 0, 1);
-    // 预扣输入（从国家库存；守恒 = 生产+进口 = 消费+出口+Δ库存+建筑消耗）
+    // 预扣输入（从本省库存；守恒 = 生产+进口+净流入 = 消费+出口+Δ库存+建筑消耗）
     const inputUsed = {} as Record<GoodId, number>;
     for (const g of inputGoods) {
       const need = (def.inputs[g] ?? 0) * skillFactor;
       const used = need * avail;
       if (used > 0) {
+        provStock[g] -= used;
         n.stocks[g] -= used;
         inputUsed[g] = used;
-        buildingConsumed[g] += used;
-        buildingDemand[g] += need; // 价格信号用「期望输入」
+        provGoods(provBuildingConsumed, p.provId)[g] += used;
+        provGoods(provBuildingDemand, p.provId)[g] += need; // 价格信号用「期望输入」
       }
     }
     const output = def.capacity * skillFactor * avail;
-    factorySupply[def.output] += output;
+    provGoods(provFactorySupply, p.provId)[def.output] += output;
     p.lastSkillFactor = skillFactor;
     p.lastRunFactor = avail;
     p.lastOutput = output;
@@ -445,7 +455,7 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
     p.lastRevenue = 0;
   }
 
-  // ---- 6. 三级市场 + 国际贸易（建筑输入参与价格形成与未满足修正） ----
+  // ---- 6. 市场（v0.8 省为结算单元）+ 国际贸易（建筑输入参与省价格形成与守恒） ----
   const marketState: MarketState = {
     national: n.market,
     province: n.provinceMarkets,
@@ -454,32 +464,42 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
   const snap = settleMarket(
     {
       counties,
-      factorySupply,
+      provFactorySupply,
+      provBuildingDemand,
+      provBuildingConsumed,
       govDemand,
-      buildingDemand,
-      buildingConsumed,
-      stocks: n.stocks,
+      provStocks: n.provStocks,
       routeCoef: routeCoef(n),
       tariffRate: tax.rates.tariff,
       goodsTax: tax.goods,
       producers: GOOD_PRODUCERS,
       crossFreight,
       natFreight: avgFreight,
+      openTrade: n.openTrade,
+      exportRights: n.exportRights,
     },
     marketState,
   );
+  // 国家聚合库存 = Σ 省库存（市场已原地更新 provStocks）
+  for (const g of GOODS_LIST) {
+    let sum = 0;
+    for (const pid of Object.keys(n.provStocks)) sum += n.provStocks[Number(pid)][g];
+    n.stocks[g] = sum;
+  }
   n.foodStock = n.stocks.food; // 镜像到 v0.0.0 字段
 
-  // ---- 7. 建筑现金：产出 × 结算后市价 − 输入 × 税后有效价（传导账）− 运营成本（闲置维护费） ----
+  // ---- 7. 建筑现金：产出 × 本省结算后市价 − 输入 × 本省税后有效价（传导账）− 运营成本（闲置维护费） ----
   let investReturn = 0;
   for (const p of n.projects) {
     if (p.status === 'active' && !newlyCompleted.has(p.id)) {
       const def = BUILDING_DEFS[p.kind];
-      p.lastRevenue = p.lastOutput * n.market[def.output].price;
+      const provM = n.provinceMarkets[p.provId];
+      const outPrice = provM ? provM[def.output].price : n.market[def.output].price;
+      p.lastRevenue = p.lastOutput * outPrice;
       let inputCost = 0;
       for (const g of Object.keys(p.lastInputUsed) as GoodId[]) {
         // v0.4 传导账：输入按「税后有效价」（含商品税与上游成本传导）
-        inputCost += (p.lastInputUsed[g] ?? 0) * n.market[g].effPrice;
+        inputCost += (p.lastInputUsed[g] ?? 0) * (provM ? provM[g].effPrice : n.market[g].effPrice);
       }
       p.lastInputCost = inputCost;
       const idleScale = 0.3 + 0.7 * p.lastRunFactor * p.lastSkillFactor;

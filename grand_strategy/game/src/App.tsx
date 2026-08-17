@@ -211,6 +211,18 @@ export default function App() {
       setPolicy(g, policy, on);
       setGame({ ...g });
     },
+    /** v0.8 开放贸易（国家开关：false=自给不贸易；true=按世界价进出口+关税） */
+    setOpenTrade(on: boolean) {
+      const g = gameRef.current;
+      g.nations[g.playerNation].openTrade = on;
+      setGame({ ...g });
+    },
+    /** v0.8 出口权（省授予/收回：获权省商品可入国际市场） */
+    setExportRight(provId: number, on: boolean) {
+      const g = gameRef.current;
+      g.nations[g.playerNation].exportRights[provId] = on;
+      setGame({ ...g });
+    },
     abolish() {
       const g = gameRef.current;
       if (abolishSerfdom(g, map)) {
@@ -392,6 +404,8 @@ export default function App() {
           onCancelInvest={actions.cancelInvest}
           onTogglePolicy={actions.togglePolicy}
           onAbolish={actions.abolish}
+          onToggleTrade={actions.setOpenTrade}
+          onExportRight={actions.setExportRight}
           collapsed={govCollapsed}
           onToggleCollapse={() => setGovCollapsed((c) => !c)}
         />

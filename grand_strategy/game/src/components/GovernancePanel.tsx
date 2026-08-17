@@ -32,6 +32,7 @@ import { nextJobThreshold } from '../game/labor';
 import { BUILDING_DEFS, BUILDING_KINDS, buildingSkillReqPop, projectProgress, buildingUnlock } from '../game/buildings';
 import type { BuildingKind } from '../game/buildings';
 import { monthLabel } from '../game/clock';
+import { isCoastal } from '../game/logistics';
 
 interface Props {
   game: GameState;
@@ -44,6 +45,10 @@ interface Props {
   onCancelInvest: (projectId: number) => void;
   onTogglePolicy: (policy: 'progressiveTax' | 'universalSuffrage', on: boolean) => void;
   onAbolish: () => void;
+  /** v0.8 开放贸易（国家开关） */
+  onToggleTrade: (on: boolean) => void;
+  /** v0.8 出口权（省授予/收回） */
+  onExportRight: (provId: number, on: boolean) => void;
 }
 
 type Section = 'economy' | 'stability' | 'market' | 'tax' | 'class' | 'pop' | 'policy' | 'invest' | 'log';
@@ -831,7 +836,7 @@ function SectionHead({ title, icon: Icon, open, onToggle }: { title: string; ico
   );
 }
 
-export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSpending, onRetrain, onInvest, onCancelInvest, onTogglePolicy, onAbolish, collapsed, onToggleCollapse }: Props & { collapsed: boolean; onToggleCollapse: () => void }) {
+export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSpending, onRetrain, onInvest, onCancelInvest, onTogglePolicy, onAbolish, onToggleTrade, onExportRight, collapsed, onToggleCollapse }: Props & { collapsed: boolean; onToggleCollapse: () => void }) {
   const [open, setOpen] = useState<Record<Section, boolean>>({
     economy: true, stability: false, market: true, tax: false, class: false, pop: true, policy: false, invest: false, log: false,
   });
@@ -1128,6 +1133,36 @@ export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSp
                   <span><b>普选</b>：下阶层政治权重 ↑，上阶层 ↓；识字率高则稳定度 +3，低则 -4</span>
                 </label>
                 <p className="dim">政策写入存档；累进税/普选可随时开关，废农奴制仅一次。</p>
+              </section>
+
+              <section className="p-sec">
+                <h4>对外贸易（v0.8 市场中心 · 省为结算单元）</h4>
+                <label className="policy-toggle">
+                  <input
+                    type="checkbox"
+                    checked={n.openTrade}
+                    onChange={(e) => onToggleTrade(e.target.checked)}
+                  />
+                  <span><b>开放贸易</b>：按世界价进出口 + 关税；关闭则完全自给（无任何进出口）</span>
+                </label>
+                <p className="dim">出口权：仅获权省商品可直通国际市场；沿海/港口省默认获权，内陆省可授予/收回。未获权省商品须运抵口岸出口（运费吨位计税）。</p>
+                <div className="mkt-scroll export-right-list">
+                  {ownedProvs.map((p) => (
+                    <label key={p.id} className="policy-toggle">
+                      <input
+                        type="checkbox"
+                        checked={!!n.exportRights[p.id]}
+                        onChange={(e) => onExportRight(p.id, e.target.checked)}
+                      />
+                      <span>行省 #{p.id + 1}{isCoastal(map, p) ? '（沿海）' : ''}{p.isStrait ? ' · 海峡要道' : ''}</span>
+                    </label>
+                  ))}
+                </div>
+                {(n.monthly.exportValue > 0.01 || n.monthly.importValue > 0.01) ? (
+                  <p className="dim">上月出口 {n.monthly.exportValue.toFixed(1)} 万₭ · 进口 {n.monthly.importValue.toFixed(1)} 万₭ · 关税 +{n.monthly.tariff.toFixed(1)} 万₭</p>
+                ) : (
+                  <p className="dim">上月无国际贸易（开放贸易关闭或口岸无余量）。</p>
+                )}
               </section>
             </div>
           )}
