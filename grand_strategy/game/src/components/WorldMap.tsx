@@ -632,7 +632,7 @@ export default function WorldMap({
       <div className="map-hint">
         {editMode ? (
           <>
-            编辑模式 · 点击省份改属「{ownerName(editNation)}」· 迷雾区不可编辑
+            编辑模式 · {editNation === 'undiscovered' ? '已选「迷雾锁」：点击省份不生效' : `点击省份改属「${ownerName(editNation)}」`} · 迷雾区不可编辑
             <span className="map-hint-sep">｜</span>
             Ctrl+Z 撤销 · Ctrl+Y 重做
           </>
@@ -749,7 +749,11 @@ function HoverCard({
       </dl>
       {editMode && (
         <div className="hover-note">
-          {prov.isUndiscovered ? '🔒 迷雾区锁定，不可编辑' : `点击改属 → ${ownerName(editNation)}`}
+          {prov.isUndiscovered
+            ? '🔒 迷雾区锁定，不可编辑'
+            : editNation === 'undiscovered'
+              ? '已选「迷雾锁」：点击省份不生效'
+              : `点击改属 → ${ownerName(editNation)}`}
         </div>
       )}
       {prov.isUndiscovered && !editMode && <div className="hover-note">未探明的新大陆，等待征服。</div>}
