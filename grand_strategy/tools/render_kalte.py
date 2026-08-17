@@ -38,7 +38,7 @@ for c in cells:
     pts = [vxy(i) for i in c.get("v", [])]
     if len(pts) < 3:
         continue
-    if t > 0 or h > sea_max_h:
+    if h >= 20:  # 陆地：海拔 h>=20
         land += 1
         # 海拔上色：低=绿，中=黄褐，高=棕白
         if h > 60:

@@ -15,7 +15,7 @@ cells = data["cells"]["cells"]
 verts = data["cells"]["vertices"]
 vxy = (lambda i: (verts[i].get("p", [0, 0])[0], verts[i].get("p", [0, 0])[1]))
 cell_by_id = {c["i"]: c for c in cells}
-land_ids = [c["i"] for c in cells if c.get("t", 0) > 0]
+land_ids = [c["i"] for c in cells if c.get("h", 0) >= 20]  # 陆地判定：海拔 h>=20
 
 # 省份聚簇
 prov_of = {}
@@ -183,3 +183,26 @@ d.text((lx, ly + len(NATIONS) * 20 + 4), "新大陆（未探明）· 不属任�
 
 img.save(OUT)
 print("已保存", OUT)
+
+# ---- 省份图（每省一色，不含新大陆边距）----
+import colorsys
+pimg = Image.new("RGB", (W, H), (10, 22, 46))
+pd = ImageDraw.Draw(pimg)
+pal = {}
+def pcol(p):
+    if p not in pal:
+        hue = (p * 0.61803398875) % 1.0
+        r, g, b = colorsys.hsv_to_rgb(hue, 0.55, 0.82)
+        pal[p] = (int(r * 255), int(g * 255), int(b * 255))
+    return pal[p]
+for p, cids in prov_cells.items():
+    col = pcol(p)
+    for cid in cids:
+        c = cell_by_id[cid]
+        pts = [vxy(i) for i in c["v"]]
+        if len(pts) < 3:
+            continue
+        pd.polygon(pts, fill=col)
+        pd.line(pts + [pts[0]], fill=(255, 255, 255), width=1)
+pimg.save("kalte_provinces.png")
+print("已保存 kalte_provinces.png（省份图）")
