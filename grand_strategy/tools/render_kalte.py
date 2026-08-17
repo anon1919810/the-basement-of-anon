@@ -15,15 +15,13 @@ W, H = info["width"], info["height"]
 cells = data["cells"]["cells"]
 verts = data["cells"]["vertices"]
 
-# 顶点坐标格式探测
-v0 = verts[0]
-if isinstance(v0, dict):
-    def vxy(i):
-        v = verts[i]
-        return v.get("x", v.get("lon", 0)), v.get("y", v.get("lat", 0))
-else:
-    def vxy(i):
-        return verts[i][0], verts[i][1]
+# 顶点坐标格式探测（Azgaar 顶点: {i, p:[x,y], v, c}）
+def vxy(i):
+    v = verts[i]
+    p = v.get("p") if isinstance(v, dict) else None
+    if p:
+        return p[0], p[1]
+    return (v[0], v[1]) if isinstance(v, list) else (0, 0)
 
 img = Image.new("RGB", (W, H), (10, 20, 40))
 d = ImageDraw.Draw(img)
