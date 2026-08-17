@@ -5,6 +5,7 @@ import type { GameState } from './game/state';
 import { loadGame, newGameState, tickDay, processEvent, deferEvent, saveGame, clearSave } from './game/state';
 import type { NationId, Speed, TaxLevel } from './game/types';
 import { monthIndex, daysPerSecond } from './game/clock';
+import { retrainPop } from './game/labor';
 import WorldMap from './components/WorldMap';
 import TopBar from './components/TopBar';
 import NationPanel from './components/NationPanel';
@@ -77,9 +78,14 @@ export default function App() {
       g.nations[g.playerNation].taxLevel = level;
       setGame({ ...g });
     },
-    setSpending(kind: 'military' | 'admin' | 'infra', value: number) {
+    setSpending(kind: 'military' | 'admin' | 'infra' | 'court' | 'health', value: number) {
       const g = gameRef.current;
       g.nations[g.playerNation].spending[kind] = value;
+      setGame({ ...g });
+    },
+    retrain(provId: number, popIndex: number) {
+      const g = gameRef.current;
+      retrainPop(g, map, provId, popIndex);
       setGame({ ...g });
     },
     chooseEvent(optionIndex: number) {
@@ -127,6 +133,7 @@ export default function App() {
           selectedProvince={selectedProvince}
           onTax={actions.setTax}
           onSpending={actions.setSpending}
+          onRetrain={actions.retrain}
         />
       </main>
       <EventModal game={game} onChoose={actions.chooseEvent} onDefer={actions.deferEventNow} />

@@ -26,7 +26,7 @@ export default function TopBar({ game, onSpeed, onNation, onSave, onNewGame, onO
     <header className="topbar">
       <div className="brand">
         <span className="brand-mark">《卡尔特》</span>
-        <span className="brand-sub">v0.0.0 可玩原型</span>
+        <span className="brand-sub">v0.1.0 行政区三级制</span>
       </div>
 
       <div className="tb-clock">
@@ -63,6 +63,9 @@ export default function TopBar({ game, onSpeed, onNation, onSave, onNewGame, onO
         </span>
         <span className="stat">
           识字率 <b>{(n.literacy * 100).toFixed(1)}%</b>
+        </span>
+        <span className="stat">
+          健康 <b>{(n.health * 100).toFixed(0)}%</b>
         </span>
       </div>
 

@@ -1,20 +1,28 @@
 /**
- * 事件系统：内置模板池（12 条），每 1-3 月随机触发 1 条。
- * 每条事件含若干选项，选项效果作用于：国库 / 稳定度 / 人口 / 识字率 / 粮食。
- * 效果以「比例系数」定义，应用时按国家规模（月收入 / 年耗粮 / 人口）缩放，保证小国大国都合理。
+ * 事件系统（v0.1）：内置模板池（12 条 v0.0.0 + 3 条 v0.1 经济事件，共 15 条），
+ * 每 1-3 月随机触发 1 条（weight=0 的「破产」仅由代码触发，不进随机池）。
+ * 选项效果作用于：国库 / 稳定度 / 人口 / 识字率 / 健康 / 幸福度 / 粮食 / 商品库存。
+ * 效果以「比例系数」定义，应用时按国家规模（月收入 / 年耗粮 / 人口）缩放。
  */
+import type { GoodId } from './types';
 
 export interface EventEffects {
   /** × 月税收收入（万₭） */
   treasuryFrac?: number;
   /** 绝对稳定度增减（0-100） */
   stability?: number;
-  /** × 当前人口（万人）的增减比例（0.01 = +1%） */
+  /** × 当前人口的比例增减（0.01 = +1%，作用于各省 POP） */
   popFrac?: number;
   /** 绝对识字率增减（0-1） */
   literacy?: number;
+  /** 绝对健康增减（0-1） */
+  health?: number;
+  /** 全国平均幸福度增减（0-100，作用于各省 POP） */
+  happiness?: number;
   /** × 年耗粮（万吨）的增减 */
   foodFrac?: number;
+  /** 各商品库存比例增减（0.25 = +25%，作用于国家市场库存） */
+  stockFrac?: Partial<Record<GoodId, number>>;
 }
 
 export interface EventOption {
@@ -171,6 +179,39 @@ export const EVENT_TEMPLATES: EventTemplate[] = [
       { label: '资助学堂与出版', effects: { treasuryFrac: -1.5, literacy: 0.004 } },
       { label: '听之任之', effects: { literacy: 0.002 } },
       { label: '查禁新书', hint: '愚民政策', effects: { literacy: -0.002, stability: -3 } },
+    ],
+  },
+  {
+    id: 'grain_price_surge',
+    title: '粮价暴涨',
+    text: '秋收不及预期，粮商囤积居奇，粮价连日暴涨，城中流民聚于粮铺门外，骚乱一触即发。',
+    weight: 7,
+    options: [
+      { label: '开仓平粜，压制粮价', hint: '消耗存粮', effects: { stockFrac: { food: -0.25 }, stability: 4 } },
+      { label: '设粮价上限，严惩囤积', hint: '商户怨声载道', effects: { stability: 3, happiness: -4, treasuryFrac: -0.6 } },
+      { label: '放任市场，加征流通税', hint: '与民争利', effects: { treasuryFrac: 2.2, stability: -6, happiness: -5 } },
+    ],
+  },
+  {
+    id: 'industrial_boom',
+    title: '工坊机器轰鸣',
+    text: '新式纺织机在工坊试车成功，订货单雪片般飞来，资本家奔走相告，工人们连夜赶工。',
+    weight: 6,
+    options: [
+      { label: '扶持新兴工坊', hint: '减税与低息贷款', effects: { treasuryFrac: -1.6, literacy: 0.003, happiness: 3 } },
+      { label: '加征工业税，充实国库', effects: { treasuryFrac: 3.2, happiness: -4 } },
+      { label: '任其自然发展', effects: { treasuryFrac: 1.2, happiness: 1 } },
+    ],
+  },
+  {
+    id: 'bankruptcy',
+    title: '国库破产',
+    text: '国库亏空如山，债主登门，军饷欠发，朝野震动。再不设法，恐生大变。',
+    weight: 0, // 仅由代码触发（国库低于下限）
+    options: [
+      { label: '发行国债，举债度日', hint: '寅吃卯粮', effects: { treasuryFrac: 2, stability: -3 } },
+      { label: '变卖王室产业', hint: '伤及体面', effects: { treasuryFrac: 1.2, happiness: -2 } },
+      { label: '开征临时特别税', hint: '民怨沸腾', effects: { treasuryFrac: 1.5, stability: -5, happiness: -4 } },
     ],
   },
 ];
