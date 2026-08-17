@@ -25,6 +25,11 @@ export function lastBar(m: MarketLike): BarLike {
   return m.history[m.history.length - 1];
 }
 
+/** 数组末元素（指数等无 K 线结构的历史用） */
+export function lastOf<T>(arr: T[]): T {
+  return arr[arr.length - 1];
+}
+
 /** 最新收盘价 */
 export function lastClose(m: MarketLike): number {
   return lastBar(m).close;

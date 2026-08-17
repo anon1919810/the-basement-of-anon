@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { STOCKS } from "./game/stocks";
-import { advanceDay, computeRanking } from "./game/engine";
+import { advanceDay } from "./game/engine";
 import {
   cancelOrder,
   clearSave,
@@ -11,23 +11,27 @@ import {
   placeMarketOrder,
   saveState,
 } from "./game/state";
-import type { GameState, OrderKind, OrderSide } from "./game/types";
+import { openShort, coverShort } from "./game/short";
+import type { GameState, OrderKind, OrderSide, TunableParams } from "./game/types";
 import TopBar from "./components/TopBar";
 import MarketTable from "./components/MarketTable";
-import PriceChart from "./components/PriceChart";
+import CandleChart from "./components/CandleChart";
 import TradePanel from "./components/TradePanel";
 import HoldingsTable from "./components/HoldingsTable";
 import NewsFeed from "./components/NewsFeed";
-import SettlementModal from "./components/SettlementModal";
+import PortfolioCharts from "./components/PortfolioCharts";
+import TradeLog from "./components/TradeLog";
+import ReportModal from "./components/ReportModal";
+import TuningPanel from "./components/TuningPanel";
 
 export default function App() {
   const [state, setState] = useState<GameState>(() => loadState() ?? createInitialState());
   const [selectedCode, setSelectedCode] = useState<string>(STOCKS[0].code);
   const [busy, setBusy] = useState(false);
+  const [tuningOpen, setTuningOpen] = useState(false);
 
   const assets = useMemo(() => computeAssets(state), [state]);
   const ret = assets / state.initialCash - 1;
-  const ranking = useMemo(() => (state.phase === "settled" ? computeRanking(state) : []), [state]);
 
   const commit = useCallback((next: GameState) => {
     setState(next);
@@ -37,10 +41,17 @@ export default function App() {
   const handleTrade = useCallback(
     (side: OrderSide, kind: OrderKind, qty: number, limitPrice?: number) => {
       const next = structuredClone(state);
-      const result =
-        kind === "market"
-          ? placeMarketOrder(next, side, selectedCode, qty)
-          : placeLimitOrder(next, side, selectedCode, qty, limitPrice ?? 0);
+      let result;
+      if (side === "short") {
+        result = openShort(next, selectedCode, qty);
+      } else if (side === "cover") {
+        result = coverShort(next, selectedCode, qty);
+      } else {
+        result =
+          kind === "market"
+            ? placeMarketOrder(next, side, selectedCode, qty)
+            : placeLimitOrder(next, side === "buy" ? "buy" : "sell", selectedCode, qty, limitPrice ?? 0);
+      }
       if (result.ok) commit(next);
       return result;
     },
@@ -72,7 +83,18 @@ export default function App() {
     clearSave();
     setState(createInitialState());
     setSelectedCode(STOCKS[0].code);
+    setTuningOpen(false);
   }, []);
+
+  const handleTuningApply = useCallback(
+    (params: TunableParams) => {
+      const next = structuredClone(state);
+      next.pendingParams = { ...params };
+      commit(next);
+      setTuningOpen(false);
+    },
+    [state, commit],
+  );
 
   return (
     <div className="app">
@@ -83,13 +105,14 @@ export default function App() {
         busy={busy}
         onNextDay={handleNextDay}
         onNewGame={handleNewGame}
+        onOpenTuning={() => setTuningOpen(true)}
       />
       <main className="main-grid">
         <aside className="panel">
           <MarketTable state={state} selectedCode={selectedCode} onSelect={setSelectedCode} />
         </aside>
         <section className="panel">
-          <PriceChart state={state} code={selectedCode} />
+          <CandleChart state={state} code={selectedCode} />
         </section>
         <aside className="panel">
           <TradePanel
@@ -100,22 +123,32 @@ export default function App() {
           />
         </aside>
       </main>
-      <section className="bottom-grid">
+      <section className="charts-grid">
+        <div className="panel">
+          <PortfolioCharts state={state} />
+        </div>
+      </section>
+      <section className="bottom-grid bottom-grid-3">
         <div className="panel">
           <HoldingsTable state={state} onSelect={setSelectedCode} />
         </div>
         <div className="panel">
           <NewsFeed state={state} />
         </div>
+        <div className="panel">
+          <TradeLog state={state} />
+        </div>
       </section>
-      {state.phase === "settled" && (
-        <SettlementModal
-          state={state}
-          playerAssets={assets}
-          playerRet={ret}
-          ranking={ranking}
-          onNewGame={handleNewGame}
+      {tuningOpen && (
+        <TuningPanel
+          current={state.params}
+          pending={state.pendingParams}
+          onApply={handleTuningApply}
+          onClose={() => setTuningOpen(false)}
         />
+      )}
+      {state.phase === "settled" && state.report && (
+        <ReportModal state={state} report={state.report} onNewGame={handleNewGame} />
       )}
     </div>
   );
