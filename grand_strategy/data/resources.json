@@ -1,0 +1,454 @@
+{
+ "0": {
+  "cells": 496,
+  "elev": 37.4,
+  "temp": 3.7,
+  "prec": 15.3,
+  "coastal": true,
+  "resources": [
+   "sulfur",
+   "timber",
+   "fish"
+  ]
+ },
+ "1": {
+  "cells": 32,
+  "elev": 21.8,
+  "temp": -4.7,
+  "prec": 19.2,
+  "coastal": true,
+  "resources": [
+   "farmland",
+   "fish"
+  ]
+ },
+ "2": {
+  "cells": 2,
+  "elev": 20.0,
+  "temp": -6.5,
+  "prec": 0.0,
+  "coastal": true,
+  "resources": [
+   "farmland",
+   "fish"
+  ]
+ },
+ "3": {
+  "cells": 1,
+  "elev": 20.0,
+  "temp": -6.0,
+  "prec": 0.0,
+  "coastal": true,
+  "resources": [
+   "farmland",
+   "fish"
+  ]
+ },
+ "4": {
+  "cells": 7,
+  "elev": 20.3,
+  "temp": -4.7,
+  "prec": 12.9,
+  "coastal": true,
+  "resources": [
+   "farmland",
+   "fish"
+  ]
+ },
+ "5": {
+  "cells": 344,
+  "elev": 28.9,
+  "temp": 10.0,
+  "prec": 18.5,
+  "coastal": true,
+  "resources": [
+   "copper",
+   "coal",
+   "fish",
+   "salt"
+  ]
+ },
+ "6": {
+  "cells": 1,
+  "elev": 20.0,
+  "temp": -5.0,
+  "prec": 20.0,
+  "coastal": true,
+  "resources": [
+   "farmland",
+   "fish"
+  ]
+ },
+ "7": {
+  "cells": 7,
+  "elev": 20.7,
+  "temp": -3.0,
+  "prec": 23.1,
+  "coastal": true,
+  "resources": [
+   "farmland",
+   "fish"
+  ]
+ },
+ "8": {
+  "cells": 38,
+  "elev": 21.5,
+  "temp": 2.3,
+  "prec": 26.5,
+  "coastal": true,
+  "resources": [
+   "farmland",
+   "fish",
+   "salt"
+  ]
+ },
+ "9": {
+  "cells": 1,
+  "elev": 21.0,
+  "temp": 0.0,
+  "prec": 32.0,
+  "coastal": true,
+  "resources": [
+   "farmland",
+   "fish",
+   "salt"
+  ]
+ },
+ "10": {
+  "cells": 2,
+  "elev": 20.0,
+  "temp": 0.0,
+  "prec": 30.5,
+  "coastal": true,
+  "resources": [
+   "farmland",
+   "timber",
+   "fish"
+  ]
+ },
+ "11": {
+  "cells": 10,
+  "elev": 20.3,
+  "temp": 2.0,
+  "prec": 26.4,
+  "coastal": true,
+  "resources": [
+   "farmland",
+   "fish"
+  ]
+ },
+ "12": {
+  "cells": 3,
+  "elev": 20.0,
+  "temp": 2.0,
+  "prec": 30.3,
+  "coastal": true,
+  "resources": [
+   "farmland",
+   "timber",
+   "fish"
+  ]
+ },
+ "13": {
+  "cells": 113,
+  "elev": 24.4,
+  "temp": 10.9,
+  "prec": 19.3,
+  "coastal": true,
+  "resources": [
+   "coal",
+   "fish",
+   "salt"
+  ]
+ },
+ "14": {
+  "cells": 3,
+  "elev": 21.0,
+  "temp": 7.3,
+  "prec": 22.7,
+  "coastal": true,
+  "resources": [
+   "farmland",
+   "fish"
+  ]
+ },
+ "15": {
+  "cells": 1,
+  "elev": 20.0,
+  "temp": 6.0,
+  "prec": 24.0,
+  "coastal": true,
+  "resources": [
+   "farmland",
+   "fish"
+  ]
+ },
+ "16": {
+  "cells": 2,
+  "elev": 20.5,
+  "temp": 9.0,
+  "prec": 38.0,
+  "coastal": true,
+  "resources": [
+   "farmland",
+   "timber",
+   "fish"
+  ]
+ },
+ "17": {
+  "cells": 84,
+  "elev": 22.5,
+  "temp": 17.7,
+  "prec": 18.5,
+  "coastal": true,
+  "resources": [
+   "farmland",
+   "fish",
+   "salt"
+  ]
+ },
+ "18": {
+  "cells": 1,
+  "elev": 20.0,
+  "temp": 12.0,
+  "prec": 30.0,
+  "coastal": true,
+  "resources": [
+   "farmland",
+   "fish"
+  ]
+ },
+ "19": {
+  "cells": 261,
+  "elev": 27.4,
+  "temp": 15.8,
+  "prec": 17.3,
+  "coastal": true,
+  "resources": [
+   "iron",
+   "fish"
+  ]
+ },
+ "20": {
+  "cells": 1,
+  "elev": 24.0,
+  "temp": 16.0,
+  "prec": 30.0,
+  "coastal": true,
+  "resources": [
+   "farmland",
+   "timber",
+   "fish"
+  ]
+ },
+ "21": {
+  "cells": 3,
+  "elev": 24.3,
+  "temp": 16.3,
+  "prec": 50.7,
+  "coastal": true,
+  "resources": [
+   "iron",
+   "coal",
+   "timber",
+   "fish"
+  ]
+ },
+ "22": {
+  "cells": 1,
+  "elev": 20.0,
+  "temp": 16.0,
+  "prec": 56.0,
+  "coastal": true,
+  "resources": [
+   "cotton",
+   "timber",
+   "fish"
+  ]
+ },
+ "23": {
+  "cells": 4,
+  "elev": 22.2,
+  "temp": 19.0,
+  "prec": 19.0,
+  "coastal": true,
+  "resources": [
+   "farmland",
+   "fish"
+  ]
+ },
+ "24": {
+  "cells": 1,
+  "elev": 20.0,
+  "temp": 19.0,
+  "prec": 27.0,
+  "coastal": true,
+  "resources": [
+   "farmland",
+   "timber",
+   "fish",
+   "salt"
+  ]
+ },
+ "25": {
+  "cells": 2,
+  "elev": 24.5,
+  "temp": 19.0,
+  "prec": 21.5,
+  "coastal": true,
+  "resources": [
+   "farmland",
+   "fish"
+  ]
+ },
+ "26": {
+  "cells": 1,
+  "elev": 20.0,
+  "temp": 19.0,
+  "prec": 37.0,
+  "coastal": true,
+  "resources": [
+   "cotton",
+   "timber",
+   "fish"
+  ]
+ },
+ "27": {
+  "cells": 23,
+  "elev": 21.0,
+  "temp": 18.0,
+  "prec": 16.1,
+  "coastal": true,
+  "resources": [
+   "farmland",
+   "fish"
+  ]
+ },
+ "28": {
+  "cells": 305,
+  "elev": 24.5,
+  "temp": 7.9,
+  "prec": 17.0,
+  "coastal": true,
+  "resources": [
+   "coal",
+   "timber",
+   "fish"
+  ]
+ },
+ "29": {
+  "cells": 1,
+  "elev": 20.0,
+  "temp": 18.0,
+  "prec": 21.0,
+  "coastal": true,
+  "resources": [
+   "farmland",
+   "fish"
+  ]
+ },
+ "30": {
+  "cells": 6,
+  "elev": 21.3,
+  "temp": 17.7,
+  "prec": 27.7,
+  "coastal": true,
+  "resources": [
+   "farmland",
+   "fish"
+  ]
+ },
+ "31": {
+  "cells": 1,
+  "elev": 21.0,
+  "temp": 17.0,
+  "prec": 33.0,
+  "coastal": true,
+  "resources": [
+   "cotton",
+   "timber",
+   "fish"
+  ]
+ },
+ "32": {
+  "cells": 1,
+  "elev": 20.0,
+  "temp": 17.0,
+  "prec": 18.0,
+  "coastal": true,
+  "resources": [
+   "farmland",
+   "fish"
+  ]
+ },
+ "33": {
+  "cells": 13,
+  "elev": 21.0,
+  "temp": 16.1,
+  "prec": 26.5,
+  "coastal": true,
+  "resources": [
+   "farmland",
+   "timber",
+   "fish",
+   "salt"
+  ]
+ },
+ "34": {
+  "cells": 2,
+  "elev": 20.0,
+  "temp": 15.0,
+  "prec": 25.5,
+  "coastal": true,
+  "resources": [
+   "farmland",
+   "fish"
+  ]
+ },
+ "35": {
+  "cells": 1,
+  "elev": 20.0,
+  "temp": 15.0,
+  "prec": 19.0,
+  "coastal": true,
+  "resources": [
+   "farmland",
+   "fish"
+  ]
+ },
+ "36": {
+  "cells": 4,
+  "elev": 20.0,
+  "temp": -9.8,
+  "prec": 0.0,
+  "coastal": true,
+  "resources": [
+   "farmland",
+   "fish"
+  ]
+ },
+ "37": {
+  "cells": 8,
+  "elev": 20.5,
+  "temp": -11.2,
+  "prec": 0.0,
+  "coastal": true,
+  "resources": [
+   "timber",
+   "fish",
+   "salt"
+  ]
+ },
+ "38": {
+  "cells": 2,
+  "elev": 21.0,
+  "temp": -12.0,
+  "prec": 0.0,
+  "coastal": true,
+  "resources": [
+   "timber",
+   "fish",
+   "salt"
+  ]
+ }
+}
