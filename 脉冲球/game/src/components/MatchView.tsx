@@ -1,4 +1,4 @@
-// Canvas 比赛回放视图：球场 + 22 名球员圆点 + 脉冲 LED 球 + 控制条 + 事件日志
+// Canvas 比赛回放视图：球场 + 18 名球员圆点（9v9）+ 脉冲 LED 球 + 控制条 + 事件日志
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MatchResult } from '../game/engine';
 import type { MatchEvent } from '../game/match';
@@ -116,7 +116,27 @@ function drawScene(canvas: HTMLCanvasElement, teams: [Team, Team], evs: MatchEve
     ctx.fillRect(gx, Y(FIELD_H / 2) - 2 * s, 1.2 * s, 4 * s);
   }
 
-  // 球员（22 个圆点）
+  // 队名 + 脉冲 + 当前事件字幕（看得懂的观赛信息）
+  ctx.font = 'bold 15px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#2563eb';
+  ctx.fillText(teams[0].name, 8, 18);
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#dc2626';
+  ctx.fillText(teams[1].name, W - 8, 18);
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 17px sans-serif';
+  ctx.fillStyle = PULSE_COLORS[pulse];
+  ctx.fillText(`脉冲 ${pulse}/5`, W / 2, 20);
+  const caption = cur.desc || '';
+  ctx.font = '13px sans-serif';
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  const cw = ctx.measureText(caption).width + 14;
+  ctx.fillRect(W / 2 - cw / 2, H - 24, cw, 18);
+  ctx.fillStyle = '#111827';
+  ctx.fillText(caption, W / 2, H - 11);
+
+  // 球员（18 个圆点 = 9v9）
   const pos = layoutTeams(teams, possession, bx, by);
   const actorName = cur.player;
   for (const t of [0, 1] as const) {
