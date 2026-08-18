@@ -1,11 +1,10 @@
-// Canvas 比赛回放视图：球场 + 18 名球员圆点（9v9）+ 脉冲 LED 球 + 控制条 + 事件日志
+// Three.js 3D 比赛回放视图：3D 球场 + 18 名小人（9v9）+ 脉冲 LED 球 + 控制条 + 事件日志
+// 播放/步进/跳节/比分/脉冲/日志 DOM 与原 2D 版一致；渲染层由 MatchScene（three）承担
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MatchResult } from '../game/engine';
 import type { MatchEvent } from '../game/match';
-import { FIELD_W, FIELD_H } from '../game/match';
-import type { Team } from '../game/teams';
+import { MatchScene, PULSE_COLORS } from '../three/MatchScene';
 
-const PULSE_COLORS = ['#9ca3af', '#9ca3af', '#3b82f6', '#22c55e', '#eab308', '#ef4444'];
 const PULSE_LABEL = ['灰(0~1)', '灰(0~1)', '蓝(2)', '绿(3)', '黄(4)', '红(5)'];
 
 const KEY_TYPES = new Set<string>([
@@ -42,151 +41,12 @@ function eventIndexAt(events: MatchEvent[], t: number): number {
   return ans;
 }
 
-// 简化站位：控球方围绕球展开，防守方在球与本方球门之间布阵
-function layoutTeams(teams: [Team, Team], possession: 0 | 1, bx: number, by: number): { x: number; y: number }[][] {
-  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
-  const gkX = (t: 0 | 1) => (t === 0 ? 2.5 : FIELD_W - 2.5);
-  const out: { x: number; y: number }[][] = [[], []];
-  for (const t of [0, 1] as const) {
-    const isAtt = t === possession;
-    const d = isAtt ? (possession === 0 ? 1 : -1) : (possession === 0 ? -1 : 1);
-    const arr = out[t];
-    arr[0] = { x: gkX(t), y: FIELD_H / 2 };
-    const offs: [number, number][] = isAtt
-      ? [[10, 0], [5, 4.5], [5, -4.5], [0, 8], [0, -8], [1, 0], [-6, 5], [-6, -5]]
-      : [[-3, 0], [-6, 3.5], [-6, -3.5], [-11, 7], [-11, -7], [-12, 0], [-18, 6], [-18, -6]];
-    for (let i = 0; i < 8; i++) {
-      arr[i + 1] = {
-        x: clamp(bx + d * offs[i][0], 1.5, FIELD_W - 1.5),
-        y: clamp(by + offs[i][1], 1.5, FIELD_H - 1.5),
-      };
-    }
-  }
-  return out;
-}
-
-function drawScene(canvas: HTMLCanvasElement, teams: [Team, Team], evs: MatchEvent[], idx: number, frac: number) {
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return;
-  const W = canvas.width, H = canvas.height;
-  const s = W / FIELD_W;
-  const X = (x: number) => x * s;
-  const Y = (y: number) => y * s;
-  const cur = evs[Math.min(idx, evs.length - 1)];
-  const nxt = evs[idx + 1];
-  const bx = nxt ? cur.x + (nxt.x - cur.x) * frac : cur.x;
-  const by = nxt ? cur.y + (nxt.y - cur.y) * frac : cur.y;
-  const pulse = Math.max(0, Math.min(5, Math.round(cur.pulse)));
-  const possession: 0 | 1 = cur.team === 0 ? 0 : 1;
-
-  ctx.clearRect(0, 0, W, H);
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, W, H);
-
-  // 球场：白底细绿线
-  ctx.strokeStyle = '#16a34a';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(0, 0, W, H);
-  ctx.beginPath();
-  ctx.moveTo(X(FIELD_W / 2), 0);
-  ctx.lineTo(X(FIELD_W / 2), H);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(X(FIELD_W / 2), Y(FIELD_H / 2), 3 * s, 0, Math.PI * 2);
-  ctx.stroke();
-
-  // 脉冲区（半径 13 半圆环，虚线）
-  ctx.setLineDash([6, 5]);
-  ctx.strokeStyle = '#4ade80';
-  for (const g of [0, FIELD_W] as const) {
-    ctx.beginPath();
-    ctx.arc(X(g), Y(FIELD_H / 2), 13 * s, -Math.PI / 2, Math.PI / 2);
-    ctx.stroke();
-  }
-  ctx.setLineDash([]);
-
-  // 禁区（半径 8 半圆）+ 球门
-  ctx.strokeStyle = '#22c55e';
-  for (const g of [0, FIELD_W] as const) {
-    ctx.beginPath();
-    ctx.arc(X(g), Y(FIELD_H / 2), 8 * s, -Math.PI / 2, Math.PI / 2);
-    ctx.stroke();
-    ctx.fillStyle = '#16a34a';
-    const gx = g === 0 ? X(g) - 1.2 * s : X(g);
-    ctx.fillRect(gx, Y(FIELD_H / 2) - 2 * s, 1.2 * s, 4 * s);
-  }
-
-  // 队名 + 脉冲 + 当前事件字幕（看得懂的观赛信息）
-  ctx.font = 'bold 15px sans-serif';
-  ctx.textAlign = 'left';
-  ctx.fillStyle = '#2563eb';
-  ctx.fillText(teams[0].name, 8, 18);
-  ctx.textAlign = 'right';
-  ctx.fillStyle = '#dc2626';
-  ctx.fillText(teams[1].name, W - 8, 18);
-  ctx.textAlign = 'center';
-  ctx.font = 'bold 17px sans-serif';
-  ctx.fillStyle = PULSE_COLORS[pulse];
-  ctx.fillText(`脉冲 ${pulse}/5`, W / 2, 20);
-  const caption = cur.desc || '';
-  ctx.font = '13px sans-serif';
-  ctx.fillStyle = 'rgba(255,255,255,0.92)';
-  const cw = ctx.measureText(caption).width + 14;
-  ctx.fillRect(W / 2 - cw / 2, H - 24, cw, 18);
-  ctx.fillStyle = '#111827';
-  ctx.fillText(caption, W / 2, H - 11);
-
-  // 球员（18 个圆点 = 9v9）
-  const pos = layoutTeams(teams, possession, bx, by);
-  const actorName = cur.player;
-  for (const t of [0, 1] as const) {
-    for (let i = 0; i < 9; i++) {
-      const p = pos[t][i];
-      const isGK = i === 0;
-      const isActor = actorName !== undefined && cur.team === t && actorName === teams[t].players[i].name;
-      ctx.beginPath();
-      ctx.arc(X(p.x), Y(p.y), (isGK ? 2.6 : 2.1) * s, 0, Math.PI * 2);
-      ctx.fillStyle = t === 0 ? '#2563eb' : '#dc2626';
-      ctx.fill();
-      ctx.lineWidth = 1.5;
-      ctx.strokeStyle = '#ffffff';
-      ctx.stroke();
-      if (isActor) {
-        ctx.beginPath();
-        ctx.arc(X(p.x), Y(p.y), (isGK ? 3.7 : 3.2) * s, 0, Math.PI * 2);
-        ctx.strokeStyle = '#f59e0b';
-        ctx.lineWidth = 2.5;
-        ctx.stroke();
-      }
-      ctx.fillStyle = '#ffffff';
-      ctx.font = `${Math.max(8, 1.6 * s)}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(String(teams[t].players[i].number), X(p.x), Y(p.y));
-    }
-  }
-
-  // 球 + 脉冲 LED 光晕
-  ctx.beginPath();
-  ctx.arc(X(bx), Y(by), 3.0 * s, 0, Math.PI * 2);
-  ctx.fillStyle = PULSE_COLORS[pulse];
-  ctx.globalAlpha = 0.35;
-  ctx.fill();
-  ctx.globalAlpha = 1;
-  ctx.beginPath();
-  ctx.arc(X(bx), Y(by), 1.6 * s, 0, Math.PI * 2);
-  ctx.fillStyle = '#111827';
-  ctx.fill();
-  ctx.lineWidth = 1.5;
-  ctx.strokeStyle = PULSE_COLORS[pulse];
-  ctx.stroke();
-}
-
 export default function MatchView({ result }: { result: MatchResult }) {
   const events = result.events;
   const duration = events.length ? events[events.length - 1].t : 0;
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
+  const sceneRef = useRef<MatchScene | null>(null);
 
   const [vtime, setVtime] = useState(0);
   const [playing, setPlaying] = useState(true);
@@ -216,7 +76,19 @@ export default function MatchView({ result }: { result: MatchResult }) {
     keyOnlyRef.current = keyOnly;
   }, [playing, speed, keyOnly]);
 
-  // rAF 播放循环：vtime 推进（1x ≈ 60 秒播完一场）
+  // 创建/销毁 3D 场景（一场比赛一个）
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const scene = new MatchScene(el, result.teams, result.events);
+    sceneRef.current = scene;
+    return () => {
+      scene.dispose();
+      sceneRef.current = null;
+    };
+  }, [result]);
+
+  // rAF 播放循环：vtime 推进（1x ≈ 60 秒播完一场）+ 驱动 3D 渲染
   useEffect(() => {
     let raf = 0;
     let last = performance.now();
@@ -247,22 +119,12 @@ export default function MatchView({ result }: { result: MatchResult }) {
         vtimeRef.current = vt;
         setVtime(vt);
       }
+      sceneRef.current?.update(vtimeRef.current, now);
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
   }, [duration]);
-
-  // 绘制当前帧
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const curIdx = eventIndexAt(events, vtime);
-    const a = events[Math.max(0, curIdx)];
-    const b = events[curIdx + 1];
-    const frac = b ? (vtime - a.t) / Math.max(1e-6, b.t - a.t) : 0;
-    drawScene(canvas, result.teams, events, curIdx, Math.max(0, Math.min(1, frac)));
-  }, [vtime, events, result]);
 
   // 日志自动滚动到当前事件
   useEffect(() => {
@@ -323,12 +185,7 @@ export default function MatchView({ result }: { result: MatchResult }) {
         </div>
       </div>
 
-      <canvas
-        ref={canvasRef}
-        width={880}
-        height={Math.round((880 * FIELD_H) / FIELD_W)}
-        className="pitch"
-      />
+      <div className="pitch3d" ref={containerRef} />
 
       <div className="controls">
         <div className="group">

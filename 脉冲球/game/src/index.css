@@ -58,7 +58,16 @@ header h1 span { color: var(--green); font-size: 13px; font-weight: 600; letter-
 .scoreboard .meta { margin-left: auto; display: flex; gap: 14px; align-items: center; color: #4b5563; font-size: 13px; }
 .pulse i { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
 
-.pitch { width: 100%; border: 1px solid var(--line); border-radius: 10px; display: block; background: #fff; }
+.pitch3d {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 65 / 40;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #0d2317;
+}
+.pitch3d canvas { display: block; width: 100% !important; height: 100% !important; }
 
 .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 10px 0; }
 .controls .group { display: flex; gap: 6px; align-items: center; border-right: 1px solid var(--line); padding-right: 10px; }
