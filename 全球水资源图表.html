@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>全球水资源储量</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<style>
+  body { font-family: "PingFang SC","Microsoft YaHei",sans-serif; background:#f7f9fb; color:#1f2937; margin:0; padding:24px; }
+  h1 { text-align:center; font-size:22px; }
+  .sub { text-align:center; color:#6b7280; font-size:13px; margin-bottom:16px; }
+  .cards { display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin-bottom:20px; }
+  .card { background:#fff; border:1px solid #e5e7eb; padding:12px 18px; text-align:center; min-width:130px; }
+  .card .num { font-size:20px; font-weight:700; color:#3b82f6; }
+  .card .lbl { font-size:12px; color:#6b7280; margin-top:2px; }
+  .chart { background:#fff; border:1px solid #e5e7eb; margin:0 auto 20px; width:92%; max-width:900px; height:420px; }
+  .note { text-align:center; color:#9ca3af; font-size:12px; }
+</style>
+</head>
+<body>
+<h1>🌍 全球水资源储量</h1>
+<div class="sub">数据来源：美国地质调查局（USGS）全球水分布估算</div>
+<div class="cards">
+  <div class="card"><div class="num">13.86亿</div><div class="lbl">全球总水量（km³）</div></div>
+  <div class="card"><div class="num">96.5%</div><div class="lbl">海洋（咸水）</div></div>
+  <div class="card"><div class="num">2.5%</div><div class="lbl">淡水总量</div></div>
+  <div class="card"><div class="num">≈0.007%</div><div class="lbl">人类易用地表淡水（河湖）</div></div>
+</div>
+
+<div id="c1" class="chart"></div>
+<div class="sub">图一：全球水的分布——绝大多数是海水，淡水只有一小块</div>
+
+<div id="c2" class="chart"></div>
+<div class="sub">图二：淡水的构成——近七成冻在冰川冰盖里，地下水占三成，河湖少得可怜</div>
+
+<p class="note">💡 关键点：水其实很多，但能直接喝的（河流+湖泊淡水）只有全球水的约 0.007%——所以节约用水永远重要。</p>
+
+<script>
+const c1 = echarts.init(document.getElementById('c1'));
+c1.setOption({
+  tooltip: { trigger: 'item', formatter: '{b}: {c}%' },
+  series: [{
+    type: 'pie', radius: ['38%','68%'], center: ['50%','50%'],
+    label: { formatter: '{b}\n{d}%' },
+    data: [
+      { name: '海洋（咸水）', value: 96.5, itemStyle: { color: '#1d6fd6' } },
+      { name: '淡水', value: 2.5, itemStyle: { color: '#3ecf8e' } },
+      { name: '其他（咸湖/土壤水等）', value: 1.0, itemStyle: { color: '#9ca3af' } }
+    ]
+  }]
+});
+
+const c2 = echarts.init(document.getElementById('c2'));
+c2.setOption({
+  tooltip: { trigger: 'axis' },
+  grid: { left: 80, right: 30, top: 20, bottom: 40 },
+  xAxis: { type: 'value', name: '占淡水总量 %' },
+  yAxis: {
+    type: 'category',
+    data: ['冰川与冰盖','地下水','冻土（永冻层）','湖泊（淡水）','土壤水','大气水','沼泽','河流','生物体内'],
+    inverse: true
+  },
+  series: [{
+    type: 'bar',
+    data: [68.7, 30.1, 0.8, 0.26, 0.05, 0.04, 0.03, 0.006, 0.003],
+    itemStyle: { color: '#3ecf8e' },
+    label: { show: true, position: 'right', formatter: '{c}%' }
+  }]
+});
+
+window.addEventListener('resize', () => { c1.resize(); c2.resize(); });
+</script>
+</body>
+</html>
