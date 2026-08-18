@@ -29,27 +29,33 @@ function eventIndexAt(events: MatchEvent[], t: number): number {
   return ans;
 }
 
-// 简化站位：控球方围绕球展开，防守方在球与本方球门之间布阵（与旧 2D 版一致）
-function layoutTeams(possession: 0 | 1, bx: number, by: number): { x: number; y: number }[][] {
-  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
-  const gkX = (t: 0 | 1) => (t === 0 ? 2.5 : FIELD_W - 2.5);
-  const out: { x: number; y: number }[][] = [[], []];
-  for (const t of [0, 1] as const) {
-    const isAtt = t === possession;
-    const d = isAtt ? (possession === 0 ? 1 : -1) : (possession === 0 ? -1 : 1);
-    const arr = out[t];
-    arr[0] = { x: gkX(t), y: FIELD_H / 2 };
-    const offs: [number, number][] = isAtt
-      ? [[10, 0], [5, 4.5], [5, -4.5], [0, 8], [0, -8], [1, 0], [-6, 5], [-6, -5]]
-      : [[-3, 0], [-6, 3.5], [-6, -3.5], [-11, 7], [-11, -7], [-12, 0], [-18, 6], [-18, -6]];
-    for (let i = 0; i < 8; i++) {
-      arr[i + 1] = {
-        x: clamp(bx + d * offs[i][0], 1.5, FIELD_W - 1.5),
-        y: clamp(by + offs[i][1], 1.5, FIELD_H - 1.5),
-      };
-    }
-  }
-  return out;
+// ---- 阵型跑位（表现层，事件流驱动）：进攻 2-3-2-1 围绕球展开 / 防守压缩布防 / 无球前插·回追 ----
+// 偏移表：fwd 沿进攻方向为正（进攻=朝对方球门；防守=朝本方球门回撤深度），side 为横向
+const ATT_OFFS: [number, number][] = [
+  [-4, -4.5], [-4, 4.5],        // 后卫 ×2：球后一层
+  [-2, 0], [-3, -8], [-3, 8],   // 中场 ×3：中路靠后 + 双边拉开
+  [5, -6.5], [5, 6.5],          // 前腰 ×2：球前一层
+  [10, 0],                      // 前锋 ×1：最前
+];
+const DEF_OFFS: [number, number][] = [
+  [3, -3.5], [3, 3.5],          // 后卫线贴近球
+  [7.5, 0], [9, -5.5], [9, 5.5],// 中场回撤
+  [14, -4.5], [14, 4.5],        // 前腰更深
+  [19, 0],                      // 前锋最深，护本方禁区
+];
+// 阵型随球的横向偏转权重：前场跟球、后场保持中轴（球在哪一侧阵型偏转）
+const ATT_TILT = [0.5, 0.5, 0.6, 0.6, 0.6, 0.85, 0.85, 0.95];
+const DEF_TILT = [0.8, 0.8, 0.6, 0.6, 0.6, 0.45, 0.45, 0.35];
+// 长传/反击/球权转换类事件 → 触发无球前插与回追
+const RUN_TRIGGERS = new Set([
+  'pass', 'tackle', 'throwin', 'kickoff', 'goal',
+  'penalty_goal', 'penalty_miss', 'shot', 'violation', 'offside',
+]);
+
+interface RunState {
+  until: number; // 真实毫秒时间戳，到点自动回位
+  tx: number;    // 跑位目标（游戏坐标）
+  ty: number;
 }
 
 // 号码 Sprite 文字纹理（每个号码缓存一份）
@@ -111,6 +117,8 @@ export class MatchScene {
   private disposed = false;
   private disposables: { dispose(): void }[] = [];
   private actorNames: [string[], string[]];
+  private runs: (RunState | null)[] = new Array(18).fill(null);
+  private lastIdx = -1;
 
   constructor(container: HTMLElement, teams: [Team, Team], events: MatchEvent[]) {
     this.events = events;
@@ -163,7 +171,7 @@ export class MatchScene {
       const bx = e0.x, by = e0.y;
       this.ball.position.set(wx(bx), BALL_R, wz(by));
       this.halo.position.copy(this.ball.position);
-      const layout = layoutTeams(e0.team === 0 ? 0 : 1, bx, by);
+      const layout = this.layoutTeams(e0.team === 0 ? 0 : 1, bx, by, 0);
       for (let t = 0; t < 2; t++)
         for (let i = 0; i < 9; i++) {
           const p = this.players[t * 9 + i];
@@ -358,6 +366,77 @@ export class MatchScene {
     }
   }
 
+  // ---------- 阵型跑位（表现层） ----------
+
+  // 确定性伪随机（由事件下标派生，回放稳定）
+  private hash2(a: number, b: number): number {
+    let h = (a * 374761393 + b * 668265263) | 0;
+    h = (h ^ (h >>> 13)) | 0;
+    h = (h * 1274126177) | 0;
+    return (h ^ (h >>> 16)) >>> 0;
+  }
+
+  // 事件驱动无球跑位：进攻方前锋必插 + 一名边前腰前插，防守方 1 名后卫回追
+  private maybeTriggerRuns(idx: number, e: MatchEvent, now: number): void {
+    if (!RUN_TRIGGERS.has(e.type)) return;
+    const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+    const att: 0 | 1 = e.team === 0 ? 0 : 1;
+    const def = (1 - att) as 0 | 1;
+    const dirF = att === 0 ? 1 : -1; // 进攻推进方向
+    const dur = 850 + (this.hash2(idx, 7) % 500); // 0.85~1.35 真实秒，任何倍速/暂停都可见
+    const r01 = (k: number) => (this.hash2(idx, k) % 1000) / 1000;
+
+    // 前锋前插（必触发），向对方球门冲刺
+    this.runs[att * 9 + 8] = {
+      until: now + dur,
+      tx: clamp(e.x + dirF * (15 + r01(1) * 6), 2, FIELD_W - 2),
+      ty: clamp(e.y + (r01(2) - 0.5) * 7, 2, FIELD_H - 2),
+    };
+    // 一名边前腰（左右交替）沿边路前插
+    const wide = this.hash2(idx, 3) % 2 === 0 ? 6 : 7;
+    this.runs[att * 9 + wide] = {
+      until: now + dur * 0.85,
+      tx: clamp(e.x + dirF * (10 + r01(5) * 5), 2, FIELD_W - 2),
+      ty: clamp(e.y + (wide === 6 ? -6 : 6) + (r01(6) - 0.5) * 3, 2, FIELD_H - 2),
+    };
+    // 防守方 1 名后卫回追，向本方球门方向收
+    const df = (this.hash2(idx, 9) % 2) + 1;
+    this.runs[def * 9 + df] = {
+      until: now + dur * 1.1,
+      tx: clamp(e.x + dirF * 8, 2, FIELD_W - 2),
+      ty: clamp(HALF_H + (e.y - HALF_H) * 0.4, 2, FIELD_H - 2),
+    };
+  }
+
+  // 阵型落位：控球方以球为中心展开攻击阵型（纵深分层 + 横向拉开 + 随球偏转），
+  // 防守方在球与己方球门之间压缩布防（保持 2-3-2-1 相对结构）；无球跑位覆盖对应球员，跑完回位
+  private layoutTeams(possession: 0 | 1, bx: number, by: number, now: number): { x: number; y: number }[][] {
+    const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+    const dirF = possession === 0 ? 1 : -1; // 控球方推进方向
+    const out: { x: number; y: number }[][] = [[], []];
+    for (const t of [0, 1] as const) {
+      const isAtt = t === possession;
+      const gkX = t === 0 ? 2.5 : FIELD_W - 2.5;
+      // 门将永远留守本方球门，仅随球小幅横向移动
+      out[t][0] = {
+        x: gkX,
+        y: clamp(HALF_H + (by - HALF_H) * 0.3, HALF_H - 3.5, HALF_H + 3.5),
+      };
+      const offs = isAtt ? ATT_OFFS : DEF_OFFS;
+      const tilts = isAtt ? ATT_TILT : DEF_TILT;
+      for (let i = 1; i <= 8; i++) {
+        const [fo, so] = offs[i - 1];
+        const ay = HALF_H + (by - HALF_H) * tilts[i - 1]; // 球在哪一侧，该层随之偏转
+        let tx = bx + dirF * fo;
+        let ty = ay + so;
+        const run = this.runs[t * 9 + i];
+        if (run && now < run.until) { tx = run.tx; ty = run.ty; }
+        out[t][i] = { x: clamp(tx, 1.5, FIELD_W - 1.5), y: clamp(ty, 1.5, FIELD_H - 1.5) };
+      }
+    }
+    return out;
+  }
+
   // ---------- 每帧更新 ----------
 
   update(vtime: number, now: number): void {
@@ -371,6 +450,12 @@ export class MatchScene {
     const by = nxt ? cur.y + (nxt.y - cur.y) * frac : cur.y;
     const pulse = Math.max(0, Math.min(5, Math.round(cur.pulse)));
     const possession: 0 | 1 = cur.team === 0 ? 0 : 1;
+
+    // 事件驱动无球跑位：跨入新事件时触发前插/回追
+    if (idx !== this.lastIdx) {
+      this.lastIdx = idx;
+      this.maybeTriggerRuns(idx, cur, now);
+    }
 
     const dt = Math.min(0.1, Math.max(0, (now - this.lastNow) / 1000));
     this.lastNow = now;
@@ -395,9 +480,8 @@ export class MatchScene {
       bvz = (nxt.y - cur.y) / dT;
     }
 
-    // 球员：位置缓动 + 面向移动方向 + 摆腿
-    const layout = layoutTeams(possession, bx, by);
-    const kP = 1 - Math.exp(-dt * 6);
+    // 球员：位置缓动 + 面向移动方向 + 摆腿（前插跑位者更快、摆腿更大）
+    const layout = this.layoutTeams(possession, bx, by, now);
     for (let t2 = 0; t2 < 2; t2++) {
       for (let i = 0; i < 9; i++) {
         const p = layout[t2][i];
@@ -408,11 +492,14 @@ export class MatchScene {
         const v = dt > 1e-4 ? prev.distanceTo(new THREE.Vector3(tx, 0, tz)) / dt : 0;
         prev.set(tx, 0, tz);
 
+        const runSt = this.runs[t2 * 9 + i];
+        const isRun = !!runSt && now < runSt.until;
+        const kP = 1 - Math.exp(-dt * (isRun ? 11 : 6));
         g.x += (tx - g.x) * kP;
         g.z += (tz - g.z) * kP;
 
         // 摆腿：sin 相位 × 速度
-        const amp = Math.min(0.85, v * 0.16);
+        const amp = Math.min(0.95, v * 0.2) * (isRun ? 1.25 : 1);
         rig.phase += v * dt * 6;
         rig.leftLeg.rotation.x = Math.sin(rig.phase) * amp;
         rig.rightLeg.rotation.x = Math.sin(rig.phase + Math.PI) * amp;
