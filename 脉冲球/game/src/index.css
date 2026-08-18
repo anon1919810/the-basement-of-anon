@@ -1,0 +1,107 @@
+:root {
+  --green: #16a34a;
+  --ink: #1f2937;
+  --line: #e5e7eb;
+  --muted: #6b7280;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  color: var(--ink);
+  background: #fff;
+}
+
+.app { max-width: 980px; margin: 0 auto; padding: 24px 20px 60px; }
+
+header h1 { font-size: 28px; margin: 0; letter-spacing: 2px; }
+header h1 span { color: var(--green); font-size: 13px; font-weight: 600; letter-spacing: 4px; margin-left: 10px; }
+.tagline { color: var(--muted); margin: 6px 0 18px; font-size: 13px; }
+
+.btn {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.btn:hover { border-color: var(--green); color: var(--green); }
+.btn.primary { background: var(--green); border-color: var(--green); color: #fff; }
+.btn.primary:hover { background: #15803d; color: #fff; }
+.btn.active { background: var(--green); border-color: var(--green); color: #fff; }
+.btn.big { font-size: 16px; padding: 12px 40px; }
+
+.start { text-align: center; padding: 90px 0; }
+.start p { color: var(--muted); font-size: 13px; margin-top: 16px; }
+
+.replay-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.seed { color: #9ca3af; font-size: 12px; }
+
+.scoreboard {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.scoreboard .team { font-weight: 700; font-size: 15px; }
+.scoreboard .score { font-size: 26px; font-weight: 800; color: var(--green); padding: 0 10px; }
+.scoreboard .meta { margin-left: auto; display: flex; gap: 14px; align-items: center; color: #4b5563; font-size: 13px; }
+.pulse i { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
+
+.pitch { width: 100%; border: 1px solid var(--line); border-radius: 10px; display: block; background: #fff; }
+
+.controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 10px 0; }
+.controls .group { display: flex; gap: 6px; align-items: center; border-right: 1px solid var(--line); padding-right: 10px; }
+.controls .group:last-child { border-right: none; }
+.controls .group.grow { flex: 1; min-width: 160px; }
+.controls input[type="range"] { width: 100%; accent-color: var(--green); }
+.chk { font-size: 13px; color: #4b5563; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+.chk input { accent-color: var(--green); }
+
+.log {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  height: 320px;
+  overflow-y: auto;
+  font-size: 13px;
+  margin-top: 8px;
+  background: #fff;
+}
+.log-item { padding: 5px 12px; border-bottom: 1px solid #f3f4f6; display: flex; gap: 8px; }
+.log-item .t { color: #9ca3af; width: 52px; flex: none; }
+.log-item .tag { width: 72px; flex: none; color: var(--muted); }
+.log-item.current { background: #ecfdf5; }
+.log-item.goal { background: #f0fdf4; font-weight: 600; }
+.log-item.foul, .log-item.violation, .log-item.offside { color: #b45309; }
+.log-item.yellow { color: #a16207; }
+.log-item.shot { color: #0369a1; }
+.log-item.period_end, .log-item.overtime_start, .log-item.shootout_win { color: #0f766e; font-weight: 600; }
+
+.summary { margin-top: 28px; border-top: 2px solid var(--green); padding-top: 14px; }
+.summary h2 { margin: 0 0 10px; font-size: 18px; }
+.summary h3 { margin: 16px 0 6px; font-size: 14px; }
+.final { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
+.final strong { color: var(--green); font-size: 15px; }
+.periods { display: flex; gap: 14px; color: #4b5563; font-size: 13px; margin-bottom: 12px; flex-wrap: wrap; }
+.periods .so { color: var(--green); font-weight: 600; }
+.stats { display: flex; gap: 28px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 12px; }
+.stats table { border-collapse: collapse; font-size: 14px; }
+.stats td, .stats th { border: 1px solid var(--line); padding: 5px 16px; text-align: center; }
+.stats th { background: #fafafa; font-weight: 600; }
+.pulse-stat { font-size: 13px; color: #4b5563; padding-top: 4px; }
+.pulse-stat strong { font-size: 20px; color: var(--ink); margin: 0 4px; }
+.pulse-stat span { display: block; color: #9ca3af; font-size: 12px; margin-top: 4px; }
+.goals { font-size: 13px; color: #374151; line-height: 1.9; padding-left: 20px; }
+.goals b { color: var(--green); }
+
+footer { margin-top: 48px; text-align: center; color: #9ca3af; font-size: 12px; }
