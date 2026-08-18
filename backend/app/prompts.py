@@ -91,7 +91,7 @@ def _detect_zimu(text):
 
 def _first_sentences(body, max_chars=120):
     """逐字摘录正文开头1-3个完整句子（确定性，保证100%忠实原文）"""
-    from shared import _split_sentences
+    from .shared import _split_sentences
     sents = _split_sentences(body)
     out = ""
     for s in sents:
