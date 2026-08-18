@@ -20,6 +20,37 @@ const CAM_D = 22;
 const wx = (gx: number) => gx - HALF_W;
 const wz = (gy: number) => gy - HALF_H;
 
+// ---- 播放参数（集中可调）----
+export const PLAYBACK = {
+  // 游戏时钟推进倍率：1x = 1 游戏秒 / 1 真实秒 → 每秒一条的事件约铺 60 帧，插值/缓动充分展现。
+  // 旧版为 duration/60（每帧正好跳一个事件 → 木偶跳帧）；如需整体加速观赛，调大此值即可
+  //（建议 ≤ 6：再快则每事件不足 10 帧，缓动又开始丢失）。
+  TIME_SCALE: 1,
+  // easeInOutCubic：段内加速-减速（不是匀速直线）
+  EASE: (t: number): number => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2),
+  // 球的飞行弧线：长距离/空中球类事件轻微抬高
+  ARC: {
+    MIN_DIST: 6,      // 位移 ≥ 6 米才起弧
+    RATE: 0.08,       // 弧高 ≈ 位移 × RATE
+    MAX_H: 2.6,       // 最高弧（米）
+    TYPES: new Set<string>([
+      'pass', 'shot', 'kickoff', 'throwin', 'offside',
+      'penalty', 'penalty_goal', 'penalty_miss', 'shootout_goal', 'shootout_miss', 'goal',
+    ]),
+  },
+};
+
+// Catmull-Rom 1D：过 P1→P2 段（u∈[0,1]），切向由相邻点 P0/P3 决定 → 曲线过最近 3-4 个事件点
+function catmullRom1D(p0: number, p1: number, p2: number, p3: number, u: number): number {
+  const u2 = u * u, u3 = u2 * u;
+  return 0.5 * (
+    2 * p1 +
+    (-p0 + p2) * u +
+    (2 * p0 - 5 * p1 + 4 * p2 - p3) * u2 +
+    (-p0 + 3 * p1 - 3 * p2 + p3) * u3
+  );
+}
+
 function eventIndexAt(events: MatchEvent[], t: number): number {
   let lo = 0, hi = events.length - 1, ans = 0;
   while (lo <= hi) {
@@ -109,7 +140,7 @@ export class MatchScene {
   private haloMat!: THREE.MeshBasicMaterial;
   private actorRing: THREE.Mesh;
   private followTarget = new THREE.Vector3(0, 0, 0);
-  private ballTarget = new THREE.Vector3();
+  private prevBall = new THREE.Vector3(); // 上一帧球位（镜头提前量用有限差分速度）
   private clock = 0;
   private lastNow = 0;
   private interacting = false;
@@ -171,6 +202,7 @@ export class MatchScene {
       const bx = e0.x, by = e0.y;
       this.ball.position.set(wx(bx), BALL_R, wz(by));
       this.halo.position.copy(this.ball.position);
+      this.prevBall.copy(this.ball.position);
       const layout = this.layoutTeams(e0.team === 0 ? 0 : 1, bx, by, 0);
       for (let t = 0; t < 2; t++)
         for (let i = 0; i < 9; i++) {
@@ -445,9 +477,28 @@ export class MatchScene {
     const idx = eventIndexAt(events, t);
     const cur = events[Math.min(idx, events.length - 1)];
     const nxt = events[idx + 1];
-    const frac = nxt ? (t - cur.t) / Math.max(1e-6, nxt.t - cur.t) : 0;
-    const bx = nxt ? cur.x + (nxt.x - cur.x) * frac : cur.x;
-    const by = nxt ? cur.y + (nxt.y - cur.y) * frac : cur.y;
+
+    // 连续时间轴：段内比例 u∈[0,1]（时间间隔不均匀也按真实秒比例穿过），再用 easeInOut 缓动
+    let u = 0;
+    if (nxt) {
+      const span = Math.max(1e-6, nxt.t - cur.t);
+      u = Math.min(1, Math.max(0, (t - cur.t) / span));
+    }
+    const ease = PLAYBACK.EASE(u);
+
+    // 球：Catmull-Rom 曲线过最近 3-4 个事件点 + 缓动采样 + 轻微高度弧（长传/空中球类）
+    const p0 = events[Math.max(0, idx - 1)];
+    const p3 = events[Math.min(events.length - 1, idx + 2)];
+    const p1 = cur, p2 = nxt ?? cur;
+    const bx = catmullRom1D(p0.x, p1.x, p2.x, p3.x, ease);
+    const by = catmullRom1D(p0.y, p1.y, p2.y, p3.y, ease);
+    let arc = 0;
+    if (nxt) {
+      const dist = Math.hypot(nxt.x - cur.x, nxt.y - cur.y);
+      if (dist >= PLAYBACK.ARC.MIN_DIST && PLAYBACK.ARC.TYPES.has(nxt.type)) {
+        arc = Math.min(PLAYBACK.ARC.MAX_H, dist * PLAYBACK.ARC.RATE) * Math.sin(Math.PI * ease);
+      }
+    }
     const pulse = Math.max(0, Math.min(5, Math.round(cur.pulse)));
     const possession: 0 | 1 = cur.team === 0 ? 0 : 1;
 
@@ -461,10 +512,8 @@ export class MatchScene {
     this.lastNow = now;
     this.clock += dt;
 
-    // 球：线性插值坐标 + 轻微滞后
-    const kBall = 1 - Math.exp(-dt * 9);
-    this.ballTarget.set(wx(bx), BALL_R, wz(by));
-    this.ball.position.lerp(this.ballTarget, kBall);
+    // 球：直接按曲线落位（时间采样本身平滑，无需滞后跟随）
+    this.ball.position.set(wx(bx), BALL_R + arc, wz(by));
     const pc = new THREE.Color(PULSE_COLORS[pulse]);
     this.ballMat.emissive.copy(pc);
     this.haloMat.color.copy(pc);
@@ -472,15 +521,14 @@ export class MatchScene {
     this.halo.scale.setScalar(hs);
     this.halo.position.copy(this.ball.position);
 
-    // 球速（世界单位/秒，镜头提前量用）
-    let bvx = 0, bvz = 0;
-    if (nxt) {
-      const dT = Math.max(1e-3, nxt.t - cur.t);
-      bvx = (nxt.x - cur.x) / dT;
-      bvz = (nxt.y - cur.y) / dT;
-    }
+    // 球速（世界单位/秒，有限差分；镜头提前量用，跳转/步进时自然被钳制）
+    const bdt = Math.max(1e-4, dt);
+    const bvx = (this.ball.position.x - this.prevBall.x) / bdt;
+    const bvz = (this.ball.position.z - this.prevBall.z) / bdt;
+    this.prevBall.copy(this.ball.position);
 
-    // 球员：位置缓动 + 面向移动方向 + 摆腿（前插跑位者更快、摆腿更大）
+    // 球员：目标 = 缓动球位上的阵型（随 easeInOut 球位滑动，段内加速-减速）
+    // + 位置缓动跟随 + 面向移动方向 + 摆腿（前插跑位者更快、摆腿更大）
     const layout = this.layoutTeams(possession, bx, by, now);
     for (let t2 = 0; t2 < 2; t2++) {
       for (let i = 0; i < 9; i++) {

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MatchResult } from '../game/engine';
 import type { MatchEvent } from '../game/match';
-import { MatchScene, PULSE_COLORS } from '../three/MatchScene';
+import { MatchScene, PLAYBACK, PULSE_COLORS } from '../three/MatchScene';
 
 const PULSE_LABEL = ['灰(0~1)', '灰(0~1)', '蓝(2)', '绿(3)', '黄(4)', '红(5)'];
 
@@ -88,12 +88,13 @@ export default function MatchView({ result }: { result: MatchResult }) {
     };
   }, [result]);
 
-  // rAF 播放循环：vtime 推进（1x ≈ 60 秒播完一场）+ 驱动 3D 渲染
+  // rAF 播放循环：vtime 按 真实 dt × 速度倍率 连续推进（1x≈实时，每秒一条的事件约铺 60 帧，
+  // 插值/缓动充分展现；暂停即停钟）+ 驱动 3D 渲染
   useEffect(() => {
     let raf = 0;
     let last = performance.now();
     const loop = (now: number) => {
-      const dt = (now - last) / 1000;
+      const dt = Math.min(0.1, (now - last) / 1000);
       last = now;
       if (playingRef.current) {
         let vt = vtimeRef.current;
@@ -108,8 +109,8 @@ export default function MatchView({ result }: { result: MatchResult }) {
             setPlaying(false);
           }
         } else {
-          const baseRate = duration / 60;
-          vt = Math.min(duration, vt + dt * baseRate * speedRef.current);
+          // 连续时间轴：游戏时钟 = 真实 dt × TIME_SCALE × 速度倍率（不再每帧跳到下一事件）
+          vt = Math.min(duration, vt + dt * PLAYBACK.TIME_SCALE * speedRef.current);
           if (vt >= duration) {
             vt = duration;
             playingRef.current = false;
