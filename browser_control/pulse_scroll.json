@@ -1,0 +1,8 @@
+[
+  {"act": "wait", "ms": 1500},
+  {"act": "eval", "js": "window.scrollTo(0, 0); document.querySelector('button.btn.primary')?.click() || [...document.querySelectorAll('button')].find(b=>b.innerText.includes('开始比赛'))?.click()"},
+  {"act": "wait", "ms": 4000},
+  {"act": "eval", "js": "({scrollY: window.scrollY, pb: window.__pb, score: document.querySelector('.score')?.textContent})"},
+  {"act": "wait", "ms": 8000},
+  {"act": "eval", "js": "({scrollY: window.scrollY, pb: window.__pb, score: document.querySelector('.score')?.textContent})"}
+]

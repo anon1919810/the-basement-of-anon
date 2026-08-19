@@ -143,6 +143,8 @@ interface PlayerRig {
   yaw: number;       // 当前朝向（弧度）
   phase: number;     // 跑步摆腿相位
   prevTarget: THREE.Vector3;
+  prevPos: THREE.Vector3; // 上一帧实际位置（真实速度用，防目标突变尖峰）
+  amp: number;       // 摆腿幅度（低通滤波，防抽搐）
 }
 
 // 共享几何体（内存省）
@@ -237,6 +239,7 @@ export class MatchScene {
           const p = this.players[t * 9 + i];
           p.group.position.set(wx(layout[t][i].x), 0, wz(layout[t][i].y));
           p.prevTarget.copy(p.group.position);
+          p.prevPos.copy(p.group.position);
         }
     }
 
@@ -488,6 +491,8 @@ export class MatchScene {
           group, leftLeg, rightLeg, leftArm, rightArm,
           yaw: t === 0 ? Math.PI : 0, phase: i * 1.3,
           prevTarget: new THREE.Vector3(0, 0, 0),
+          prevPos: new THREE.Vector3(0, 0, 0),
+          amp: 0,
         });
       }
     }
@@ -702,9 +707,6 @@ export class MatchScene {
         const rig = this.players[t2 * 9 + i];
         const g = rig.group.position;
         const tx = wx(p.x), tz = wz(p.y);
-        const prev = rig.prevTarget;
-        const v = dt > 1e-4 ? prev.distanceTo(new THREE.Vector3(tx, 0, tz)) / dt : 0;
-        prev.set(tx, 0, tz);
 
         const runSt = this.runs[t2 * 9 + i];
         const isRun = !!runSt && now < runSt.until;
@@ -712,8 +714,14 @@ export class MatchScene {
         g.x += (tx - g.x) * kP;
         g.z += (tz - g.z) * kP;
 
-        // 摆腿：sin 相位 × 速度
-        const amp = Math.min(0.95, v * 0.2) * (isRun ? 1.25 : 1);
+        // 速度 = 实际位移/时间（平滑，无目标突变尖峰）→ 驱动摆腿
+        const v = dt > 1e-4 ? rig.prevPos.distanceTo(g) / dt : 0;
+        rig.prevPos.copy(g);
+
+        // 摆腿幅度低通滤波（防抽搐）
+        const targetAmp = Math.min(0.95, v * 0.2) * (isRun ? 1.25 : 1);
+        rig.amp += (targetAmp - rig.amp) * (1 - Math.exp(-dt * 10));
+        const amp = rig.amp;
         rig.phase += v * dt * 6;
         rig.leftLeg.rotation.x = Math.sin(rig.phase) * amp;
         rig.rightLeg.rotation.x = Math.sin(rig.phase + Math.PI) * amp;
@@ -758,7 +766,7 @@ export class MatchScene {
     const lmag = Math.hypot(lx, lz);
     if (lmag > 7) { lx *= 7 / lmag; lz *= 7 / lmag; }
     lx += possession === 0 ? 3 : -3; // 进攻方向偏置
-    const kT = 1 - Math.exp(-dt * 4);
+    const kT = 1 - Math.exp(-dt * 2.2); // 运镜更柔（FM 式平滑跟随）
     this.followTarget.lerp(new THREE.Vector3(this.ball.position.x + lx, 0, this.ball.position.z + lz), kT);
 
     if (!this.interacting) {

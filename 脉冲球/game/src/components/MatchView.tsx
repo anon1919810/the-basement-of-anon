@@ -158,9 +158,12 @@ export default function MatchView({ result }: { result: MatchResult }) {
     return () => cancelAnimationFrame(raf);
   }, [duration]);
 
-  // 日志自动滚动到当前事件
+  // 日志滚动：只在容器内滚动（绝不滚整个页面——修复观赛时页面被强制下拉）
   useEffect(() => {
-    logRef.current?.querySelector(`[data-idx="${idx}"]`)?.scrollIntoView({ block: 'nearest' });
+    const c = logRef.current;
+    if (!c) return;
+    const item = c.querySelector(`[data-idx="${idx}"]`);
+    if (item) c.scrollTo({ top: (item as HTMLElement).offsetTop - c.clientHeight / 2 });
   }, [idx]);
 
   const goTo = (t: number) => {
