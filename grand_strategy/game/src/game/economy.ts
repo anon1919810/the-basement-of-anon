@@ -667,8 +667,9 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
   }
   n.foodStock = n.stocks.food; // 镜像到 v0.0.0 字段
 
-  // ---- 7. 建筑现金（v0.9 双轨）：国营利润入国库；私营利润入资本池，持续亏损破产 ----
+  // ---- 7. 建筑现金（v0.9 双轨+资本池）：国营利润入国库；私营利润 60% 分红入池（给资本侧当收入）40% 留存本金（再投资） ----
   let investReturn = 0;
+  let privateDividend = 0; // 私营分红池（当月分给资本家/商人/银行家/贵族）
   const bankrupt: InvestmentProject[] = [];
   for (const p of n.projects) {
     if (p.status === 'active' && !newlyCompleted.has(p.id)) {
@@ -688,7 +689,8 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
       const idleScale = 0.3 + 0.7 * p.lastRunFactor * p.lastSkillFactor;
       const profit = p.lastRevenue - inputCost - def.opCost * idleScale;
       if (p.owner === 'private') {
-        n.capitalWealth += profit; // 私营利润归资本
+        n.capitalWealth += profit * 0.4; // 40% 留存本金（资本家再投资）
+        privateDividend += profit * 0.6; // 60% 进入分红池（当月分给资本侧/贵族）
         p.lossMonths = profit < -1 ? p.lossMonths + 1 : 0;
         if (p.lossMonths >= 3) bankrupt.push(p); // 连续 3 月亏损 → 破产
       } else {
@@ -732,7 +734,7 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
   }
 
   // ---- 8. 劳动力市场：工资 ----
-  // ---- 8. 劳动力市场：工资（v0.9 按省供需比——首都岗位需求大 → 工资高，而非全国统一） ----
+  // ---- 8. 劳动力市场：工资（v0.9 按省供需比——物以稀为贵：省岗位供需比决定工资，首都稀缺技能岗位供需比高 → 工资高） ----
   const wages = computeWages(zeroJobMix(), zeroJobMix()); // 全国兜底（极少用到）
   const provWages: Record<number, Record<JobId, number>> = {};
   for (const pid of provIds) {
@@ -768,16 +770,9 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
     }
   }
 
-  // ---- 9. POP 投资收入：上层阶级（1-4）按国家财富占比分得资本回报池 ----
-  // 池 = 贸易顺差一部分 + 建筑工业利润一部分（万₭/月）
+  // ---- 9. 资本回报池（分红）：私营利润 60% 分红 + 贸易顺差 40% —— 国营利润归国库，不参与分红 ----
   const tradeSurplus = Math.max(0, snap.exportValue - snap.importValue);
-  let buildingProfit = 0;
-  for (const p of n.projects) {
-    if (p.status === 'active' && !newlyCompleted.has(p.id)) {
-      buildingProfit += Math.max(0, p.lastRevenue - p.lastInputCost);
-    }
-  }
-  const capitalPool = tradeSurplus * CAPITAL_POOL_TRADE + buildingProfit * CAPITAL_POOL_INDUSTRY;
+  const capitalPool = tradeSurplus * CAPITAL_POOL_TRADE + privateDividend;
   let eliteWealth = 0;
   for (const pid of provIds) {
     for (const pop of state.provinces[pid].pops) {
@@ -787,9 +782,10 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
   const perUnit = eliteWealth > 1e-9 ? capitalPool / eliteWealth : 0;
   for (const pid of provIds) {
     for (const pop of state.provinces[pid].pops) {
-      // v0.9 资本收入只给资本侧职业 + 贵族（经营/投资/交易所得）：商人/资本家/银行家 + 阶级 1-2
+      // v0.9 分红只给资本侧职业 + 贵族：银行家 1.4 / 资本家 1.2 / 商人 1.0 / 贵族（阶级1-2）按 wealthCoef
+      const CAP_JOB: Partial<Record<JobId, number>> = { banker: 1.4, capitalist: 1.2, merchant: 1.0 };
       const isCapitalist = pop.job === 'merchant' || pop.job === 'capitalist' || pop.job === 'banker' || pop.class <= 2;
-      const wc = isCapitalist ? classDef(pop.class).wealthCoef : 0;
+      const wc = isCapitalist ? (CAP_JOB[pop.job] ?? 1.0) * classDef(pop.class).wealthCoef : 0;
       pop.investIncome = wc > 0 ? pop.size * wc * perUnit : 0;
     }
   }
@@ -871,8 +867,9 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
       const needsSat = 0.35 * satFood + 0.2 * satCloth + 0.15 * satFuel + 0.3 * housingSat;
       pop.sat = { food: satFood, clothing: satCloth, housing: housingSat, fuel: satFuel };
       // ---- v0.9 生活水平 = 实际收入/生活成本 × 0.5 + 满足度 × 0.5 ----
-      // 首都悖论解法：名义工资随省供需比涨（首都岗位多）且随省物价溢价（工资货币化），
-      // 除以全国均价 → 首都实际购买力高于边远（工资优渥 > 物价负担）；边远省工资低×物价低 → 更贫困
+      // 首都悖论解法：首都优渥来自三件事——①稀缺技能岗位供需比高（物以稀为贵）→ 名义工资高；
+      // ②物价溢价（商品贵 → 农民卖价高/店主营业额高/名义工资货币化）；③资本集中（贸易金融在首都 → 资本池分成集中）。
+      // 生活水平 = 省名义收入 × 省物价溢价 / 全国均价 → 首都实际购买力高于边远；边远省工资低×物价低 → 更贫困
       const natPriceIdx = provIds.length > 0
         ? provIds.reduce((s2, pid2) => {
             const m2 = n.provinceMarkets[pid2];
