@@ -11,16 +11,21 @@
  */
 import type { GameMap } from './map';
 import type { GameState } from './state';
-import { BASE_WAGE, JOB_LADDER, LITERACY_REQ, RETRAIN_MONTHS, clamp, findClassPop } from './pops';
+import { BASE_WAGE, JOB_LADDER, LITERACY_REQ, RETRAIN_MONTHS, clamp, findClassPop, zeroJobMix } from './pops';
 import type { ClassId, JobId } from './types';
 import { classDef } from './classes';
 
 /** 每格劳动力需求系数（万人/格，决定岗位供需比） */
 export const LABOR_DEMAND_PER_CELL: Record<JobId, number> = {
-  farmer: 2.0,
-  miner: 0.35,
-  artisan: 0.7,
+  slave: 1.6,
+  peasant: 2.0,
+  worker: 0.5,
+  technician: 0.7,
+  clerk: 0.3,
   engineer: 0.35,
+  merchant: 0.2,
+  capitalist: 0.1,
+  banker: 0.08,
 };
 
 export const WAGE_CLAMP_MIN = 0.5;
@@ -28,7 +33,7 @@ export const WAGE_CLAMP_MAX = 2.0;
 
 /** 国家各岗位劳动力需求（万人） */
 export function laborDemand(map: GameMap, nationId: string): Record<JobId, number> {
-  const demand: Record<JobId, number> = { farmer: 0, miner: 0, artisan: 0, engineer: 0 };
+  const demand = zeroJobMix();
   for (const p of map.provinces) {
     if (p.owner !== nationId || p.isUndiscovered) continue;
     for (const job of Object.keys(LABOR_DEMAND_PER_CELL) as JobId[]) {

@@ -27,6 +27,7 @@ import {
   GOODS,
   INITIAL_JOB_MIX,
   JOBS,
+  zeroJobMix,
   JOB_OUTPUT_PER_WAN,
   LUXURY_NEED_BASE,
   LUXURY_OUTPUT_PER_WAN,
@@ -258,6 +259,16 @@ export function transportAdequacy(n: NationState): number {
   return clamp(stock / Math.max(1e-9, stock + demand), 0.25, 1);
 }
 
+/** 部门从业资质（v0.9 职业/阶级/资质三分）：允许职业集合，产能按集合内 POP 和 */
+export const SKILL_ALLOW: Record<BuildingCategory, JobId[]> = {
+  agriculture: ['slave', 'peasant', 'worker', 'clerk'],
+  extraction: ['slave', 'worker', 'clerk', 'engineer', 'merchant'],
+  processing: ['worker', 'technician', 'clerk', 'engineer', 'merchant', 'capitalist', 'banker'],
+  heavy: ['worker', 'technician', 'clerk', 'engineer', 'merchant', 'capitalist', 'banker'],
+  fine: ['worker', 'technician', 'clerk', 'engineer', 'merchant', 'capitalist', 'banker'],
+  infra: ['worker', 'technician', 'clerk', 'engineer', 'merchant'],
+};
+
 /** 国家政治影响力构成（阶级规模 × 政治权重；含普选修正）——UI「权势构成」 */
 export function nationClassPower(map: GameMap, state: GameState, nationId: NationId): Record<ClassId, number> {
   const n = state.nations[nationId];
@@ -378,14 +389,16 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
     for (const pop of ps.pops) {
       const retrainMult = pop.retrainMonths > 0 ? RETRAIN_OUTPUT_PENALTY : 1;
       const eff = ps.efficiency * infraCap * retrainMult * serfPenalty;
-      if (pop.job === 'farmer') {
+      if (pop.job === 'slave' || pop.job === 'peasant') {
         const o = farmerOutput(prov, pop.size, eff);
         for (const g of GOODS) out[g] += o[g];
-      } else if (pop.job === 'miner') {
+      } else if (pop.job === 'worker') {
         const o = minerOutput(prov, pop.size, eff);
         for (const g of GOODS) out[g] += o[g];
-      } else if (pop.job === 'artisan') {
-        out.clothing += pop.size * JOB_OUTPUT_PER_WAN.artisan * eff;
+      } else if (pop.job === 'technician' || pop.job === 'clerk') {
+        out.clothing += pop.size * JOB_OUTPUT_PER_WAN[pop.job] * eff;
+      } else if (pop.job === 'merchant' || pop.job === 'capitalist' || pop.job === 'banker') {
+        out.luxury += pop.size * JOB_OUTPUT_PER_WAN[pop.job] * eff;
       } else {
         out.tools += pop.size * JOB_OUTPUT_PER_WAN.engineer * eff;
       }
@@ -506,7 +519,10 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
     const mainOutput = varDef?.output ?? def.output;
     const ps = state.provinces[p.provId];
     let skillPop = 0;
-    if (ps) for (const pop of ps.pops) if (pop.job === def.skill) skillPop += pop.size;
+    if (ps) {
+      const allow = SKILL_ALLOW[def.category];
+      for (const pop of ps.pops) if (allow.includes(pop.job)) skillPop += pop.size;
+    }
     const skillFactor = clamp(skillPop / buildingSkillReqPop(def), 0, 1);
     // 输入可用性：按本省库存（建筑按项目 id 序确定性占用）
     const provStock = n.provStocks[p.provId] ?? (n.provStocks[p.provId] = zeroGoods());
@@ -650,8 +666,8 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
   }
 
   // ---- 8. 劳动力市场：工资 ----
-  const supply: Record<JobId, number> = { farmer: 0, miner: 0, artisan: 0, engineer: 0 };
-  const demand: Record<JobId, number> = { farmer: 0, miner: 0, artisan: 0, engineer: 0 };
+  const supply = zeroJobMix();
+  const demand = zeroJobMix();
   for (const pid of provIds) {
     const ps = state.provinces[pid];
     const prov = map.provinceById.get(pid);

@@ -32,8 +32,20 @@ export type RaceId =
   | 'sarkaz'
   | 'norman';
 
-/** 职业（技能梯子：农民→矿工→工匠→工程师） */
-export type JobId = 'farmer' | 'miner' | 'artisan' | 'engineer';
+/**
+ * 职业（v0.9 职业/阶级/资质三分）：生产侧 奴隶→自耕农→工人→技术工人→工程师；
+ * 管理 职员；资本侧 商人→资本家→银行家。阶级（财富）与职业解耦。
+ */
+export type JobId =
+  | 'slave'
+  | 'peasant'
+  | 'worker'
+  | 'technician'
+  | 'clerk'
+  | 'engineer'
+  | 'merchant'
+  | 'capitalist'
+  | 'banker';
 
 /**
  * 商品（v0.9 五部门：资源 → 半成品 → 成品，36 种）。

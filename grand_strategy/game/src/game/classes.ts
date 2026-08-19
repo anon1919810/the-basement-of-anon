@@ -39,8 +39,8 @@ export interface ClassDef {
 export const CLASS_DEFS: Record<ClassId, ClassDef> = {
   1: {
     id: 1,
-    label: '大贵族',
-    members: '大贵族·大资本家·大地主',
+    label: '贵族',
+    members: '世袭贵族·大金融家·大地主',
     taxCoef: 0.2,
     luxuryAccess: 1.0,
     politicalWeight: 10,
@@ -52,8 +52,8 @@ export const CLASS_DEFS: Record<ClassId, ClassDef> = {
   },
   2: {
     id: 2,
-    label: '资本家',
-    members: '大银行家·贵族·资本家',
+    label: '富裕',
+    members: '大银行家·资本家·富商',
     taxCoef: 0.4,
     luxuryAccess: 0.85,
     politicalWeight: 6,
@@ -65,8 +65,8 @@ export const CLASS_DEFS: Record<ClassId, ClassDef> = {
   },
   3: {
     id: 3,
-    label: '技术阶层',
-    members: '技术阶层·官僚·地主·教士',
+    label: '中产',
+    members: '工程师·官僚·地主·教士',
     taxCoef: 0.7,
     luxuryAccess: 0.4,
     politicalWeight: 3,
@@ -78,8 +78,8 @@ export const CLASS_DEFS: Record<ClassId, ClassDef> = {
   },
   4: {
     id: 4,
-    label: '市民工匠',
-    members: '职员·工匠·富农·市民',
+    label: '温饱',
+    members: '职员·技术工人·富农·市民',
     taxCoef: 1.0,
     luxuryAccess: 0.15,
     politicalWeight: 1.2,
@@ -91,7 +91,7 @@ export const CLASS_DEFS: Record<ClassId, ClassDef> = {
   },
   5: {
     id: 5,
-    label: '自耕农工人',
+    label: '贫困',
     members: '自耕农·工人',
     taxCoef: 1.3,
     luxuryAccess: 0,
@@ -104,7 +104,7 @@ export const CLASS_DEFS: Record<ClassId, ClassDef> = {
   },
   6: {
     id: 6,
-    label: '无业佃农',
+    label: '赤贫',
     members: '无业游民·佃农',
     taxCoef: 1.6,
     luxuryAccess: 0,
@@ -117,7 +117,7 @@ export const CLASS_DEFS: Record<ClassId, ClassDef> = {
   },
   7: {
     id: 7,
-    label: '奴隶',
+    label: '奴役',
     members: '奴隶',
     taxCoef: 0,
     luxuryAccess: 0,
@@ -131,72 +131,27 @@ export const CLASS_DEFS: Record<ClassId, ClassDef> = {
 };
 
 export const CLASS_LABEL: Record<ClassId, string> = {
-  1: '大贵族', 2: '资本家', 3: '技术阶层', 4: '市民工匠', 5: '自耕农工人', 6: '无业佃农', 7: '奴隶',
+  1: '贵族', 2: '富裕', 3: '中产', 4: '温饱', 5: '贫困', 6: '赤贫', 7: '奴役',
 };
 
 export function classDef(c: ClassId): ClassDef {
   return CLASS_DEFS[c];
 }
 
-// ---- 各国初始阶级分布（世界观，v0.4 八国） ----
+// ---- 各国初始阶级分布（v0.9 纯财富分布：职业与阶级解耦；阶级由经济内生演化） ----
 /**
- * 申斯戈维克帝国：农奴制 → 大量 奴隶/佃农 + 地主/大贵族，少量 官僚/技术阶层
- * 洛林共和国：市民/工人/资本家/官僚/技术阶层 为主，少贵族，无奴隶
- * 伊尼亚斯王国：工人/工匠/资本家/地主 + 贵族议会传统
- * 奥兰治亲王国：市民/商人工匠 为主，滨海商业阶层
- * 北/南扎拉克：工业萌芽 + 民族主义 → 工人/工匠/农民为主，选帝侯贵族少量
- * 盎格伦撒自由城邦：市民/商人/资本家/大银行家 为顶，金融阶层庞大
- * 诺曼尼亚帝国：地主/官僚 + 农奴残留，守旧落后
+ * 洛林共和国：中产/温饱多，无奴隶；申斯戈维克帝国：奴役/赤贫多，农奴制；
+ * 盎格伦撒自由城邦：富裕/贵族多，金融阶层庞大；诺曼尼亚：奴役残留。
  */
-export const INITIAL_CLASS_MIX: Record<NationId, Record<JobId, Partial<Record<ClassId, number>>>> = {
-  lorraine: {
-    farmer: { 4: 0.3, 5: 0.45, 6: 0.25 },
-    miner: { 4: 0.15, 5: 0.85 },
-    artisan: { 3: 0.3, 4: 0.7 },
-    engineer: { 1: 0.08, 2: 0.35, 3: 0.57 },
-  },
-  ianys: {
-    farmer: { 4: 0.35, 5: 0.4, 6: 0.25 },
-    miner: { 4: 0.2, 5: 0.8 },
-    artisan: { 3: 0.4, 4: 0.6 },
-    engineer: { 1: 0.1, 2: 0.4, 3: 0.5 },
-  },
-  empire: {
-    farmer: { 4: 0.04, 5: 0.08, 6: 0.28, 7: 0.6 },
-    miner: { 5: 0.3, 6: 0.4, 7: 0.3 },
-    artisan: { 3: 0.2, 4: 0.45, 5: 0.35 },
-    engineer: { 1: 0.2, 2: 0.3, 3: 0.5 },
-  },
-  orange: {
-    farmer: { 4: 0.4, 5: 0.4, 6: 0.2 },
-    miner: { 4: 0.2, 5: 0.8 },
-    artisan: { 2: 0.15, 3: 0.35, 4: 0.5 },
-    engineer: { 1: 0.05, 2: 0.4, 3: 0.55 },
-  },
-  zalakN: {
-    farmer: { 4: 0.15, 5: 0.4, 6: 0.45 },
-    miner: { 4: 0.25, 5: 0.75 },
-    artisan: { 3: 0.3, 4: 0.7 },
-    engineer: { 1: 0.05, 2: 0.3, 3: 0.65 },
-  },
-  zalakS: {
-    farmer: { 4: 0.2, 5: 0.42, 6: 0.38 },
-    miner: { 4: 0.3, 5: 0.7 },
-    artisan: { 3: 0.35, 4: 0.65 },
-    engineer: { 1: 0.08, 2: 0.35, 3: 0.57 },
-  },
-  angland: {
-    farmer: { 3: 0.15, 4: 0.45, 5: 0.4 },
-    miner: { 4: 0.5, 5: 0.5 },
-    artisan: { 2: 0.25, 3: 0.4, 4: 0.35 },
-    engineer: { 1: 0.1, 2: 0.5, 3: 0.4 },
-  },
-  normandy: {
-    farmer: { 3: 0.2, 4: 0.1, 5: 0.2, 6: 0.3, 7: 0.2 },
-    miner: { 5: 0.4, 6: 0.4, 7: 0.2 },
-    artisan: { 3: 0.3, 4: 0.5, 5: 0.2 },
-    engineer: { 1: 0.15, 2: 0.3, 3: 0.55 },
-  },
+export const INITIAL_CLASS_DIST: Record<NationId, Record<ClassId, number>> = {
+  lorraine: { 1: 0.02, 2: 0.05, 3: 0.18, 4: 0.3, 5: 0.3, 6: 0.13, 7: 0.02 },
+  ianys: { 1: 0.02, 2: 0.05, 3: 0.15, 4: 0.28, 5: 0.3, 6: 0.17, 7: 0.03 },
+  empire: { 1: 0.03, 2: 0.04, 3: 0.1, 4: 0.15, 5: 0.2, 6: 0.28, 7: 0.2 },
+  orange: { 1: 0.03, 2: 0.07, 3: 0.16, 4: 0.3, 5: 0.28, 6: 0.14, 7: 0.02 },
+  zalakN: { 1: 0.02, 2: 0.04, 3: 0.14, 4: 0.26, 5: 0.3, 6: 0.2, 7: 0.04 },
+  zalakS: { 1: 0.02, 2: 0.05, 3: 0.15, 4: 0.27, 5: 0.29, 6: 0.18, 7: 0.04 },
+  angland: { 1: 0.05, 2: 0.1, 3: 0.2, 4: 0.25, 5: 0.25, 6: 0.12, 7: 0.03 },
+  normandy: { 1: 0.03, 2: 0.04, 3: 0.12, 4: 0.2, 5: 0.22, 6: 0.26, 7: 0.13 },
 };
 
 // ---- 政策对系数的修正 ----

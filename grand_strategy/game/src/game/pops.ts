@@ -9,7 +9,7 @@
 import type { GameMap, Province } from './map';
 import type { GoodId, JobId, NationId, NeedId, RaceId } from './types';
 import type { ClassId } from './types';
-import { CLASSES, CLASS_DEFS, INITIAL_CLASS_MIX, classDef } from './classes';
+import { CLASSES, CLASS_DEFS, INITIAL_CLASS_DIST, classDef } from './classes';
 import { GOODS_LIST, zeroGoods } from './market';
 import { provinceHasFur, provinceHasResource, provinceCoastal } from './resources';
 
@@ -32,13 +32,16 @@ export const RACE_LABEL: Record<RaceId, string> = {
   norman: '诺曼',
 };
 
-export const JOBS: JobId[] = ['farmer', 'miner', 'artisan', 'engineer'];
+export const JOBS: JobId[] = ['slave', 'peasant', 'worker', 'technician', 'clerk', 'engineer', 'merchant', 'capitalist', 'banker'];
 export const JOB_LABEL: Record<JobId, string> = {
-  farmer: '农民',
-  miner: '矿工',
-  artisan: '工匠',
-  engineer: '工程师',
+  slave: '奴隶', peasant: '自耕农', worker: '工人', technician: '技术工人',
+  clerk: '职员', engineer: '工程师', merchant: '商人', capitalist: '资本家', banker: '银行家',
 };
+
+/** 零职业分布（UI/统计初始化用） */
+export function zeroJobMix(): Record<JobId, number> {
+  return { slave: 0, peasant: 0, worker: 0, technician: 0, clerk: 0, engineer: 0, merchant: 0, capitalist: 0, banker: 0 };
+}
 
 export const GOODS: GoodId[] = GOODS_LIST;
 export const GOOD_LABEL: Record<GoodId, string> = {
@@ -83,18 +86,26 @@ export const NEED_PER_WAN: Record<GoodId, number> = {
 
 /** 每万从业者月基础产出（基准单位：万吨/万件） */
 export const JOB_OUTPUT_PER_WAN: Record<JobId, number> = {
-  farmer: 0.022,
-  miner: 0.02,
-  artisan: 0.012, // 手工衣物（工业化前夜；规模化靠服装厂）
+  slave: 0.008,
+  peasant: 0.022,
+  worker: 0.02,
+  technician: 0.012, // 技术工种（精加工前夜）
+  clerk: 0.004,      // 管理岗（产出少，效率加成角色）
   engineer: 0.002,
+  merchant: 0, capitalist: 0, banker: 0, // 资本侧不出产商品
 };
 
 /** 职业 → 主产出商品 */
 export const JOB_GOOD: Record<JobId, GoodId> = {
-  farmer: 'food',
-  miner: 'coal',
-  artisan: 'clothing',
+  slave: 'food',
+  peasant: 'food',
+  worker: 'coal',
+  technician: 'clothing',
+  clerk: 'clothing',
   engineer: 'tools',
+  merchant: 'luxury',
+  capitalist: 'luxury',
+  banker: 'luxury',
 };
 
 /** 农民省资源附加产出（每万从业者月产，按省资源/沿海/气候；无建筑自然经济底子，不受加强项加成） */
@@ -127,10 +138,11 @@ export const MINER_OUTPUT: Record<GoodId, number> = {
 
 /** 奢侈品：工匠/工程师附加产出（每万从业者月产单位；× 省奢侈品潜力） */
 export const LUXURY_OUTPUT_PER_WAN: Record<JobId, number> = {
-  farmer: 0,
-  miner: 0,
-  artisan: 0.001,
+  slave: 0, peasant: 0, worker: 0,
+  technician: 0.001,
+  clerk: 0,
   engineer: 0.0008,
+  merchant: 0, capitalist: 0, banker: 0,
 };
 /** 奢侈品需求基数（× 阶级奢侈权重 × 幸福度系数 × 国家财富系数） */
 export const LUXURY_NEED_BASE = 0.0022;
@@ -149,29 +161,44 @@ export function luxuryWealthCoef(n: { popWan: number; treasury: number }): numbe
 }
 /** 职业基础年薪（万₭/人/年） */
 export const BASE_WAGE: Record<JobId, number> = {
-  farmer: 2.4,
-  miner: 3.0,
-  artisan: 3.4,
+  slave: 1.0,
+  peasant: 2.4,
+  worker: 3.0,
+  technician: 3.4,
+  clerk: 3.2,
   engineer: 4.2,
+  merchant: 4.0,
+  capitalist: 5.0,
+  banker: 5.5,
 };
 /** 每格住房容量（万人）——基建可提升 */
 export const BASE_HOUSING_PER_CELL = 4.5;
 /** 转职代价：该 POP 3 个月产出减半 */
 export const RETRAIN_MONTHS = 3;
 export const RETRAIN_OUTPUT_PENALTY = 0.5;
-/** 技能梯子（下一职业；engineer 为顶端） */
+/** 技能梯子（生产侧；资本侧 商人→资本家→银行家） */
 export const JOB_LADDER: Record<JobId, JobId | null> = {
-  farmer: 'miner',
-  miner: 'artisan',
-  artisan: 'engineer',
+  slave: 'peasant',
+  peasant: 'worker',
+  worker: 'technician',
+  technician: 'engineer',
+  clerk: 'engineer',
   engineer: null,
+  merchant: 'capitalist',
+  capitalist: 'banker',
+  banker: null,
 };
-/** 技能梯子识字率门槛 */
+/** 技能梯子识字率门槛（资质获取） */
 export const LITERACY_REQ: Record<JobId, number> = {
-  farmer: 0,
-  miner: 0.1,
-  artisan: 0.25,
+  slave: 0,
+  peasant: 0,
+  worker: 0.1,
+  technician: 0.25,
+  clerk: 0.15,
   engineer: 0.5,
+  merchant: 0.2,
+  capitalist: 0.3,
+  banker: 0.4,
 };
 /** 各国主体种族构成（v0.4 八国，初始化 POP 用；世界观种族分布） */
 export const NATION_RACE_MIX: Record<NationId, Record<RaceId, number>> = {
@@ -208,12 +235,17 @@ export const NATION_RACE_MIX: Record<NationId, Record<RaceId, number>> = {
     ursus: 0, draco: 0, feline: 0, zalak: 0,
   },
 };
-/** 初始职业构成（工业化前夜） */
+/** 初始职业构成（工业化前夜；资本侧少量） */
 export const INITIAL_JOB_MIX: Record<JobId, number> = {
-  farmer: 0.55,
-  miner: 0.15,
-  artisan: 0.22,
-  engineer: 0.08,
+  slave: 0.05,
+  peasant: 0.5,
+  worker: 0.15,
+  technician: 0.12,
+  clerk: 0.05,
+  engineer: 0.05,
+  merchant: 0.05,
+  capitalist: 0.02,
+  banker: 0.01,
 };
 
 export interface Pop {
@@ -252,22 +284,22 @@ export interface ProvinceEcon {
   freight: number;
 }
 
-/** 新建省的聚合 POP（按国家主体种族 × 初始职业构成 × 初始阶级分布） */
+/** 新建省的聚合 POP（按国家主体种族 × 初始职业构成 × 初始阶级分布；职业与阶级独立） */
 export function createProvincePops(
   provincePop: number,
   nationId: NationId,
 ): Pop[] {
   const raceMix = NATION_RACE_MIX[nationId];
-  const classMix = INITIAL_CLASS_MIX[nationId];
+  const classDist = INITIAL_CLASS_DIST[nationId];
   const pops: Pop[] = [];
   for (const race of RACES) {
     const raceShare = raceMix[race] ?? 0;
     if (raceShare <= 0) continue;
     for (const job of JOBS) {
       const jobShare = INITIAL_JOB_MIX[job];
-      const perClass = classMix[job];
+      if (jobShare <= 0) continue;
       for (const c of CLASSES) {
-        const w = perClass[c] ?? 0;
+        const w = classDist[c] ?? 0;
         if (w <= 0) continue;
         const size = provincePop * raceShare * jobShare * w;
         if (size < 0.001) continue;
@@ -314,7 +346,7 @@ export function initProvinceEcon(
 
 /** 统计省职业构成（UI 用） */
 export function provinceJobMix(p: ProvinceEcon): Record<JobId, number> {
-  const mix: Record<JobId, number> = { farmer: 0, miner: 0, artisan: 0, engineer: 0 };
+  const mix = zeroJobMix();
   for (const pop of p.pops) mix[pop.job] += pop.size;
   return mix;
 }
@@ -337,7 +369,7 @@ export function provinceClassMix(p: ProvinceEcon): Record<ClassId, number> {
 
 /** 从国家维度聚合各职业人口（万人） */
 export function nationJobSupply(map: GameMap, state: { provinces: Record<number, ProvinceEcon> }, nationId: NationId): Record<JobId, number> {
-  const supply: Record<JobId, number> = { farmer: 0, miner: 0, artisan: 0, engineer: 0 };
+  const supply = zeroJobMix();
   for (const p of map.provinces) {
     if (p.owner !== nationId || p.isUndiscovered) continue;
     const ps = state.provinces[p.id];
@@ -375,7 +407,7 @@ export function provinceFoodMod(prov: Province): number {
 /** 农民产出（含资源附加）：沃土修正 × 气候 grainMod；自然经济底子（无建筑也产，不受加强项加成） */
 export function farmerOutput(prov: Province, size: number, mult: number): Record<GoodId, number> {
   const out = zeroGoods();
-  out.food = size * JOB_OUTPUT_PER_WAN.farmer * provinceFoodMod(prov) * prov.grainMod * mult;
+  out.food = size * JOB_OUTPUT_PER_WAN.peasant * provinceFoodMod(prov) * prov.grainMod * mult;
   // 省资源附加：棉/木/渔/盐（沿海）/毛皮（寒带林）/细粮·肉·糖（沃土）
   if (provinceHasResource(prov, 'timber')) out.timber += size * FARMER_EXTRA_OUTPUT.timber * mult;
   if (provinceHasResource(prov, 'cotton')) out.cotton += size * FARMER_EXTRA_OUTPUT.cotton * mult;
