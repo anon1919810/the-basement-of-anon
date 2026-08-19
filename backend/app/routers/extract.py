@@ -30,7 +30,7 @@ from .auth import get_current_user, resolve_key_source
 
 router = APIRouter(prefix="/api/extract", tags=["extract"])
 
-MAX_UPLOAD_MB = 10
+MAX_UPLOAD_MB = 20
 ALLOWED_EXT = {".pdf", ".docx", ".doc"}
 TEMP_ROOT = Path(__file__).resolve().parent.parent.parent / "temp_pdfs"
 
