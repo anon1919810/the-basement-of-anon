@@ -15,7 +15,7 @@
  *    → 三级市场+贸易（含成本传导与商品税）→ 建筑现金（按税后输入价）→ 工资 → POP 投资收入
  *    → 幸福度/动乱/效率 → 人口增长+迁移 → 阶级流动 → 财政（六税种，含建筑现金流）→ 识字率/健康 → 稳定度
  */
-import type { GameMap } from './map';
+import type { GameMap, Province } from './map';
 import type { GameState, NationState } from './state';
 import { addChronicle } from './state';
 import type { GoodId, JobId, NationId } from './types';
@@ -48,7 +48,7 @@ import { settleMarket } from './market';
 import type { CountyFlow, MarketState } from './market';
 import { BASE_PRICE, GOODS_LIST, zeroGoods } from './market';
 import { countyFreightFactor, provinceFreightFactor, isCoastal } from './logistics';
-import { BUILDING_DEFS, buildingSkillReqPop } from './buildings';
+import { BUILDING_DEFS, BUILDING_KINDS, buildingSkillReqPop, buildingUnlock, startInvestment, terrainCostFactor } from './buildings';
 import type { BuildingCategory, BuildingKind, InvestmentProject } from './buildings';
 import { provinceHasResource } from './resources';
 
@@ -643,8 +643,9 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
   }
   n.foodStock = n.stocks.food; // 镜像到 v0.0.0 字段
 
-  // ---- 7. 建筑现金：产出 × 本省结算后市价 − 输入 × 本省税后有效价（传导账）− 运营成本（闲置维护费） ----
+  // ---- 7. 建筑现金（v0.9 双轨）：国营利润入国库；私营利润入资本池，持续亏损破产 ----
   let investReturn = 0;
+  const bankrupt: InvestmentProject[] = [];
   for (const p of n.projects) {
     if (p.status === 'active' && !newlyCompleted.has(p.id)) {
       const def = BUILDING_DEFS[p.kind];
@@ -661,7 +662,48 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
       }
       p.lastInputCost = inputCost;
       const idleScale = 0.3 + 0.7 * p.lastRunFactor * p.lastSkillFactor;
-      investReturn += p.lastRevenue - inputCost - def.opCost * idleScale;
+      const profit = p.lastRevenue - inputCost - def.opCost * idleScale;
+      if (p.owner === 'private') {
+        n.capitalWealth += profit; // 私营利润归资本
+        p.lossMonths = profit < -1 ? p.lossMonths + 1 : 0;
+        if (p.lossMonths >= 3) bankrupt.push(p); // 连续 3 月亏损 → 破产
+      } else {
+        investReturn += profit; // 国营利润入国库
+      }
+    }
+  }
+  // 私营破产：移除项目（失业由省 POP 自然反映）
+  for (const p of bankrupt) {
+    const idx = n.projects.indexOf(p);
+    if (idx >= 0) {
+      n.projects.splice(idx, 1);
+      addChronicle(state, `「${BUILDING_DEFS[p.kind].label}」破产倒闭（连续亏损）`, `行省 #${p.provId + 1} · 私营`);
+    }
+  }
+
+  // ---- 7.5 私营自动投资：资本池充裕 → 投利润/成本比最高的可建建筑（不超上限） ----
+  if (n.capitalWealth >= 150) {
+    let best: { kind: BuildingKind; provId: number; cost: number; ratio: number } | null = null;
+    for (const kind of BUILDING_KINDS) {
+      const def = BUILDING_DEFS[kind];
+      if (!def.output) continue; // 只投商品建筑（服务加成阶段 D 不自动投）
+      const estProfit = def.capacity * n.market[def.output].price - def.opCost;
+      if (estProfit <= 0) continue;
+      for (const pid of provIds) {
+        const prov = map.provinceById.get(pid);
+        if (!prov) continue;
+        const unlock = buildingUnlock(map, kind, prov, n.infra, { stocks: n.stocks, projects: n.projects, literacy: n.literacy });
+        if (!unlock.ok) continue;
+        const cost = def.cost * terrainCostFactor(map, kind, prov);
+        if (cost > n.capitalWealth) continue;
+        const ratio = estProfit / cost;
+        if (!best || ratio > best.ratio) best = { kind, provId: pid, cost, ratio };
+      }
+    }
+    if (best && best.cost <= n.capitalWealth) {
+      startInvestment(state, map, best.kind, best.provId, undefined, 'private');
+      n.capitalWealth -= best.cost;
+      addChronicle(state, `资本家投资新建「${BUILDING_DEFS[best.kind].label}」`, `行省 #${best.provId + 1} · 私营`);
     }
   }
 

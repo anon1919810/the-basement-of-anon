@@ -74,6 +74,8 @@ export interface NationState {
   exportRights: Record<number, boolean>;
   /** v0.9 运力政策：'auto'=省运力库存足则自动启用加强项；'off'=全部禁用 */
   transportPolicy: 'auto' | 'off';
+  /** v0.9 双轨制：资本财富池（资本家/银行家积累 → 私营自动投资） */
+  capitalWealth: number;
   // ---- 投资（v0.3 产业链建筑） ----
   projects: InvestmentProject[]; // 在建/已投产项目
   nextProjectId: number;
@@ -342,6 +344,7 @@ export function newGameState(playerNation: NationId, seed: number, map: GameMap)
       openTrade: false,
       exportRights,
       transportPolicy: 'auto',
+      capitalWealth: 60, // 初始资本（资本家/银行家底子）
       projects: [],
       nextProjectId: 1,
       investCostAcc: 0,

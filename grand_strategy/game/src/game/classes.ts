@@ -8,7 +8,7 @@
  *  - 消费倍率：上层消费多（consumptionMult 作用于需求）
  *  - 资本回报分配：wealthCoef 决定精英投资收入占比（上层多）
  */
-import type { ClassId, JobId, NationId } from './types';
+import type { ClassId, NationId } from './types';
 
 export const CLASSES: ClassId[] = [1, 2, 3, 4, 5, 6, 7];
 

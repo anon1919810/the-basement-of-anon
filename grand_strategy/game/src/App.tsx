@@ -8,7 +8,7 @@ import type { TaxKind } from './game/tax';
 import type { GoodId } from './game/types';
 import { monthIndex, daysPerSecond } from './game/clock';
 import { retrainPop } from './game/labor';
-import { cancelInvestment, startInvestment } from './game/buildings';
+import { cancelInvestment, startInvestment, nationalizeProject } from './game/buildings';
 import type { BuildingKind } from './game/buildings';
 import { NATIONS, NATION_LIST } from './game/nations';
 import { clampTax } from './game/tax';
@@ -204,6 +204,11 @@ export default function App() {
     cancelInvest(projectId: number) {
       const g = gameRef.current;
       cancelInvestment(g, projectId);
+      setGame({ ...g });
+    },
+    nationalize(projectId: number) {
+      const g = gameRef.current;
+      nationalizeProject(g, projectId);
       setGame({ ...g });
     },
     togglePolicy(policy: 'progressiveTax' | 'universalSuffrage', on: boolean) {
@@ -402,6 +407,7 @@ export default function App() {
           onRetrain={actions.retrain}
           onInvest={actions.invest}
           onCancelInvest={actions.cancelInvest}
+          onNationalize={actions.nationalize}
           onTogglePolicy={actions.togglePolicy}
           onAbolish={actions.abolish}
           onToggleTrade={actions.setOpenTrade}

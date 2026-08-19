@@ -381,6 +381,10 @@ export interface InvestmentProject {
   status: 'building' | 'active';
   /** 兵工厂产线（未选 = 主输出） */
   variant?: number;
+  /** v0.9 双轨制：国营（国库投资）vs 私营（资本家自动投资） */
+  owner: 'state' | 'private';
+  /** 连续亏损月数（私营 ≥3 破产；国营不倒闭） */
+  lossMonths: number;
   // ---- 建筑运营记录（UI/断言用） ----
   /** 上月技能满足系数 0-1（无对应职业 POP → <1 产能打折） */
   lastSkillFactor: number;
@@ -418,6 +422,25 @@ export function nationHasGood(view: NationBuildingView, g: GoodId): boolean {
   });
 }
 
+/** 每省每建筑上限（地形容量基数；基建/科技提升） */
+export const MAX_COUNT_BASE: Record<BuildingCategory, number> = {
+  agriculture: 8, extraction: 4, processing: 3, heavy: 2, fine: 2, infra: 6,
+};
+
+/** 每省每建筑上限 = 基数 × (1 + 基建/科技) */
+export function buildingMaxCount(kind: BuildingKind, infra: { roads: number; ports: number }): number {
+  const def = BUILDING_DEFS[kind];
+  const base = MAX_COUNT_BASE[def.category] ?? 3;
+  return Math.ceil(base * (1 + (infra.roads + infra.ports) * 0.004));
+}
+
+/** 同省同 kind 在产/在建项目数 */
+export function countOfKind(projects: InvestmentProject[], provId: number, kind: BuildingKind): number {
+  let c = 0;
+  for (const p of projects) if (p.provId === provId && p.kind === kind) c++;
+  return c;
+}
+
 /** 省份/基建/资源/半成品解锁检查（UI 与 sim 共用） */
 export function buildingUnlock(
   map: GameMap, kind: BuildingKind, prov: Province,
@@ -435,6 +458,9 @@ export function buildingUnlock(
   }
   if (def.requireLiteracy !== undefined && nation.literacy < def.requireLiteracy) {
     return { ok: false, reason: `识字率需 ≥${(def.requireLiteracy * 100).toFixed(0)}%` };
+  }
+  if (countOfKind(nation.projects, prov.id, kind) >= buildingMaxCount(kind, infra)) {
+    return { ok: false, reason: '已达地形/基建容量上限' };
   }
   // 炼铁厂特殊：煤矿省或港口（进口矿）
   if (kind === 'ironWorks' && !provinceHasResource(prov, 'coal') && infra.ports < 15) {
@@ -471,8 +497,11 @@ export function terrainCostFactor(map: GameMap, kind: BuildingKind, prov: Provin
   }
 }
 
-/** 新建建筑项目（立即从国库扣除成本；失败返回 null） */
-export function startInvestment(state: GameState, map: GameMap, kind: BuildingKind, provId: number, variant?: number): InvestmentProject | null {
+/** 新建建筑项目（立即从国库/资本池扣除成本；失败返回 null）。owner='private' 为私营（资本家自动投资） */
+export function startInvestment(
+  state: GameState, map: GameMap, kind: BuildingKind, provId: number,
+  variant?: number, owner: 'state' | 'private' = 'state',
+): InvestmentProject | null {
   const n = state.nations[state.playerNation];
   const def = BUILDING_DEFS[kind];
   const prov = map.provinceById.get(provId);
@@ -480,8 +509,13 @@ export function startInvestment(state: GameState, map: GameMap, kind: BuildingKi
   const unlock = buildingUnlock(map, kind, prov, n.infra, { stocks: n.stocks, projects: n.projects, literacy: n.literacy });
   if (!unlock.ok) return null;
   const cost = def.cost * terrainCostFactor(map, kind, prov); // 地形造价（山地基建贵）
-  if (n.treasury < cost) return null;
-  n.treasury -= cost;
+  if (owner === 'private') {
+    if (n.capitalWealth < cost) return null;
+    n.capitalWealth -= cost;
+  } else {
+    if (n.treasury < cost) return null;
+    n.treasury -= cost;
+  }
   n.investCostAcc += cost;
   const p: InvestmentProject = {
     id: n.nextProjectId++,
@@ -492,6 +526,8 @@ export function startInvestment(state: GameState, map: GameMap, kind: BuildingKi
     monthsLeft: def.duration,
     status: 'building',
     variant,
+    owner,
+    lossMonths: 0,
     lastSkillFactor: 0,
     lastRunFactor: 0,
     lastOutput: 0,
@@ -501,6 +537,20 @@ export function startInvestment(state: GameState, map: GameMap, kind: BuildingKi
   };
   n.projects.push(p);
   return p;
+}
+
+/** 国有化（v0.9 双轨）：私营 → 国营，国库按市值 70% 补偿给资本池 */
+export function nationalizeProject(state: GameState, projectId: number): { ok: boolean; reason?: string; cost: number } {
+  const n = state.nations[state.playerNation];
+  const p = n.projects.find((x) => x.id === projectId);
+  if (!p) return { ok: false, reason: '项目不存在', cost: 0 };
+  if (p.owner !== 'private') return { ok: false, reason: '该建筑已是国营', cost: 0 };
+  const cost = p.totalCost * 0.7;
+  if (n.treasury < cost) return { ok: false, reason: `国库不足（需 ${cost.toFixed(0)} 万₭）`, cost };
+  n.treasury -= cost;
+  n.capitalWealth += cost;
+  p.owner = 'state';
+  return { ok: true, cost };
 }
 
 /** 取消在建项目：退款 = 总成本 × (1 - 进度)，退回国库 */

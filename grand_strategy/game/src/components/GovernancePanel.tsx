@@ -43,6 +43,8 @@ interface Props {
   onRetrain: (provId: number, popIndex: number) => void;
   onInvest: (kind: BuildingKind, provId: number) => void;
   onCancelInvest: (projectId: number) => void;
+  /** v0.9 双轨制：国有化私营建筑（有偿补偿） */
+  onNationalize: (projectId: number) => void;
   onTogglePolicy: (policy: 'progressiveTax' | 'universalSuffrage', on: boolean) => void;
   onAbolish: () => void;
   /** v0.8 开放贸易（国家开关） */
@@ -437,12 +439,13 @@ function MarketTable({ game, map, ownedProvs, focusProvId }: {
 }
 
 /** 投资页：产业链建筑清单（解锁条件/输入输出/技能要求） */
-function InvestTab({ game, map, ownedProvs, onInvest, onCancelInvest }: {
+function InvestTab({ game, map, ownedProvs, onInvest, onCancelInvest, onNationalize }: {
   game: GameState;
   map: GameMap;
   ownedProvs: Province[];
   onInvest: Props['onInvest'];
   onCancelInvest: Props['onCancelInvest'];
+  onNationalize: Props['onNationalize'];
 }) {
   const n = game.nations[game.playerNation];
   const [pick, setPick] = useState<Record<BuildingKind, number>>(
@@ -500,10 +503,12 @@ function InvestTab({ game, map, ownedProvs, onInvest, onCancelInvest }: {
 
       {active.length > 0 && (
         <section className="p-sec">
-          <h4>已投产建筑（{active.length}）</h4>
+          <h4>
+            已投产建筑（{active.length}） · 资本池 {n.capitalWealth.toFixed(0)} 万₭
+          </h4>
           <table className="mini-table">
             <thead>
-              <tr><th>项目</th><th>位置</th><th>技能/运行</th><th>上月产出</th><th>上月回报</th></tr>
+              <tr><th>项目</th><th>位置</th><th>技能/运行</th><th>上月产出</th><th>上月回报</th><th>所有制</th></tr>
             </thead>
             <tbody>
               {active.map((p) => {
@@ -518,12 +523,22 @@ function InvestTab({ game, map, ownedProvs, onInvest, onCancelInvest }: {
                     </td>
                     <td>{p.lastOutput.toFixed(2)} {d.output ? GOOD_LABEL[d.output] : '—'}</td>
                     <td className={ret >= 0 ? 'pos' : 'neg'}>{ret >= 0 ? '+' : ''}{ret.toFixed(1)}</td>
+                    <td>
+                      {p.owner === 'private' ? (
+                        <>
+                          <span className="dim">私营</span>{' '}
+                          <button className="btn btn-mini" onClick={() => onNationalize(p.id)}>国有化</button>
+                        </>
+                      ) : (
+                        <span className="dim">国营</span>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
-          <p className="dim">技能满足 = 省内{JOBS.map((j) => JOB_LABEL[j]).join('/')} POP 充足度；输入可用 = 国家库存充足度。</p>
+          <p className="dim">技能满足 = 省内{JOBS.map((j) => JOB_LABEL[j]).join('/')} POP 充足度；输入可用 = 国家库存充足度。私营利润归资本池，连续 3 月亏损破产；国有化按市值 70% 有偿补偿。</p>
         </section>
       )}
 
@@ -841,7 +856,7 @@ function SectionHead({ title, icon: Icon, open, onToggle }: { title: string; ico
   );
 }
 
-export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSpending, onRetrain, onInvest, onCancelInvest, onTogglePolicy, onAbolish, onToggleTrade, onExportRight, collapsed, onToggleCollapse }: Props & { collapsed: boolean; onToggleCollapse: () => void }) {
+export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSpending, onRetrain, onInvest, onCancelInvest, onNationalize, onTogglePolicy, onAbolish, onToggleTrade, onExportRight, collapsed, onToggleCollapse }: Props & { collapsed: boolean; onToggleCollapse: () => void }) {
   const [open, setOpen] = useState<Record<Section, boolean>>({
     economy: true, stability: false, market: true, tax: false, class: false, pop: true, policy: false, invest: false, log: false,
   });
@@ -1085,7 +1100,7 @@ export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSp
                                   onClick={() => onRetrain(focusProv.id, i)}
                                   title={canRetrain ? '转职：3 个月产出减半' : `识字率需 ≥${(literacyReq * 100).toFixed(0)}%`}
                                 >
-                                  转{next === 'miner' ? '矿' : next === 'artisan' ? '匠' : '工'}
+                                  转{next === 'worker' ? '工' : next === 'technician' ? '技' : next === 'clerk' ? '职' : next === 'merchant' ? '商' : next === 'capitalist' ? '资' : '升'}
                                 </button>
                               ) : (
                                 <span className="dim">顶</span>
@@ -1175,7 +1190,7 @@ export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSp
           {/* ---- 投资 ---- */}
           <SectionHead title="投资" icon={Factory} open={open.invest} onToggle={() => toggle('invest')} />
           {open.invest && (
-            <InvestTab game={game} map={map} ownedProvs={ownedProvs} onInvest={onInvest} onCancelInvest={onCancelInvest} />
+            <InvestTab game={game} map={map} ownedProvs={ownedProvs} onInvest={onInvest} onCancelInvest={onCancelInvest} onNationalize={onNationalize} />
           )}
 
           {/* ---- 大事记 ---- */}
