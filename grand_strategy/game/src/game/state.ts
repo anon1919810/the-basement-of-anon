@@ -37,6 +37,8 @@ export const SAVE_KEY = 'kalt-save-v9';
 export const OLD_SAVE_KEYS = ['kalt-save-v8', 'kalt-save-v7', 'kalt-save-v6', 'kalt-save-v5', 'kalt-save-v4', 'kalt-save-v3'];
 
 /** 国家政策（v0.3）：作用于当前国，写入状态与存档 */
+export type EconomicLaw = 'traditionalism' | 'laissezFaire' | 'draconian';
+
 export interface NationPolicies {
   /** 废农奴制：一次性转型（奴隶→佃农/自耕农），短期稳定度↓ + 人口效率长期↑ */
   abolishedSerfdom: boolean;
@@ -44,10 +46,12 @@ export interface NationPolicies {
   progressiveTax: boolean;
   /** 普选：下阶层政治权重↑上阶层↓，稳定度混合影响 */
   universalSuffrage: boolean;
+  /** v0.9 经济体制：传统主义（政府分红-10% 再投资减半）/ 自由放任（资本+25%）/ 龙本主义（农民地主贵族+50% 政府分红+15%） */
+  economicLaw: EconomicLaw;
 }
 
 export function defaultPolicies(): NationPolicies {
-  return { abolishedSerfdom: false, progressiveTax: false, universalSuffrage: false };
+  return { abolishedSerfdom: false, progressiveTax: false, universalSuffrage: false, economicLaw: 'laissezFaire' };
 }
 
 export interface NationState {
@@ -76,6 +80,8 @@ export interface NationState {
   transportPolicy: 'auto' | 'off';
   /** v0.9 双轨制：资本财富池（资本家/银行家积累 → 私营自动投资） */
   capitalWealth: number;
+  /** v0.9 建造力池（建造部门产出，建筑建造消耗；全国通用不耗运力，非市场资源） */
+  buildPower: number;
   /** v0.9 战时状态：战时开放义务兵役（强制征兵）；平时禁止国家强行转职（靠待遇吸引） */
   warTime: boolean;
   /** 政体（义务兵役率/征兵强度判定） */
@@ -351,6 +357,7 @@ export function newGameState(playerNation: NationId, seed: number, map: GameMap)
       exportRights,
       transportPolicy: 'auto',
       capitalWealth: 60, // 初始资本（资本家/银行家底子）
+      buildPower: 40, // 初始建造力（可先建 3-4 个基础建筑）
       warTime: false,
       gov: def.gov,
       projects: [],
@@ -472,6 +479,16 @@ export function setPolicy(state: GameState, policy: 'progressiveTax' | 'universa
   }
 }
 
+/** 经济体制切换（v0.9：政府分红效率 + 投资池效率修正） */
+export function setEconomicLaw(state: GameState, law: EconomicLaw): void {
+  const n = state.nations[state.playerNation];
+  n.policies.economicLaw = law;
+  const label: Record<EconomicLaw, string> = {
+    traditionalism: '传统主义', laissezFaire: '自由放任', draconian: '龙本主义',
+  };
+  addChronicle(state, `经济体制改为「${label[law]}」`, '政府分红与投资池效率修正生效');
+}
+
 /** 废农奴制（一次性）：奴隶 → 佃农/自耕农；帝国初始可用 */
 export function abolishSerfdom(state: GameState, map: GameMap): boolean {
   const n = state.nations[state.playerNation];
@@ -488,16 +505,16 @@ export function abolishSerfdom(state: GameState, map: GameMap): boolean {
       if (toTenant > 0) {
         let t = ps.pops.find((x) => x.class === 6 && x.job === s.job && x.race === s.race);
         if (!t) {
-          t = { class: 6, job: s.job, race: s.race, size: 0, happiness: 46, wage: s.wage, investIncome: 0, sat: { ...s.sat }, retrainMonths: 0 };
-          ps.pops.push(t);
+          ps.pops.push({ class: 6, job: s.job, race: s.race, size: 0, happiness: 46, wage: s.wage, investIncome: 0, sat: { ...s.sat }, retrainMonths: 0, livingStd: s.livingStd, expected: s.expected, unrest: 0 });
+          t = ps.pops[ps.pops.length - 1];
         }
         t.size += toTenant;
       }
       if (toOwner > 0) {
         let o = ps.pops.find((x) => x.class === 5 && x.job === s.job && x.race === s.race);
         if (!o) {
-          o = { class: 5, job: s.job, race: s.race, size: 0, happiness: 54, wage: s.wage, investIncome: 0, sat: { ...s.sat }, retrainMonths: 0 };
-          ps.pops.push(o);
+          ps.pops.push({ class: 5, job: s.job, race: s.race, size: 0, happiness: 54, wage: s.wage, investIncome: 0, sat: { ...s.sat }, retrainMonths: 0, livingStd: s.livingStd, expected: s.expected, unrest: 0 });
+          o = ps.pops[ps.pops.length - 1];
         }
         o.size += toOwner;
       }

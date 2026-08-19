@@ -15,7 +15,6 @@
  */
 import { loadMap } from './map';
 import type { GameMap, Province, County } from './map';
-import { Rng } from './rng';
 
 export type ResourceId =
   | 'coal' // 煤矿
@@ -126,7 +125,7 @@ export function countyResourcesOf(map: GameMap, county: County): ResourceId[] {
 }
 
 /** 单省资源（v0.9 = 各县资源并集；确定性） */
-export function computeProvinceResources(map: GameMap, prov: Province, rng: Rng): ResourceId[] {
+export function computeProvinceResources(map: GameMap, prov: Province): ResourceId[] {
   const set = new Set<ResourceId>();
   for (const cid of prov.countyIds) {
     const county = map.countyById.get(cid);
@@ -141,10 +140,9 @@ let resourcesByProvince: Map<number, ResourceId[]> | null = null;
 export function resourcesByProvinceId(): Map<number, ResourceId[]> {
   if (resourcesByProvince) return resourcesByProvince;
   const map = loadMap();
-  const rng = new Rng(RESOURCE_SEED);
   const out = new Map<number, ResourceId[]>();
   for (const prov of map.provinces) {
-    out.set(prov.id, computeProvinceResources(map, prov, rng));
+    out.set(prov.id, computeProvinceResources(map, prov));
   }
   resourcesByProvince = out;
   return out;

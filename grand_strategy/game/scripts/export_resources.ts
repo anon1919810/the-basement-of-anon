@@ -7,11 +7,9 @@
 import { fileURLToPath } from 'node:url';
 import { writeFileSync } from 'node:fs';
 import { loadMap } from '../src/game/map';
-import { computeProvinceResources, provinceCoastal, RESOURCE_SEED } from '../src/game/resources';
-import { Rng } from '../src/game/rng';
+import { computeProvinceResources, provinceCoastal } from '../src/game/resources';
 
 const map = loadMap();
-const rng = new Rng(RESOURCE_SEED);
 const out: Record<string, { cells: number; elev: number; temp: number; prec: number; coastal: boolean; resources: string[] }> = {};
 for (const p of map.provinces) {
   const cellN = p.cellIds.length;
@@ -31,9 +29,9 @@ for (const p of map.provinces) {
     temp: Math.round((tSum / cellN) * 10) / 10,
     prec: Math.round((pSum / cellN) * 10) / 10,
     coastal: provinceCoastal(p),
-    resources: computeProvinceResources(map, p, rng),
+    resources: computeProvinceResources(map, p),
   };
 }
 const path = fileURLToPath(new URL('../../data/resources_v2.json', import.meta.url));
 writeFileSync(path, JSON.stringify(out, null, 1));
-console.log(`已导出 ${path}（${Object.keys(out).length} 省 / 种子 ${RESOURCE_SEED}）`);
+console.log(`已导出 ${path}（${Object.keys(out).length} 省 / 县资源组合确定性）`);

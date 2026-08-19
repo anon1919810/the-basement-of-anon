@@ -7,7 +7,7 @@ import { GOOD_LABEL } from '../src/game/pops';
 import { BUILDING_DEFS, BUILDING_KINDS, buildingUnlock, startInvestment } from '../src/game/buildings';
 import { provinceHasResource } from '../src/game/resources';
 import type { GameState } from '../src/game/state';
-import type { GameMap, Province } from '../src/game/map';
+import type { Province } from '../src/game/map';
 import type { BuildingKind } from '../src/game/buildings';
 
 const DAYS_PER_YEAR = 360;
@@ -32,7 +32,7 @@ interface MonthRec {
 function provAvgPrice(state: GameState, g: string): number {
   let s = 0, w = 0;
   for (const pid of Object.keys(state.nations[state.playerNation].provinceMarkets)) {
-    const pm = state.nations[state.playerNation].provinceMarkets[Number(pid)]?.[g as never];
+    const pm = (state.nations[state.playerNation].provinceMarkets[Number(pid)] as Record<string, { price: number; supply: number }>)[g];
     if (pm) { s += pm.price * pm.supply; w += pm.supply; }
   }
   return w > 0 ? s / w : BASE_PRICE[g as never];
@@ -44,7 +44,6 @@ function investBalanced(state: GameState, map: ReturnType<typeof loadMap>): void
   // 运力价 > 2.2×base → 先修基建（road 便宜/port 沿海）
   if (n.market.transport.price > 2.2 * BASE_PRICE.transport) {
     for (const kind of ['road', 'port', 'lighthouse'] as const) {
-      const def = BUILDING_DEFS[kind];
       for (const p of map.provinces) {
         if (p.owner !== 'lorraine' || p.isUndiscovered) continue;
         const unlock = buildingUnlock(map, kind, p, n.infra, { stocks: n.stocks, projects: n.projects, literacy: n.literacy });
@@ -147,8 +146,8 @@ function main(): void {
   build('textile', (p) => provinceHasResource(p, 'cotton'));
   build('clothingWorks', (p) => provinceHasResource(p, 'cotton') || provinceHasResource(p, 'farmland'));
   build('road', (p) => provinceHasResource(p, 'stone'));
-  build('port', (p) => true);
-  build('fishFarm', (p) => true);
+  build('port', () => true);
+  build('fishFarm', () => true);
   build('mill', (p) => provinceHasResource(p, 'farmland'));
 
   const recs: MonthRec[] = [];
@@ -162,7 +161,7 @@ function main(): void {
   // ---- 输出：关键商品价格轨迹 ----
   const watch = ['food', 'wheat', 'coal', 'iron', 'steel', 'tools', 'luxury', 'transport'];
   console.log('=== 关键商品省均价轨迹（月）===');
-  console.log('月 | ' + watch.map((g) => GOOD_LABEL[g as never].padEnd(4)).join(' '));
+  console.log('月 | ' + watch.map((g) => String(GOOD_LABEL[g as never] ?? g).padEnd(4)).join(' '));
   for (let i = 0; i < recs.length; i += 6) {
     const r = recs[i];
     const cells = watch.map((g) => {

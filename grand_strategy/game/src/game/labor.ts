@@ -13,7 +13,7 @@ import type { GameMap } from './map';
 import type { GameState } from './state';
 import { BASE_WAGE, EXPECTED_STD, JOB_LADDER, LITERACY_REQ, RETRAIN_MONTHS, clamp, findClassPop, zeroJobMix } from './pops';
 import type { Pop } from './pops';
-import type { ClassId, JobId } from './types';
+import type { ClassId, JobId, RaceId } from './types';
 import { classDef } from './classes';
 
 /** 每格劳动力需求系数（万人/格，决定岗位供需比） */

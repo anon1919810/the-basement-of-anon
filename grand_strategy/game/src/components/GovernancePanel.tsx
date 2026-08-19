@@ -46,6 +46,8 @@ interface Props {
   /** v0.9 双轨制：国有化私营建筑（有偿补偿） */
   onNationalize: (projectId: number) => void;
   onTogglePolicy: (policy: 'progressiveTax' | 'universalSuffrage', on: boolean) => void;
+  /** v0.9 经济体制（政府分红效率） */
+  onEconomicLaw: (law: 'traditionalism' | 'laissezFaire' | 'draconian') => void;
   onAbolish: () => void;
   /** v0.8 开放贸易（国家开关） */
   onToggleTrade: (on: boolean) => void;
@@ -504,7 +506,7 @@ function InvestTab({ game, map, ownedProvs, onInvest, onCancelInvest, onNational
       {active.length > 0 && (
         <section className="p-sec">
           <h4>
-            已投产建筑（{active.length}） · 资本池 {n.capitalWealth.toFixed(0)} 万₭
+            已投产建筑（{active.length}） · 资本池 {n.capitalWealth.toFixed(0)} 万₭ · 建造力 {n.buildPower.toFixed(0)}
           </h4>
           <table className="mini-table">
             <thead>
@@ -856,7 +858,7 @@ function SectionHead({ title, icon: Icon, open, onToggle }: { title: string; ico
   );
 }
 
-export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSpending, onRetrain, onInvest, onCancelInvest, onNationalize, onTogglePolicy, onAbolish, onToggleTrade, onExportRight, collapsed, onToggleCollapse }: Props & { collapsed: boolean; onToggleCollapse: () => void }) {
+export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSpending, onRetrain, onInvest, onCancelInvest, onNationalize, onTogglePolicy, onEconomicLaw, onAbolish, onToggleTrade, onExportRight, collapsed, onToggleCollapse }: Props & { collapsed: boolean; onToggleCollapse: () => void }) {
   const [open, setOpen] = useState<Record<Section, boolean>>({
     economy: true, stability: false, market: true, tax: false, class: false, pop: true, policy: false, invest: false, log: false,
   });
@@ -1152,7 +1154,27 @@ export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSp
                   />
                   <span><b>普选</b>：下阶层政治权重 ↑，上阶层 ↓；识字率高则稳定度 +3，低则 -4</span>
                 </label>
-                <p className="dim">政策写入存档；累进税/普选可随时开关，废农奴制仅一次。</p>
+                <div className="policy-toggle">
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <b>经济体制</b>（政府分红）：
+                    {(['traditionalism', 'laissezFaire', 'draconian'] as const).map((l) => (
+                      <button
+                        key={l}
+                        className={`retrain-btn ${n.policies.economicLaw === l ? '' : 'disabled'}`}
+                        style={{ opacity: n.policies.economicLaw === l ? 1 : 0.6 }}
+                        onClick={() => onEconomicLaw(l)}
+                        title={
+                          l === 'traditionalism' ? '传统主义：政府分红 -10%' :
+                          l === 'laissezFaire' ? '自由放任：中性' :
+                          '龙本主义：政府分红 +15%'
+                        }
+                      >
+                        {l === 'traditionalism' ? '传统主义' : l === 'laissezFaire' ? '自由放任' : '龙本主义'}
+                      </button>
+                    ))}
+                  </span>
+                </div>
+                <p className="dim">政策写入存档；累进税/普选可随时开关，废农奴制仅一次；经济体制决定政府分红效率（国企利润 → 国库）。</p>
               </section>
 
               <section className="p-sec">

@@ -16,7 +16,7 @@
  *    → 幸福度/动乱/效率 → 人口增长+迁移 → 阶级流动 → 财政（六税种，含建筑现金流）→ 识字率/健康 → 稳定度
  */
 import type { GameMap, Province } from './map';
-import type { GameState, NationState } from './state';
+import type { GameState, NationState, EconomicLaw } from './state';
 import { addChronicle } from './state';
 import type { GoodId, JobId, NationId } from './types';
 import type { ClassId } from './types';
@@ -79,6 +79,13 @@ export const INFRA_DECAY = 0.008;
 /** 全国资本回报池系数（v0.3 上层阶级投资收入） */
 export const CAPITAL_POOL_TRADE = 0.4; // 贸易顺差计入比例
 export const CAPITAL_POOL_INDUSTRY = 0.5; // 建筑工业利润计入比例
+
+// ---- v0.9 政府分红（国企利润 → 国库，效率受经济体制）----
+export const GOV_DIV_EFF: Record<EconomicLaw, number> = {
+  traditionalism: 0.9, // 传统体制国企利润抽取效率略低
+  laissezFaire: 1.0,   // 自由放任中性
+  draconian: 1.15,     // 龙本主义重视国家资本
+};
 
 /** 农奴制效率惩罚（未废奴且存在奴隶 → 产出 ×0.9） */
 export const SERFDOM_PENALTY = 0.9;
@@ -434,7 +441,7 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
     for (const pop of ps.pops) {
       const cons = classDef(pop.class).consumptionMult;
       const jm = JOB_CONSUME;
-      const m = (g: GoodId, base: number) => base * cons * CONSUME_MATRIX[g][pop.class] * (jm[g]?.[pop.job] ?? 1);
+      const m = (g: GoodId, base: number) => base * cons * (CONSUME_MATRIX[g]?.[pop.class] ?? 1) * (jm[g]?.[pop.job] ?? 1);
       d.food += pop.size * m('food', NEED_PER_WAN.food);
       d.wheat += pop.size * m('wheat', NEED_PER_WAN.wheat);
       d.meat += pop.size * m('meat', NEED_PER_WAN.meat);
@@ -627,6 +634,12 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
       output = Math.max(0, Math.min(output, Math.max(0, cap - cur)));
     }
     if (mainOutput) provGoods(provFactorySupply, p.provId)[mainOutput] += output;
+    // 建造部门：产建造力池（非市场资源，全国通用不耗运力）
+    if (def.buildPowerPer) {
+      const bp = def.buildPowerPer * skillFactor * avail;
+      n.buildPower += bp;
+      output = bp;
+    }
     p.lastSkillFactor = skillFactor;
     p.lastRunFactor = avail;
     p.lastOutput = output;
@@ -1088,7 +1101,9 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
   n.investRefundAcc = 0;
 
   // 投资成本/退款已在 startInvestment/cancelInvestment 操作发生时入账，此处只记账不重复入账
-  n.treasury += income - spending + investReturn;
+  // v0.9 政府分红：国企利润按经济体制效率注入国库（传统 -10% / 自由放任 中性 / 龙本 +15%）
+  const govDiv = investReturn * (GOV_DIV_EFF[n.policies.economicLaw] ?? 1);
+  n.treasury += income - spending + govDiv;
   n.monthly = {
     income,
     spending,
@@ -1106,7 +1121,7 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
     foodSurplus: foodSurplusRatio,
     growthRate: annualGrowth,
     investIncome: capitalPool,
-    investReturn,
+    investReturn: govDiv, // 政府分红后净值（守恒断言口径）
     investCost,
     investRefund,
     migrationOut,

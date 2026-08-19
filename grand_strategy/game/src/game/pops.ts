@@ -170,8 +170,8 @@ export const CONSUMER_GOODS: GoodId[] = [
   'clothing', 'fineFood', 'luxury', 'coal',
 ];
 
-/** 商品 × 阶级（1 贵族→7 奴役）消费权重：上层细粮糖奢侈品多，下层粗粮多 */
-export const CONSUME_MATRIX: Record<GoodId, Record<ClassId, number>> = {
+/** 商品 × 阶级（1 贵族→7 奴役）消费权重：上层细粮糖奢侈品多，下层粗粮多（仅消费性商品设矩阵） */
+export const CONSUME_MATRIX: Partial<Record<GoodId, Record<ClassId, number>>> = {
   food: { 1: 0.6, 2: 0.7, 3: 0.85, 4: 1.0, 5: 1.1, 6: 1.2, 7: 1.3 },
   wheat: { 1: 1.8, 2: 1.5, 3: 1.2, 4: 0.9, 5: 0.6, 6: 0.4, 7: 0.2 },
   meat: { 1: 2.0, 2: 1.7, 3: 1.3, 4: 1.0, 5: 0.8, 6: 0.6, 7: 0.4 },
@@ -185,8 +185,8 @@ export const CONSUME_MATRIX: Record<GoodId, Record<ClassId, number>> = {
   coal: { 1: 1.3, 2: 1.2, 3: 1.1, 4: 1.0, 5: 0.95, 6: 0.9, 7: 0.8 },
 };
 
-/** 商品 × 职业消费乘数（默认 1；军人烟酒多、官僚服装咖啡多、工人烟草多） */
-export const JOB_CONSUME: Record<GoodId, Partial<Record<JobId, number>>> = {
+/** 商品 × 职业消费乘数（默认 1；军人烟酒多、官僚服装咖啡多、工人烟草多；仅消费性商品设矩阵） */
+export const JOB_CONSUME: Partial<Record<GoodId, Partial<Record<JobId, number>>>> = {
   food: { soldier: 1.5, peasant: 1.3, worker: 1.1, bureaucrat: 1.2, shopkeeper: 1.1 },
   meat: { soldier: 1.5, peasant: 1.1, worker: 1.1, merchant: 1.2, shopkeeper: 1.2 },
   tobacco: { soldier: 2.0, worker: 1.6, peasant: 1.2, bureaucrat: 1.2, merchant: 1.3, shopkeeper: 1.3 },

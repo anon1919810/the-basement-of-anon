@@ -30,7 +30,8 @@ export type BuildingKind =
   | 'toolWorks' | 'armory' | 'shipyard' | 'dynamiteWorks' | 'machineWorks'
   // 基建与公共服务（8）
   | 'road' | 'railroad' | 'canal' | 'port' | 'lighthouse'
-  | 'school' | 'bank' | 'market';
+  | 'school' | 'bank' | 'market'
+  | 'buildyard'; // 建造部门（产建造力）
 
 export type BuildingCategory = 'agriculture' | 'extraction' | 'processing' | 'heavy' | 'fine' | 'infra';
 
@@ -59,6 +60,8 @@ export interface BuildingDef {
   opt?: Partial<Record<GoodId, number>>;
   /** 主输出商品（服务类建筑可空） */
   output?: GoodId;
+  /** 建造力产出（建造部门专用：产建造力池，非市场商品） */
+  buildPowerPer?: number;
   /** 第二输出（如 牲畜农场 皮毛） */
   output2?: GoodId;
   /** 输出比例（output2 相对 output 的每月量） */
@@ -351,6 +354,13 @@ export const BUILDING_DEFS: Record<BuildingKind, BuildingDef> = {
     cost: 130, duration: 5, opCost: 0.4, infra: {},
     desc: '公共服务：贸易容量↑、价格传导更顺（B 阶段接入）。',
   },
+  buildyard: {
+    kind: 'buildyard', label: '建造部门', category: 'infra', skill: 'technician',
+    inputs: { timber: 1.0, iron: 1.0, tools: 0.5 }, opt: { stone: 1.0, steel: 0.5, machines: 0.3, dynamite: 0.2 },
+    output: undefined, buildPowerPer: 20, capacity: 0, // 月产 20 建造力（≈每周 5）
+    cost: 200, duration: 8, opCost: 1.0, infra: { roads: 10 },
+    desc: '产建造力（全国通用不耗运力）：木材＋铁锭＋工具（/石料/钢/机器/炸药）；建筑建造消耗建造力。',
+  },
 };
 
 export const BUILDING_KINDS: BuildingKind[] = [
@@ -364,11 +374,22 @@ export const BUILDING_KINDS: BuildingKind[] = [
   'toolWorks', 'armory', 'shipyard', 'dynamiteWorks', 'machineWorks',
   'road', 'railroad', 'canal', 'port', 'lighthouse',
   'school', 'bank', 'market',
+  'buildyard',
 ];
 
 /** 建筑技能需求规模（万人）：产能 × 0.3，至少 0.2 万 */
 export function buildingSkillReqPop(def: BuildingDef): number {
   return Math.max(0.2, def.capacity * 0.3);
+}
+
+/** 每类建筑建造力需求（建造部门产建造力，建筑建造消耗；规模×复杂性） */
+export const BUILDING_BUILD_COST: Record<BuildingCategory, number> = {
+  agriculture: 12, extraction: 20, processing: 30, heavy: 35, fine: 35, infra: 40,
+};
+
+/** 某建筑建造力需求 */
+export function buildCostOf(def: BuildingDef): number {
+  return BUILDING_BUILD_COST[def.category] ?? 20;
 }
 
 export interface InvestmentProject {
@@ -509,11 +530,15 @@ export function startInvestment(
   const unlock = buildingUnlock(map, kind, prov, n.infra, { stocks: n.stocks, projects: n.projects, literacy: n.literacy });
   if (!unlock.ok) return null;
   const cost = def.cost * terrainCostFactor(map, kind, prov); // 地形造价（山地基建贵）
+  // 建造力：建筑建造需消耗建造力池（建造部门产出，全国通用不耗运力）
+  const bCost = buildCostOf(def);
+  if (n.buildPower < bCost) return null;
+  n.buildPower -= bCost;
   if (owner === 'private') {
-    if (n.capitalWealth < cost) return null;
+    if (n.capitalWealth < cost) { n.buildPower += bCost; return null; }
     n.capitalWealth -= cost;
   } else {
-    if (n.treasury < cost) return null;
+    if (n.treasury < cost) { n.buildPower += bCost; return null; }
     n.treasury -= cost;
   }
   n.investCostAcc += cost;

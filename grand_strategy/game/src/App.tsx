@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { GameMap } from './game/map';
 import { applyBorderOverrides, loadMap } from './game/map';
 import type { GameState } from './game/state';
-import { loadGame, newGameState, tickDay, saveGame, clearSave, setPolicy, abolishSerfdom, hasOldSave, scaledNationPop } from './game/state';
+import { loadGame, newGameState, tickDay, saveGame, clearSave, setPolicy, setEconomicLaw, abolishSerfdom, hasOldSave, scaledNationPop } from './game/state';
 import type { NationId, ProvinceOwner, Speed } from './game/types';
 import type { TaxKind } from './game/tax';
 import type { GoodId } from './game/types';
@@ -216,6 +216,11 @@ export default function App() {
       setPolicy(g, policy, on);
       setGame({ ...g });
     },
+    setEconomicLaw(law: 'traditionalism' | 'laissezFaire' | 'draconian') {
+      const g = gameRef.current;
+      setEconomicLaw(g, law);
+      setGame({ ...g });
+    },
     /** v0.8 开放贸易（国家开关：false=自给不贸易；true=按世界价进出口+关税） */
     setOpenTrade(on: boolean) {
       const g = gameRef.current;
@@ -409,6 +414,7 @@ export default function App() {
           onCancelInvest={actions.cancelInvest}
           onNationalize={actions.nationalize}
           onTogglePolicy={actions.togglePolicy}
+          onEconomicLaw={actions.setEconomicLaw}
           onAbolish={actions.abolish}
           onToggleTrade={actions.setOpenTrade}
           onExportRight={actions.setExportRight}
