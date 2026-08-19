@@ -32,10 +32,11 @@ export const RACE_LABEL: Record<RaceId, string> = {
   norman: '诺曼',
 };
 
-export const JOBS: JobId[] = ['slave', 'peasant', 'worker', 'technician', 'clerk', 'engineer', 'soldier', 'bureaucrat', 'merchant', 'capitalist', 'banker'];
+export const JOBS: JobId[] = ['slave', 'peasant', 'worker', 'technician', 'clerk', 'engineer', 'shopkeeper', 'soldier', 'bureaucrat', 'merchant', 'capitalist', 'banker'];
 export const JOB_LABEL: Record<JobId, string> = {
   slave: '奴隶', peasant: '自耕农', worker: '工人', technician: '技术工人',
-  clerk: '职员', engineer: '工程师', soldier: '军人', bureaucrat: '官僚',
+  clerk: '职员', engineer: '工程师', shopkeeper: '店主',
+  soldier: '军人', bureaucrat: '官僚',
   merchant: '商人', capitalist: '资本家', banker: '银行家',
 };
 
@@ -43,7 +44,7 @@ export const JOB_LABEL: Record<JobId, string> = {
 export function zeroJobMix(): Record<JobId, number> {
   return {
     slave: 0, peasant: 0, worker: 0, technician: 0, clerk: 0, engineer: 0,
-    soldier: 0, bureaucrat: 0, merchant: 0, capitalist: 0, banker: 0,
+    shopkeeper: 0, soldier: 0, bureaucrat: 0, merchant: 0, capitalist: 0, banker: 0,
   };
 }
 
@@ -96,6 +97,7 @@ export const JOB_OUTPUT_PER_WAN: Record<JobId, number> = {
   technician: 0.012, // 技术工种（精加工前夜）
   clerk: 0.004,      // 管理岗（产出少，效率加成角色）
   engineer: 0.002,
+  shopkeeper: 0.001, // 店主：小商业（小资产阶级）
   soldier: 0,        // 军人：吃军饷
   bureaucrat: 0.002, // 官僚：行政管理产出
   merchant: 0, capitalist: 0, banker: 0, // 资本侧不出产商品
@@ -109,6 +111,7 @@ export const JOB_GOOD: Record<JobId, GoodId> = {
   technician: 'clothing',
   clerk: 'clothing',
   engineer: 'tools',
+  shopkeeper: 'luxury',
   soldier: 'food',
   bureaucrat: 'clothing',
   merchant: 'luxury',
@@ -150,6 +153,7 @@ export const LUXURY_OUTPUT_PER_WAN: Record<JobId, number> = {
   technician: 0.001,
   clerk: 0,
   engineer: 0.0008,
+  shopkeeper: 0.0004,
   soldier: 0, bureaucrat: 0,
   merchant: 0, capitalist: 0, banker: 0,
 };
@@ -183,12 +187,12 @@ export const CONSUME_MATRIX: Record<GoodId, Record<ClassId, number>> = {
 
 /** 商品 × 职业消费乘数（默认 1；军人烟酒多、官僚服装咖啡多、工人烟草多） */
 export const JOB_CONSUME: Record<GoodId, Partial<Record<JobId, number>>> = {
-  food: { soldier: 1.5, peasant: 1.3, worker: 1.1, bureaucrat: 1.2 },
-  meat: { soldier: 1.5, peasant: 1.1, worker: 1.1, merchant: 1.2 },
-  tobacco: { soldier: 2.0, worker: 1.6, peasant: 1.2, bureaucrat: 1.2, merchant: 1.3 },
-  coffee: { bureaucrat: 2.5, clerk: 1.8, merchant: 1.5, capitalist: 1.5, banker: 1.6, soldier: 1.2 },
-  clothing: { bureaucrat: 1.8, clerk: 1.3, engineer: 1.2, soldier: 1.2, capitalist: 1.3 },
-  fineFood: { bureaucrat: 1.5, merchant: 1.3, capitalist: 1.4, banker: 1.5, soldier: 1.2 },
+  food: { soldier: 1.5, peasant: 1.3, worker: 1.1, bureaucrat: 1.2, shopkeeper: 1.1 },
+  meat: { soldier: 1.5, peasant: 1.1, worker: 1.1, merchant: 1.2, shopkeeper: 1.2 },
+  tobacco: { soldier: 2.0, worker: 1.6, peasant: 1.2, bureaucrat: 1.2, merchant: 1.3, shopkeeper: 1.3 },
+  coffee: { bureaucrat: 2.5, clerk: 1.8, merchant: 1.5, capitalist: 1.5, banker: 1.6, soldier: 1.2, shopkeeper: 1.4 },
+  clothing: { bureaucrat: 1.8, clerk: 1.3, engineer: 1.2, soldier: 1.2, capitalist: 1.3, shopkeeper: 1.3 },
+  fineFood: { bureaucrat: 1.5, merchant: 1.3, capitalist: 1.4, banker: 1.5, soldier: 1.2, shopkeeper: 1.2 },
   sugar: { capitalist: 1.3, banker: 1.4, merchant: 1.2 },
   luxury: { capitalist: 1.2, banker: 1.3, merchant: 1.2 },
 };
@@ -210,6 +214,7 @@ export const BASE_WAGE: Record<JobId, number> = {
   technician: 3.4,
   clerk: 3.2,
   engineer: 4.2,
+  shopkeeper: 3.5, // 店主：小资产阶级
   soldier: 3.0,
   bureaucrat: 3.8,
   merchant: 4.0,
@@ -221,7 +226,7 @@ export const BASE_HOUSING_PER_CELL = 4.5;
 /** 转职代价：该 POP 3 个月产出减半 */
 export const RETRAIN_MONTHS = 3;
 export const RETRAIN_OUTPUT_PENALTY = 0.5;
-/** 技能梯子（生产侧；资本侧 商人→资本家→银行家） */
+/** 技能梯子（生产侧；资本侧 商人→资本家→银行家；店主→商人；军人/官僚为俸禄职业） */
 export const JOB_LADDER: Record<JobId, JobId | null> = {
   slave: 'peasant',
   peasant: 'worker',
@@ -229,9 +234,24 @@ export const JOB_LADDER: Record<JobId, JobId | null> = {
   technician: 'engineer',
   clerk: 'engineer',
   engineer: null,
+  shopkeeper: 'merchant',
+  soldier: null,
+  bureaucrat: null,
   merchant: 'capitalist',
   capitalist: 'banker',
   banker: null,
+};
+/** 旁路转职（v0.9）：工人/职员/店主/工程师可获取军人/官僚资质（转职 UI 展开选项） */
+export const JOB_LATERAL: Record<JobId, JobId[]> = {
+  worker: ['soldier'],
+  clerk: ['bureaucrat'],
+  technician: ['bureaucrat'],
+  engineer: ['soldier', 'bureaucrat'],
+  shopkeeper: ['bureaucrat', 'soldier'],
+  peasant: ['soldier'],
+  soldier: ['peasant', 'worker'],
+  bureaucrat: ['worker', 'clerk'],
+  slave: [], merchant: [], capitalist: [], banker: [],
 };
 /** 技能梯子识字率门槛（资质获取） */
 export const LITERACY_REQ: Record<JobId, number> = {
@@ -241,9 +261,28 @@ export const LITERACY_REQ: Record<JobId, number> = {
   technician: 0.25,
   clerk: 0.15,
   engineer: 0.5,
+  shopkeeper: 0.18,
+  soldier: 0.15,
+  bureaucrat: 0.2,
   merchant: 0.2,
   capitalist: 0.3,
   banker: 0.4,
+};
+
+/** 生活水平预期（v0.9 固定基准：该职业人群的期望生活水准；低于则积累不满并尝试改行） */
+export const EXPECTED_STD: Record<JobId, number> = {
+  slave: 25,
+  peasant: 40,
+  worker: 45,
+  technician: 50,
+  clerk: 52,
+  engineer: 60,
+  shopkeeper: 55,
+  soldier: 50,
+  bureaucrat: 65,
+  merchant: 58,
+  capitalist: 70,
+  banker: 75,
 };
 /** 各国主体种族构成（v0.4 八国，初始化 POP 用；世界观种族分布） */
 export const NATION_RACE_MIX: Record<NationId, Record<RaceId, number>> = {
@@ -283,11 +322,12 @@ export const NATION_RACE_MIX: Record<NationId, Record<RaceId, number>> = {
 /** 初始职业构成（工业化前夜；军人/官僚/资本侧少量） */
 export const INITIAL_JOB_MIX: Record<JobId, number> = {
   slave: 0.04,
-  peasant: 0.46,
+  peasant: 0.44,
   worker: 0.14,
   technician: 0.12,
   clerk: 0.05,
   engineer: 0.04,
+  shopkeeper: 0.03,
   soldier: 0.04,
   bureaucrat: 0.03,
   merchant: 0.05,
@@ -311,6 +351,12 @@ export interface Pop {
   sat: Record<NeedId, number>;
   /** 转职惩罚剩余月数（期间产出减半） */
   retrainMonths: number;
+  /** v0.9 生活水平指数 0-100（实际收入/生活成本 × 0.5 + 满足度 × 0.5） */
+  livingStd: number;
+  /** v0.9 生活水平预期（EXPECTED_STD 职业基准，固定） */
+  expected: number;
+  /** v0.9 不满积累（低于预期每点缺口 +1/月；触发自发改行） */
+  unrest: number;
 }
 
 export interface ProvinceEcon {
@@ -362,6 +408,9 @@ export function createProvincePops(
           investIncome: 0,
           sat: { food: 0.9, clothing: 0.9, housing: 0.9, fuel: 0.9 },
           retrainMonths: 0,
+          livingStd: 50,
+          expected: EXPECTED_STD[job],
+          unrest: 0,
         });
       }
     }

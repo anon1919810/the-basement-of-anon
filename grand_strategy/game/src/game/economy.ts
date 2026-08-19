@@ -41,6 +41,9 @@ import {
   provinceLuxuryPotential,
   CONSUME_MATRIX,
   JOB_CONSUME,
+  EXPECTED_STD,
+  JOB_LADDER,
+  JOB_LATERAL,
 } from './pops';
 import { classPoliticalWeight, PROGRESSIVE_HAPPINESS, SUFFRAGE_HAPPINESS } from './classes';
 import { classTaxCoefFor, taxPenalty, policyGrowthCoef } from './tax';
@@ -410,7 +413,7 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
         out.clothing += pop.size * JOB_OUTPUT_PER_WAN[pop.job] * eff;
       } else if (pop.job === 'soldier') {
         // 军人：无产出（吃军饷）
-      } else if (pop.job === 'merchant' || pop.job === 'capitalist' || pop.job === 'banker') {
+      } else if (pop.job === 'shopkeeper' || pop.job === 'merchant' || pop.job === 'capitalist' || pop.job === 'banker') {
         out.luxury += pop.size * JOB_OUTPUT_PER_WAN[pop.job] * eff;
       } else {
         out.tools += pop.size * JOB_OUTPUT_PER_WAN.engineer * eff;
@@ -807,6 +810,11 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
       ? clamp((provConsumedG.food + provConsumedG.fish * 0.35) / provDemandG.food, 0, 1)
       : satFoodBase;
     const housingSat = clamp(ps.housingCap / Math.max(ps.popTotal, 1e-9), 0, 1);
+    // v0.9 省物价指数（粮 50% / 衣 30% / 煤 20% 省价 ÷ 基准价）
+    const provM0 = n.provinceMarkets[pid];
+    const priceIdx = provM0
+      ? (provM0.food.price / 2.0) * 0.5 + (provM0.clothing.price / 1.8) * 0.3 + (provM0.coal.price / 1.5) * 0.2
+      : 1;
     let hSum = 0;
     for (const pop of ps.pops) {
       pop.wage = wages[pop.job];
@@ -815,6 +823,39 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
       const wageFactor = effWage / BASE_WAGE[pop.job];
       const needsSat = 0.35 * satFood + 0.2 * satCloth + 0.15 * satFuel + 0.3 * housingSat;
       pop.sat = { food: satFood, clothing: satCloth, housing: housingSat, fuel: satFuel };
+      // ---- v0.9 生活水平指数 = 实际收入/生活成本 × 0.5 + 满足度 × 0.5（刻度 0-100） ----
+      const realIncome = effWage / Math.max(0.4, priceIdx); // 实际购买力（省物价修正）
+      const incomeRatio = realIncome / BASE_WAGE[pop.job];
+      const satAvg = (pop.sat.food + pop.sat.clothing + pop.sat.housing + pop.sat.fuel) / 4;
+      pop.livingStd = clamp(50 * incomeRatio + 50 * satAvg, 0, 100);
+      pop.expected = EXPECTED_STD[pop.job];
+      // 不满：低于预期每点缺口 +1/月；满意则缓释
+      if (pop.livingStd < pop.expected) pop.unrest += pop.expected - pop.livingStd;
+      else pop.unrest = Math.max(0, pop.unrest - 2);
+      // ---- 自发改行：不满 + 省内存在高薪可得岗位 → 概率转职（不满越高越积极；转职后不满减半） ----
+      if (pop.unrest >= 5) {
+        const options: JobId[] = [];
+        const up = JOB_LADDER[pop.job];
+        if (up) options.push(up);
+        options.push(...(JOB_LATERAL[pop.job] ?? []));
+        let best: JobId | null = null;
+        let bestW = -1;
+        for (const o of options) {
+          const w = wages[o] ?? 0;
+          if (w > bestW) { bestW = w; best = o; }
+        }
+        if (best && bestW > pop.wage * 1.05) {
+          const chance = Math.min(0.02, 0.001 + pop.unrest / 1500);
+          const amount = pop.size * chance;
+          if (amount > 0.01) {
+            pop.size -= amount;
+            const t = ps.pops.find((p2) => p2.job === best && p2.race === pop.race && p2.class === pop.class);
+            if (t) t.size += amount;
+            else ps.pops.push({ ...pop, job: best, size: amount, expected: EXPECTED_STD[best], unrest: 0 });
+            pop.unrest *= 0.5;
+          }
+        }
+      }
       // 苛税打在下层：税负 × 阶级负担矩阵（人头+消费均摊；累进税改写上层↑下层↓）
       const tc =
         (classTaxCoefFor('poll', pop.class, n.policies.progressiveTax) +

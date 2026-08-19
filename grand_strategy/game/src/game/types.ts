@@ -34,7 +34,8 @@ export type RaceId =
 
 /**
  * 职业（v0.9 职业/阶级/资质三分）：生产侧 奴隶→自耕农→工人→技术工人→工程师；
- * 管理 职员；官僚/军人（俸禄职业）；资本侧 商人→资本家→银行家。阶级（财富）与职业解耦。
+ * 管理 职员；店主（小资产阶级）；官僚/军人（俸禄职业）；资本侧 商人→资本家→银行家。
+ * 阶级（财富）与职业解耦：同职业可因生活水平分化到不同阶级。
  */
 export type JobId =
   | 'slave'
@@ -43,6 +44,7 @@ export type JobId =
   | 'technician'
   | 'clerk'
   | 'engineer'
+  | 'shopkeeper'
   | 'soldier'
   | 'bureaucrat'
   | 'merchant'

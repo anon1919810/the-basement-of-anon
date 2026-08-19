@@ -11,7 +11,8 @@
  */
 import type { GameMap } from './map';
 import type { GameState } from './state';
-import { BASE_WAGE, JOB_LADDER, LITERACY_REQ, RETRAIN_MONTHS, clamp, findClassPop, zeroJobMix } from './pops';
+import { BASE_WAGE, EXPECTED_STD, JOB_LADDER, LITERACY_REQ, RETRAIN_MONTHS, clamp, findClassPop, zeroJobMix } from './pops';
+import type { Pop } from './pops';
 import type { ClassId, JobId } from './types';
 import { classDef } from './classes';
 
@@ -23,6 +24,7 @@ export const LABOR_DEMAND_PER_CELL: Record<JobId, number> = {
   technician: 0.7,
   clerk: 0.3,
   engineer: 0.35,
+  shopkeeper: 0.25,
   soldier: 0.2,
   bureaucrat: 0.15,
   merchant: 0.2,
@@ -112,10 +114,11 @@ export const UP_MOBILITY: MobilityRule[] = [
 
 /**
  * 阶级流动（确定性，无随机）：每月对玩家国家所有 POP 应用。
- *  - 向上：识字率 × 工资倍率驱动，按规则表流动到同职业同种族的上层 POP
- *  - 向下：工资低迷（< DOWN_WAGE_THRESHOLD）→ 跌入下一级（至多跌到 6 无业游民）
+ *  - 向上：识字率 × 生活水平（livingStd/expected）驱动，按规则表流动到同职业同种族的上层 POP
+ *  - 向下：生活水平低迷（< 预期的 70%）→ 跌入下一级（至多跌到 6 无业游民）
  *  - 奴隶(7) 不参与任何流动
  *  - 目标 POP 不存在时自动创建（size 0，保持链条完整）
+ *  - 同职业可因生活水平不同分化到不同阶级（工程师在物价高省变穷、在富省变富）
  */
 export function applyClassMobility(state: GameState, map: GameMap): void {
   const n = state.nations[state.playerNation];
@@ -124,64 +127,45 @@ export function applyClassMobility(state: GameState, map: GameMap): void {
     .filter((p) => p.owner === state.playerNation && !p.isUndiscovered)
     .map((p) => p.id);
 
+  const mkTarget = (job: JobId, race: RaceId, cls: ClassId): Pop => ({
+    class: cls, job, race, size: 0,
+    happiness: classDef(cls).baseHappiness,
+    wage: BASE_WAGE[job], investIncome: 0,
+    sat: { food: 0.9, clothing: 0.9, housing: 0.9, fuel: 0.9 },
+    retrainMonths: 0, livingStd: 50, expected: EXPECTED_STD[job], unrest: 0,
+  });
+
   for (const pid of provIds) {
     const ps = state.provinces[pid];
-    // 收集每（job × race）的阶级 POP 索引，用于寻找目标
-    // 1) 向上流动
+    // 1) 向上流动（生活水平高于预期）
     for (const rule of UP_MOBILITY) {
       const { from, to } = rule;
-      // 遍历当前 from 阶级的 POP 快照（流动中 size 变化，用快照避免重复流动）
       const candidates = ps.pops.filter((p) => p.class === from);
       for (const pop of candidates) {
         if (pop.size <= 0.0001) continue;
-        const wageFactor = clamp(pop.wage / BASE_WAGE[pop.job], 0.5, 2);
+        const stdFactor = pop.expected > 0 ? clamp(pop.livingStd / pop.expected, 0.5, 1.5) : 1;
+        if (stdFactor <= 1.15) continue; // 生活水平不足预期 115% 不向上
         const litFactor = lit >= rule.literacyReq ? 1 : 0.3;
-        const rate = Math.min(MOBILITY_CAP, rule.baseRate * litFactor * (0.6 + 0.4 * wageFactor));
+        const rate = Math.min(MOBILITY_CAP, rule.baseRate * litFactor * (stdFactor - 1.0));
         const amount = Math.min(pop.size * rate, pop.size * 0.5);
         if (amount <= 0) continue;
         let target = findClassPop(ps.pops, pop.job, pop.race, to);
-        if (!target) {
-          target = {
-            class: to,
-            job: pop.job,
-            race: pop.race,
-            size: 0,
-            happiness: classDef(to).baseHappiness,
-            wage: BASE_WAGE[pop.job],
-            investIncome: 0,
-            sat: { food: 0.9, clothing: 0.9, housing: 0.9, fuel: 0.9 },
-            retrainMonths: 0,
-          };
-          ps.pops.push(target);
-        }
+        if (!target) { target = mkTarget(pop.job, pop.race, to); ps.pops.push(target); }
         pop.size -= amount;
         target.size += amount;
       }
     }
-    // 2) 向下流动（工资低迷）：class < 6，跌入 class+1（奴隶除外）
+    // 2) 向下流动（生活水平低迷）：class < 6，跌入 class+1（奴隶除外）
     const downCandidates = ps.pops.filter((p) => p.class < 6 && p.class >= 1 && p.size > 0.0001);
     for (const pop of downCandidates) {
-      const wageFactor = clamp(pop.wage / BASE_WAGE[pop.job], 0.5, 2);
-      if (wageFactor >= DOWN_WAGE_THRESHOLD) continue;
-      const rate = 0.002 * (1 - wageFactor / DOWN_WAGE_THRESHOLD);
+      const stdFactor = pop.expected > 0 ? pop.livingStd / pop.expected : 1;
+      if (stdFactor >= 0.7) continue;
+      const rate = 0.002 * (0.7 - stdFactor);
       const amount = Math.min(pop.size * rate, pop.size * 0.5);
       if (amount <= 0) continue;
       const to = Math.min(6, pop.class + 1) as ClassId;
       let target = findClassPop(ps.pops, pop.job, pop.race, to);
-      if (!target) {
-        target = {
-          class: to,
-          job: pop.job,
-          race: pop.race,
-          size: 0,
-          happiness: classDef(to).baseHappiness,
-          wage: BASE_WAGE[pop.job],
-          investIncome: 0,
-          sat: { food: 0.9, clothing: 0.9, housing: 0.9, fuel: 0.9 },
-          retrainMonths: 0,
-        };
-        ps.pops.push(target);
-      }
+      if (!target) { target = mkTarget(pop.job, pop.race, to); ps.pops.push(target); }
       pop.size -= amount;
       target.size += amount;
     }
