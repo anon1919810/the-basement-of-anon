@@ -1,0 +1,12 @@
+[
+  {"act": "wait", "ms": 800},
+  {"act": "eval", "js": "[...document.querySelectorAll('button,a')].find(b=>b.innerText.trim()==='登录')?.click()"},
+  {"act": "wait", "ms": 800},
+  {"act": "type", "sel": "input[placeholder=\"用户名\"]", "text": "失败主义谋士千早爱音（天下布武）"},
+  {"act": "wait", "ms": 300},
+  {"act": "type", "sel": "input[placeholder=\"密码\"]", "text": "Yr931226@"},
+  {"act": "wait", "ms": 300},
+  {"act": "eval", "js": "document.querySelector('button.btn-accent')?.click()"},
+  {"act": "wait", "ms": 3000},
+  {"act": "eval", "js": "document.body.innerText.slice(0, 1000)"}
+]

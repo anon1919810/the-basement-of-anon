@@ -1,6 +1,7 @@
 // Three.js 3D 回放场景：球场 + 18 名小人（9v9）+ 脉冲 LED 球 + 跟随镜头
 // 只读引擎数据（events/teams），不改引擎；播放/步进/跳节仍由 MatchView 控制
 import * as THREE from 'three';
+import RAPIER from '@dimforge/rapier3d-compat';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { MatchEvent } from '../game/match';
 import { FIELD_W, FIELD_H } from '../game/match';
@@ -38,6 +39,20 @@ export const PLAYBACK = {
       'penalty', 'penalty_goal', 'penalty_miss', 'shootout_goal', 'shootout_miss', 'goal',
     ]),
   },
+};
+
+// 物理（Rapier）：球是动态刚体，事件轨迹采样点作为"引力目标"——力驱动弹簧-阻尼约束
+// 保住 vtime 回放同步，同时球有惯性/重力/弹跳/滚动；近点吸附防漂移
+export const PHYS = {
+  GRAVITY: -9.8,
+  STEP: 1 / 60,        // 物理步长（秒）
+  K_F: 42,             // 水平弹簧刚度（力/米）
+  K_FY: 30,            // 垂直弹簧刚度（弱于重力，保弧线）
+  DAMP: 4.2,           // 阻尼（力/速度）
+  MAX_V: 30,           // 踢球初速上限（m/s）
+  MAX_VY: 16,          // 垂直初速上限
+  RESTITUTION: 0.52,   // 球地反弹
+  SNAP_DIST: 0.4,      // 距目标该距离内吸附
 };
 
 // Catmull-Rom 1D：过 P1→P2 段（u∈[0,1]），切向由相邻点 P0/P3 决定 → 曲线过最近 3-4 个事件点
@@ -139,6 +154,8 @@ export class MatchScene {
   private halo: THREE.Mesh;
   private haloMat!: THREE.MeshBasicMaterial;
   private actorRing: THREE.Mesh;
+  private world?: RAPIER.World;
+  private ballBody?: RAPIER.RigidBody;
   private followTarget = new THREE.Vector3(0, 0, 0);
   private prevBall = new THREE.Vector3(); // 上一帧球位（镜头提前量用有限差分速度）
   private clock = 0;
@@ -151,8 +168,7 @@ export class MatchScene {
   private runs: (RunState | null)[] = new Array(18).fill(null);
   private lastIdx = -1;
 
-  constructor(container: HTMLElement, teams: [Team, Team], events: MatchEvent[]) {
-    this.events = events;
+  constructor(container: HTMLElement, teams: [Team, Team], events: MatchEvent[]) {    this.events = events;
     this.actorNames = [
       teams[0].players.map((p) => p.name),
       teams[1].players.map((p) => p.name),
@@ -223,6 +239,59 @@ export class MatchScene {
     fit();
     this.observer = new ResizeObserver(fit);
     this.observer.observe(container);
+  }
+
+  // ---------- 物理（Rapier 异步初始化） ----------
+
+  static async create(container: HTMLElement, teams: [Team, Team], events: MatchEvent[]): Promise<MatchScene> {
+    await RAPIER.init();
+    const scene = new MatchScene(container, teams, events);
+    scene.initPhysics();
+    return scene;
+  }
+
+  private initPhysics(): void {
+    this.world = new RAPIER.World({ x: 0, y: PHYS.GRAVITY, z: 0 });
+    // 地面（略大防边界穿出；球被 PD 吸附回场内）
+    const ground = this.world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
+    this.world.createCollider(RAPIER.ColliderDesc.cuboid(HALF_W + 4, 0.5, HALF_H + 4).setFriction(0.6), ground);
+    // 球：动态刚体，弱线性阻尼（滚动滑行）
+    const p = this.ball.position;
+    this.ballBody = this.world.createRigidBody(
+      RAPIER.RigidBodyDesc.dynamic()
+        .setTranslation(p.x, Math.max(BALL_R, p.y), p.z)
+        .setLinearDamping(0.55)
+        .setAngularDamping(0.85),
+    );
+    this.world.createCollider(
+      RAPIER.ColliderDesc.ball(BALL_R).setRestitution(PHYS.RESTITUTION).setFriction(0.5),
+      this.ballBody,
+    );
+  }
+
+  // 跨入新事件段：给球一个沿 起点→终点 的真实初速（踢出冲量，之后力驱动修正）；
+  // 若所需速度超上限（跳节/大步进）→ 直接落位（干净跳转）
+  private kickBall(from: MatchEvent, to?: MatchEvent): void {
+    if (!to || !this.ballBody || !this.world) return;
+    const fromP = this.ballBody.translation();
+    const toP = new THREE.Vector3(wx(to.x), BALL_R, wz(to.y));
+    const dist = Math.hypot(toP.x - fromP.x, toP.z - fromP.z);
+    if (dist < 0.4) return;
+    const span = Math.max(0.3, (to.t - from.t) / PLAYBACK.TIME_SCALE); // 真实秒
+    const v = dist / span;
+    if (v > PHYS.MAX_V * 0.92) {
+      this.ballBody.setTranslation({ x: toP.x, y: BALL_R, z: toP.z }, true);
+      this.ballBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      return;
+    }
+    const dx = toP.x - fromP.x, dz = toP.z - fromP.z;
+    const len = Math.hypot(dx, dz);
+    let vy = 0;
+    if (PLAYBACK.ARC.TYPES.has(to.type) && dist >= PLAYBACK.ARC.MIN_DIST) {
+      const h = Math.min(PLAYBACK.ARC.MAX_H, dist * PLAYBACK.ARC.RATE);
+      vy = Math.sqrt(2 * -PHYS.GRAVITY * h);
+    }
+    this.ballBody.setLinvel({ x: (dx / len) * v, y: vy, z: (dz / len) * v }, true);
   }
 
   // ---------- 场景搭建 ----------
@@ -502,18 +571,48 @@ export class MatchScene {
     const pulse = Math.max(0, Math.min(5, Math.round(cur.pulse)));
     const possession: 0 | 1 = cur.team === 0 ? 0 : 1;
 
-    // 事件驱动无球跑位：跨入新事件时触发前插/回追
-    if (idx !== this.lastIdx) {
-      this.lastIdx = idx;
-      this.maybeTriggerRuns(idx, cur, now);
-    }
-
+    // 事件驱动无球跑位 + 物理球踢出：跨入新事件时触发
     const dt = Math.min(0.1, Math.max(0, (now - this.lastNow) / 1000));
     this.lastNow = now;
     this.clock += dt;
 
-    // 球：直接按曲线落位（时间采样本身平滑，无需滞后跟随）
-    this.ball.position.set(wx(bx), BALL_R + arc, wz(by));
+    if (idx !== this.lastIdx) {
+      this.lastIdx = idx;
+      this.maybeTriggerRuns(idx, cur, now);
+      this.kickBall(cur, nxt);
+    }
+
+    // 物理球：目标 = 轨迹采样点；弹簧-阻尼力拉向目标（质量感/惯性），重力+反弹保弧线，
+    // 近点吸附防漂移（保证事件起点精确）
+    if (this.world && this.ballBody) {
+      const target = new THREE.Vector3(wx(bx), BALL_R + arc, wz(by));
+      const pos = this.ballBody.translation();
+      const pv = this.ballBody.linvel();
+      this.ballBody.addForce(
+        {
+          x: (target.x - pos.x) * PHYS.K_F - pv.x * PHYS.DAMP,
+          y: (target.y - pos.y) * PHYS.K_FY - pv.y * PHYS.DAMP,
+          z: (target.z - pos.z) * PHYS.K_F - pv.z * PHYS.DAMP,
+        },
+        true,
+      );
+      const steps = Math.max(1, Math.round(dt * 60));
+      for (let i = 0; i < steps; i++) this.world.step();
+      const bpos = this.ballBody.translation();
+      const snap = u >= 0.985 || Math.hypot(target.x - bpos.x, target.z - bpos.z) < PHYS.SNAP_DIST;
+      if (snap) {
+        this.ballBody.setTranslation({ x: target.x, y: target.y, z: target.z }, true);
+        this.ballBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      }
+      this.ball.position.set(bpos.x, bpos.y, bpos.z);
+      // 滚动自转：沿水平速度方向滚（角速度 = 线速度 / 半径）
+      const hsp = Math.hypot(pv.x, pv.z);
+      if (hsp > 0.3 && !snap) {
+        const ang = (hsp / BALL_R) * dt;
+        this.ball.rotateOnWorldAxis(new THREE.Vector3(-pv.z, 0, pv.x).normalize(), ang);
+      }
+    }
+
     const pc = new THREE.Color(PULSE_COLORS[pulse]);
     this.ballMat.emissive.copy(pc);
     this.haloMat.color.copy(pc);
@@ -612,6 +711,7 @@ export class MatchScene {
     for (const d of this.disposables) {
       try { d.dispose(); } catch { /* 已释放 */ }
     }
+    if (this.world) { try { this.world.free(); } catch { /* 已释放 */ } }
     this.renderer.domElement.remove();
   }
 }

@@ -76,14 +76,24 @@ export default function MatchView({ result }: { result: MatchResult }) {
     keyOnlyRef.current = keyOnly;
   }, [playing, speed, keyOnly]);
 
-  // 创建/销毁 3D 场景（一场比赛一个）
+  // 创建/销毁 3D 场景（一场比赛一个；Rapier wasm 异步初始化）
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const scene = new MatchScene(el, result.teams, result.events);
-    sceneRef.current = scene;
+    let cancelled = false;
+    let scene: MatchScene | null = null;
+    MatchScene.create(el, result.teams, result.events).then((s) => {
+      if (cancelled) {
+        s.dispose();
+        return;
+      }
+      scene = s;
+      sceneRef.current = s;
+      (window as any).__pulse3dReady = true; // 调试/自动化检测用
+    });
     return () => {
-      scene.dispose();
+      cancelled = true;
+      if (scene) scene.dispose();
       sceneRef.current = null;
     };
   }, [result]);

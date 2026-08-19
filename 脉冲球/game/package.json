@@ -10,6 +10,7 @@
     "sim": "tsx scripts/sim.ts"
   },
   "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.12.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "three": "^0.185.1"

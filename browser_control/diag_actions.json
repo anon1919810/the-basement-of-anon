@@ -1,0 +1,7 @@
+[
+  {"act": "wait", "ms": 800},
+  {"act": "eval", "js": "[...document.querySelectorAll('button,a')].find(b=>b.innerText.trim()==='登录')?.click()"},
+  {"act": "wait", "ms": 800},
+  {"act": "eval", "js": "[...document.querySelectorAll('button')].map(b=>({t:b.innerText.replace(/\\s/g,''),cls:b.className}))"},
+  {"act": "eval", "js": "document.body.innerText"}
+]
