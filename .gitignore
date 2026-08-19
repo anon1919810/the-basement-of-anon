@@ -6,3 +6,4 @@ cache/
 temp_pdfs/
 .venv/
 results/
+node_modules/
