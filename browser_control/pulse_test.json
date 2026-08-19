@@ -2,6 +2,9 @@
   {"act": "wait", "ms": 1500},
   {"act": "eval", "js": "[...document.querySelectorAll('button')].find(b=>b.innerText.includes('开始比赛'))?.click()"},
   {"act": "wait", "ms": 4500},
-  {"act": "eval", "js": "({ready: window.__pulse3dReady === true, canvases: document.querySelectorAll('canvas').length, err: window.__pulseErr || null})"},
-  {"act": "eval", "js": "document.body.innerText.slice(0, 260)"}
+  {"act": "eval", "js": "({ready: window.__pulse3dReady === true, canvases: document.querySelectorAll('canvas').length})"},
+  {"act": "eval", "js": "document.querySelector('.score')?.textContent"},
+  {"act": "wait", "ms": 8000},
+  {"act": "eval", "js": "({score: document.querySelector('.score')?.textContent, logCount: document.querySelectorAll('.log-item').length, banner: !!document.querySelector('.banner')})"},
+  {"act": "eval", "js": "document.body.innerText.includes('脉冲') ? 'UI正常' : 'UI异常'"}
 ]

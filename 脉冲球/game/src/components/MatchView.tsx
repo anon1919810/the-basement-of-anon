@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MatchResult } from '../game/engine';
 import type { MatchEvent } from '../game/match';
-import { MatchScene, PLAYBACK, PULSE_COLORS } from '../three/MatchScene';
+import { MatchScene, PLAYBACK, PULSE_COLORS, KEY_BIG, BROADCAST } from '../three/MatchScene';
 
 const PULSE_LABEL = ['灰(0~1)', '灰(0~1)', '蓝(2)', '绿(3)', '黄(4)', '红(5)'];
 
@@ -52,16 +52,28 @@ export default function MatchView({ result }: { result: MatchResult }) {
   const [playing, setPlaying] = useState(true);
   const [speed, setSpeed] = useState(1);
   const [keyOnly, setKeyOnly] = useState(false);
+  const [banner, setBanner] = useState<string | null>(null); // 转播横幅
 
   const vtimeRef = useRef(0);
   const playingRef = useRef(true);
   const speedRef = useRef(1);
   const keyOnlyRef = useRef(false);
   const eventsRef = useRef(events);
+  const keyIdxRef = useRef(-1);   // 已触发慢放/横幅的事件下标
+  const keyAtRef = useRef(-Infinity); // 大事件发生时刻（真实毫秒）
   eventsRef.current = events;
 
   const idx = eventIndexAt(events, vtime);
   const cur = events[Math.max(0, idx)];
+
+  // 转播横幅：大事件中央字幕 2.6s
+  useEffect(() => {
+    if (KEY_BIG.has(cur.type)) {
+      setBanner(cur.desc);
+      const t = window.setTimeout(() => setBanner(null), BROADCAST.SLOW_MS);
+      return () => window.clearTimeout(t);
+    }
+  }, [cur]);
 
   const keyEventIdx = useMemo(() => {
     const arr: number[] = [];
@@ -120,7 +132,16 @@ export default function MatchView({ result }: { result: MatchResult }) {
           }
         } else {
           // 连续时间轴：游戏时钟 = 真实 dt × TIME_SCALE × 速度倍率（不再每帧跳到下一事件）
-          vt = Math.min(duration, vt + dt * PLAYBACK.TIME_SCALE * speedRef.current);
+          // 转播慢放：大事件后 2.6s 内时间流速 ×0.55（戏剧感）
+          const list = eventsRef.current;
+          const i0 = eventIndexAt(list, vtimeRef.current);
+          const c0 = list[Math.max(0, i0)];
+          if (KEY_BIG.has(c0.type) && i0 !== keyIdxRef.current) {
+            keyIdxRef.current = i0;
+            keyAtRef.current = now;
+          }
+          const slow = now - keyAtRef.current < BROADCAST.SLOW_MS;
+          vt = Math.min(duration, vt + dt * PLAYBACK.TIME_SCALE * speedRef.current * (slow ? 0.55 : 1));
           if (vt >= duration) {
             vt = duration;
             playingRef.current = false;
@@ -196,7 +217,9 @@ export default function MatchView({ result }: { result: MatchResult }) {
         </div>
       </div>
 
-      <div className="pitch3d" ref={containerRef} />
+      <div className="pitch3d" ref={containerRef}>
+        {banner && <div className="banner">{banner}</div>}
+      </div>
 
       <div className="controls">
         <div className="group">

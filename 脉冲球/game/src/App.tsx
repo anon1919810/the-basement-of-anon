@@ -68,8 +68,8 @@ export default function App() {
   return (
     <div className="app">
       <header>
-        <h1>脉冲球 <span>PULSE BALL · v0.0.4</span></h1>
-        <p className="tagline">确定性比赛引擎 · Three.js 3D 回放 + Rapier 物理球 · 9v9 · 三节净时 + 金球加时 + 点球大战</p>
+        <h1>脉冲球 <span>PULSE BALL · v0.0.5</span></h1>
+        <p className="tagline">确定性比赛引擎 · Three.js 3D 回放 + Rapier 物理（球+球员碰撞） · 9v9 · 三节净时 + 金球加时 + 点球大战</p>
       </header>
 
       {!match && (
@@ -90,7 +90,7 @@ export default function App() {
         </>
       )}
 
-      <footer>脉冲球 · 原型 v0.0.4 · 端明ちゃん 定方向 · 引擎确定性由 mulberry32 保证</footer>
+      <footer>脉冲球 · 原型 v0.0.5 · 端明ちゃん 定方向 · 引擎确定性由 mulberry32 保证</footer>
     </div>
   );
 }

@@ -55,6 +55,11 @@ export const PHYS = {
   SNAP_DIST: 0.4,      // 距目标该距离内吸附
 };
 
+// 球员碰撞（kinematic 胶囊推球）+ 转播镜头
+export const PLAYER_COL = { RADIUS: 0.34, HALF: 0.55, Y: 0.9, SEP: 0.92 }; // SEP=球员最小中心距
+export const KEY_BIG = new Set<string>(['goal', 'penalty_goal', 'shootout_goal', 'shootout_win']); // 大事件
+export const BROADCAST = { SLOW_MS: 2600, SHAKE_MS: 700, ZOOM_D: 11, ZOOM_H: 17, SHAKE: 0.55 };
+
 // Catmull-Rom 1D：过 P1→P2 段（u∈[0,1]），切向由相邻点 P0/P3 决定 → 曲线过最近 3-4 个事件点
 function catmullRom1D(p0: number, p1: number, p2: number, p3: number, u: number): number {
   const u2 = u * u, u3 = u2 * u;
@@ -156,6 +161,10 @@ export class MatchScene {
   private actorRing: THREE.Mesh;
   private world?: RAPIER.World;
   private ballBody?: RAPIER.RigidBody;
+  private playerBodies: RAPIER.RigidBody[] = [];
+  private slowUntil = 0;   // 真实毫秒：大事件慢放窗口（推近镜头）
+  private shakeUntil = 0;  // 真实毫秒：进球震动窗口
+  private shakeAmp = 0;
   private followTarget = new THREE.Vector3(0, 0, 0);
   private prevBall = new THREE.Vector3(); // 上一帧球位（镜头提前量用有限差分速度）
   private clock = 0;
@@ -267,6 +276,20 @@ export class MatchScene {
       RAPIER.ColliderDesc.ball(BALL_R).setRestitution(PHYS.RESTITUTION).setFriction(0.5),
       this.ballBody,
     );
+    // 球员：kinematic 胶囊（推球/卡位），位置每帧由 layout+软分离驱动
+    for (let t = 0; t < 2; t++) {
+      for (let i = 0; i < 9; i++) {
+        const g = this.players[t * 9 + i].group.position;
+        const body = this.world.createRigidBody(
+          RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(g.x, PLAYER_COL.Y, g.z),
+        );
+        this.world.createCollider(
+          RAPIER.ColliderDesc.capsule(PLAYER_COL.HALF, PLAYER_COL.RADIUS).setFriction(0.4),
+          body,
+        );
+        this.playerBodies.push(body);
+      }
+    }
   }
 
   // 跨入新事件段：给球一个沿 起点→终点 的真实初速（踢出冲量，之后力驱动修正）；
@@ -538,6 +561,28 @@ export class MatchScene {
     return out;
   }
 
+  // 球员间软分离（卡位推挤）：两轮迭代两两推开，原地修改 layout 目标
+  private separatePlayers(layout: { x: number; y: number }[][]): void {
+    const d = PLAYER_COL.SEP;
+    for (let pass = 0; pass < 2; pass++) {
+      for (let a = 0; a < 18; a++) {
+        const ta = a < 9 ? 0 : 1, ia = a % 9;
+        for (let b = a + 1; b < 18; b++) {
+          const tb = b < 9 ? 0 : 1, ib = b % 9;
+          const pa = layout[ta][ia], pb = layout[tb][ib];
+          const dx = pb.x - pa.x, dy = pb.y - pa.y;
+          const dist = Math.hypot(dx, dy);
+          if (dist > 1e-4 && dist < d) {
+            const push = (d - dist) / 2;
+            const nx = dx / dist, ny = dy / dist;
+            pa.x -= nx * push; pa.y -= ny * push;
+            pb.x += nx * push; pb.y += ny * push;
+          }
+        }
+      }
+    }
+  }
+
   // ---------- 每帧更新 ----------
 
   update(vtime: number, now: number): void {
@@ -580,6 +625,12 @@ export class MatchScene {
       this.lastIdx = idx;
       this.maybeTriggerRuns(idx, cur, now);
       this.kickBall(cur, nxt);
+      // 转播：大事件 → 慢放窗口（推近）+ 进球震动
+      if (KEY_BIG.has(cur.type)) {
+        this.slowUntil = now + BROADCAST.SLOW_MS;
+        this.shakeUntil = now + BROADCAST.SHAKE_MS;
+        this.shakeAmp = BROADCAST.SHAKE;
+      }
     }
 
     // 物理球：目标 = 轨迹采样点；弹簧-阻尼力拉向目标（质量感/惯性），重力+反弹保弧线，
@@ -627,8 +678,9 @@ export class MatchScene {
     this.prevBall.copy(this.ball.position);
 
     // 球员：目标 = 缓动球位上的阵型（随 easeInOut 球位滑动，段内加速-减速）
-    // + 位置缓动跟随 + 面向移动方向 + 摆腿（前插跑位者更快、摆腿更大）
+    // + 软分离卡位 + 位置缓动跟随 + 面向移动方向 + 摆腿 + kinematic 碰撞体同步（推球）
     const layout = this.layoutTeams(possession, bx, by, now);
+    this.separatePlayers(layout);
     for (let t2 = 0; t2 < 2; t2++) {
       for (let i = 0; i < 9; i++) {
         const p = layout[t2][i];
@@ -662,6 +714,10 @@ export class MatchScene {
           rig.yaw += d * (1 - Math.exp(-dt * 8));
         }
         rig.group.rotation.y = rig.yaw;
+
+        // 同步 kinematic 碰撞体（推球/卡位）
+        const body = this.playerBodies[t2 * 9 + i];
+        if (body) body.setNextKinematicTranslation({ x: g.x, y: PLAYER_COL.Y, z: g.z });
       }
     }
 
@@ -691,8 +747,19 @@ export class MatchScene {
     this.followTarget.lerp(new THREE.Vector3(this.ball.position.x + lx, 0, this.ball.position.z + lz), kT);
 
     if (!this.interacting) {
-      const ideal = new THREE.Vector3(this.followTarget.x, CAM_H, this.followTarget.z + CAM_D);
-      this.camera.position.lerp(ideal, 1 - Math.exp(-dt * 3));
+      // 转播镜头：大事件慢放窗口内推近（更低更近），否则默认俯视
+      const zoom = now < this.slowUntil;
+      const ch = zoom ? BROADCAST.ZOOM_H : CAM_H;
+      const cd = zoom ? BROADCAST.ZOOM_D : CAM_D;
+      const ideal = new THREE.Vector3(this.followTarget.x, ch, this.followTarget.z + cd);
+      this.camera.position.lerp(ideal, 1 - Math.exp(-dt * (zoom ? 6 : 3)));
+      // 进球震动：相机加衰减随机偏移
+      if (now < this.shakeUntil) {
+        const t0 = this.shakeUntil - BROADCAST.SHAKE_MS;
+        const a = this.shakeAmp * (1 - (now - t0) / BROADCAST.SHAKE_MS);
+        this.camera.position.x += (Math.random() - 0.5) * a;
+        this.camera.position.y += (Math.random() - 0.5) * a * 0.6;
+      }
     }
     this.controls.target.lerp(this.followTarget, kT);
     this.controls.update();

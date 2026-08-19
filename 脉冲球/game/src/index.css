@@ -69,6 +69,32 @@ header h1 span { color: var(--green); font-size: 13px; font-weight: 600; letter-
 }
 .pitch3d canvas { display: block; width: 100% !important; height: 100% !important; }
 
+/* 转播：大事件中央横幅 */
+.banner {
+  position: absolute;
+  left: 50%; top: 14%;
+  transform: translateX(-50%);
+  background: rgba(6, 78, 59, 0.92);
+  color: #fff;
+  font-size: 21px;
+  font-weight: 800;
+  padding: 12px 26px;
+  border-radius: 12px;
+  border: 1px solid var(--green);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  animation: bannerIn 0.25s ease-out;
+  z-index: 5;
+  max-width: 86%;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@keyframes bannerIn {
+  from { opacity: 0; transform: translateX(-50%) scale(0.85); }
+  to { opacity: 1; transform: translateX(-50%) scale(1); }
+}
+
 .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 10px 0; }
 .controls .group { display: flex; gap: 6px; align-items: center; border-right: 1px solid var(--line); padding-right: 10px; }
 .controls .group:last-child { border-right: none; }
