@@ -1,5 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import {
+  ArrowDown,
+  ArrowUp,
   BarChart3,
   Brain,
   Check,
@@ -14,6 +16,7 @@ import {
   Table2,
   Upload,
   Wand2,
+  X,
 } from 'lucide-react'
 import { api, apiBlob, apiSSE } from '../lib/api'
 import { toast } from '../lib/toast'
@@ -115,6 +118,38 @@ export default function Workbench() {
   const [statsMode, setStatsMode] = useState<'all' | 'current'>('all')
 
   const localStats = useMemo(() => (entries ? buildLocalStats(entries) : null), [entries])
+
+  // ---- 结果排序 / 筛选 ----
+  const [sortKey, setSortKey] = useState('none')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const [catFilter, setCatFilter] = useState<string[]>([])
+  const [basinFilter, setBasinFilter] = useState<string[]>([])
+
+  const catOptions = useMemo(
+    () => Array.from(new Set((entries ?? []).map((e) => e.类别 || '不详'))).sort(),
+    [entries],
+  )
+  const basinOptions = useMemo(
+    () => Array.from(new Set((entries ?? []).map((e) => e.流域 || '不详'))).sort(),
+    [entries],
+  )
+  const shownEntries = useMemo(() => {
+    if (!entries) return []
+    let list = entries.filter(
+      (e) =>
+        (catFilter.length === 0 || catFilter.includes(e.类别 || '不详')) &&
+        (basinFilter.length === 0 || basinFilter.includes(e.流域 || '不详')),
+    )
+    if (sortKey !== 'none') {
+      const key = sortKey as keyof Entry
+      list = [...list].sort((a, b) => {
+        const va = String(a[key] ?? '')
+        const vb = String(b[key] ?? '')
+        return sortDir === 'asc' ? va.localeCompare(vb, 'zh') : vb.localeCompare(va, 'zh')
+      })
+    }
+    return list
+  }, [entries, sortKey, sortDir, catFilter, basinFilter])
 
   // ---- 提取历史 ----
   const [history, setHistory] = useState<any[]>([])
@@ -270,8 +305,8 @@ export default function Workbench() {
   }
 
   function exportExcel() {
-    if (!entries || entries.length === 0) return
-    apiBlob('/api/extract/export', { book_name: bookName, entries })
+    if (!shownEntries.length) return
+    apiBlob('/api/extract/export', { book_name: bookName, entries: shownEntries })
       .then((blob) => {
         const a = document.createElement('a')
         a.href = URL.createObjectURL(blob)
@@ -292,8 +327,8 @@ export default function Workbench() {
 
   // GB/T 7714 参考文献格式
   function exportGbt() {
-    if (!entries || !entries.length) return
-    const lines = entries.map(
+    if (!shownEntries.length) return
+    const lines = shownEntries.map(
       (e, i) =>
         `${i + 1}. ${e.名称}[M]//${bookName || '地方志'}．${e.时间 || ''}．${e.空间 || ''}．${e.基础信息 || ''}`,
     )
@@ -303,9 +338,9 @@ export default function Workbench() {
 
   // RIS（可导入 Zotero / EndNote）
   function exportRis() {
-    if (!entries || !entries.length) return
+    if (!shownEntries.length) return
     const lines = ['TY - GEN', `T1 - ${bookName || '地方志'} 文化要素`]
-    entries.forEach((e) => {
+    shownEntries.forEach((e) => {
       lines.push(`N1 - ${e.名称}：${e.基础信息 || ''}（${e.时间 || ''}；${e.空间 || ''}）`)
     })
     lines.push('ER - ')
@@ -505,6 +540,55 @@ export default function Workbench() {
               </span>
             )}
           </div>
+          {/* 排序 / 筛选 */}
+          <div className="mb-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+            <span className="text-xs text-neutral-400">显示 {shownEntries.length}/{entries.length} 条</span>
+            <select className="input !w-32 !py-1" value={sortKey} onChange={(e) => setSortKey(e.target.value)}>
+              <option value="none">默认顺序</option>
+              <option value="类别">按类别</option>
+              <option value="流域">按流域</option>
+              <option value="名称">按名称</option>
+              <option value="时间">按时间</option>
+              <option value="空间">按空间</option>
+            </select>
+            <button
+              className="btn btn-icon btn-sm"
+              title={sortDir === 'asc' ? '升序' : '降序'}
+              onClick={() => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))}
+            >
+              {sortDir === 'asc' ? <ArrowUp size={13} /> : <ArrowDown size={13} />}
+              {sortDir === 'asc' ? '升序' : '降序'}
+            </button>
+            <span className="text-xs text-neutral-400">类别</span>
+            {catOptions.map((c) => (
+              <button
+                key={c}
+                className={`chip-btn${catFilter.includes(c) ? ' chip-on' : ''}`}
+                onClick={() => setCatFilter((f) => (f.includes(c) ? f.filter((x) => x !== c) : [...f, c]))}
+              >
+                {c}
+              </button>
+            ))}
+            <span className="text-xs text-neutral-400">流域</span>
+            {basinOptions.map((b) => (
+              <button
+                key={b}
+                className={`chip-btn${basinFilter.includes(b) ? ' chip-on' : ''}`}
+                onClick={() => setBasinFilter((f) => (f.includes(b) ? f.filter((x) => x !== b) : [...f, b]))}
+              >
+                {b}
+              </button>
+            ))}
+            {(sortKey !== 'none' || catFilter.length > 0 || basinFilter.length > 0) && (
+              <button
+                className="btn btn-icon btn-sm"
+                onClick={() => { setSortKey('none'); setSortDir('asc'); setCatFilter([]); setBasinFilter([]) }}
+              >
+                <X size={13} />
+                清除
+              </button>
+            )}
+          </div>
           <div className="overflow-x-auto">
             <table className="data">
               <thead>
@@ -514,7 +598,9 @@ export default function Workbench() {
                 </tr>
               </thead>
               <tbody>
-                {entries.map((e, i) => (
+                {shownEntries.map((e) => {
+                  const i = entries.indexOf(e)
+                  return (
                   <tr key={i}>
                     <td className="font-medium">{e.名称}</td>
                     {(['类别', '时间', '空间', '流域', '基础信息'] as const).map((f) => {
@@ -545,7 +631,8 @@ export default function Workbench() {
                     })}
                     <td>{e.历史文献 ?? ''}</td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>

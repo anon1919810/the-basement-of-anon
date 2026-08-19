@@ -247,6 +247,26 @@ table.data tbody tr:hover {
   color: var(--accent-dark);
   background: var(--accent-soft);
 }
+.chip-btn {
+  display: inline-block;
+  padding: 1px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+  line-height: 1.5;
+}
+.chip-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent-dark);
+}
+.chip-btn.chip-on {
+  border-color: var(--accent);
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+}
 
 /* ---------- 第二轮打磨：微阴影 · 动效 · 空状态 · 提示条 ---------- */
 .btn {
