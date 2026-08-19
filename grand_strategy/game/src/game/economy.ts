@@ -247,7 +247,7 @@ export function provinceTransportCap(map: GameMap, prov: Province): number {
   return TRANSPORT_CAP_BASE * (provAvgH(map, prov) < 28 ? 1.4 : 1.15);
 }
 
-/** 全国运力充足度（0.25-1）：运力紧 → 贸易容量收缩 */
+/** 全国运力充足度（0.25-1）：运力紧 → 贸易容量收缩（含建筑需求 + 贸易吨位） */
 export function transportAdequacy(n: NationState): number {
   let stock = 0, demand = 0;
   for (const pid of Object.keys(n.provStocks)) stock += n.provStocks[Number(pid)]?.transport ?? 0;
@@ -255,6 +255,15 @@ export function transportAdequacy(n: NationState): number {
     if (p.status !== 'active') continue;
     const def = BUILDING_DEFS[p.kind];
     if (def.output) demand += (TRANSPORT_USE[def.category] ?? 0.3) * def.capacity;
+  }
+  // 贸易吨位（上月省际调运 + 出口，transport 商品自身除外）→ 运力需求
+  for (const pid of Object.keys(n.provinceMarkets)) {
+    const pmAll = n.provinceMarkets[Number(pid)];
+    if (!pmAll) continue;
+    for (const g of GOODS_LIST) {
+      if (g === 'transport') continue;
+      demand += (pmAll[g].flowOut ?? 0) + (pmAll[g].exported ?? 0);
+    }
   }
   return clamp(stock / Math.max(1e-9, stock + demand), 0.25, 1);
 }

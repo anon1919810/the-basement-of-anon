@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "sim": "tsx scripts/sim.ts"
+    "sim": "tsx scripts/sim.ts",
+    "balance": "tsx scripts/balance.ts"
   },
   "dependencies": {
     "echarts": "^6.1.0",

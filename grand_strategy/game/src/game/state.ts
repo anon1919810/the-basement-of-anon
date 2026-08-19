@@ -319,6 +319,8 @@ export function newGameState(playerNation: NationId, seed: number, map: GameMap)
       const share = p.cellIds.length / totalCells;
       const ps = zeroGoods();
       for (const g of GOODS_LIST) ps[g] = initial[g] * share;
+      // v0.9 初始运力库存：沿海省给基础运力（现有港口/码头），破「无运力→无贸易→无钱建基建」死循环
+      ps.transport = isCoastal(map, p) ? 12 : 6;
       provStocks[p.id] = ps;
       exportRights[p.id] = isCoastal(map, p);
     }
@@ -334,7 +336,7 @@ export function newGameState(playerNation: NationId, seed: number, map: GameMap)
       foodStock: stocks.food,
       stability: def.stability,
       tax: defaultNationTax(def.taxDefaults),
-      spending: { ...def.defaultSpending, court: 15, health: 10 },
+      spending: { ...def.defaultSpending, court: 8, health: 5 },
       cells: nationCellCount(map, id),
       stocks,
       market: newMarket(),

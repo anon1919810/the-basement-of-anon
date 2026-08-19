@@ -93,8 +93,8 @@ export const BASE_TRADE_CAP: Record<GoodId, number> = {
 /** 关税税率已迁移至 tax.ts（连续滑块，economy 传入 tariffRate） */
 /** 成本传导过手率：输入品税价差 → 成品价格上浮的比例（0.85 = 85% 传导） */
 export const COST_PUSH_PASS = 0.85;
-/** 贸易吨位运力消耗系数（每吨调运/出口吃多少运力，v0.9 阶段 B） */
-export const TRADE_TRANSPORT = 0.2;
+/** 贸易吨位运力消耗系数（每吨调运/出口吃多少运力，v0.9 阶段 B；0.08 实测调） */
+export const TRADE_TRANSPORT = 0.08;
 
 /** 价格信号跨层传导权重（v0.8：省价独立定价，仅保留县←省传导） */
 export const BLEND_COUNTY_FROM_PROV = 0.2; // 本地价格 = 县供需比 × (1-0.2) + 省价格信号 0.2
@@ -381,6 +381,12 @@ export function settleMarket(input: MarketInput, markets: MarketState): MarketSn
             ? 1 / provOrder.length
             : 0;
       demand[pid] += govTotal * share;
+    }
+    // 运力需求含贸易吨位（transport 为最后商品，此时 provFreight 已累计其他商品吨位）→ 运力价反映贸易稀缺
+    if (g === 'transport') {
+      for (const pid of provOrder) {
+        demand[pid] += (provFreight[pid] ?? 0) * TRADE_TRANSPORT;
+      }
     }
 
     // ---- 2. 省价：供需比各自定价（clamp 0.4~2.5；省内运费小幅上浮） ----

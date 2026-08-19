@@ -207,13 +207,13 @@ export const BUILDING_DEFS: Record<BuildingKind, BuildingDef> = {
   ironWorks: {
     kind: 'ironWorks', label: '炼铁厂', category: 'heavy', skill: 'engineer',
     inputs: { ironOre: 2.0, coal: 1.0 }, opt: { tools: 0.3, machines: 0.2, transport: 0.3 },
-    output: 'iron', capacity: 2.0, cost: 200, duration: 8, opCost: 1.1, infra: { roads: 15 },
+    output: 'iron', capacity: 2.0, cost: 200, duration: 8, opCost: 1.1, infra: { roads: 10 },
     desc: '铁矿石＋煤 → 铁锭；需煤矿省或港口（进口矿）。',
   },
   copperWorks: {
     kind: 'copperWorks', label: '炼铜厂', category: 'heavy', skill: 'engineer',
     inputs: { copperOre: 2.0, coal: 1.0 }, opt: { tools: 0.3, machines: 0.2, transport: 0.3 },
-    output: 'copper', capacity: 2.0, cost: 210, duration: 8, opCost: 1.1, infra: { roads: 15 },
+    output: 'copper', capacity: 2.0, cost: 210, duration: 8, opCost: 1.1, infra: { roads: 10 },
     desc: '铜矿石＋煤 → 铜锭；机器/银行/船坞上游。',
   },
   mill: {
@@ -244,7 +244,7 @@ export const BUILDING_DEFS: Record<BuildingKind, BuildingDef> = {
   steelWorks: {
     kind: 'steelWorks', label: '炼钢厂', category: 'heavy', skill: 'engineer',
     inputs: { iron: 2.0, coal: 1.0 }, opt: { tools: 0.3, machines: 0.2, transport: 0.3 },
-    output: 'steel', capacity: 2.0, cost: 240, duration: 9, opCost: 1.3, infra: { roads: 15 },
+    output: 'steel', capacity: 2.0, cost: 240, duration: 9, opCost: 1.3, infra: { roads: 10 },
     requireGood: 'iron', desc: '铁锭＋煤 → 钢；工具/武器/铁路上游。',
   },
   clothingWorks: {
@@ -263,7 +263,7 @@ export const BUILDING_DEFS: Record<BuildingKind, BuildingDef> = {
     kind: 'luxuryWorkshop', label: '奢侈品工坊', category: 'fine', skill: 'engineer',
     inputs: {}, anyOf: ['cloth', 'fur'], opt: { tools: 0.2, machines: 0.15 },
     output: 'luxury', capacity: 0.8, cost: 280, duration: 10, opCost: 1.3, infra: {},
-    requireLiteracy: 0.55, desc: '精工 → 奢侈品；需高识字率工匠，供上层。',
+    requireLiteracy: 0.4, desc: '精工 → 奢侈品；需识字率工匠，供上层。',
   },
   // ==================== 工业（5）====================
   toolWorks: {
@@ -324,7 +324,7 @@ export const BUILDING_DEFS: Record<BuildingKind, BuildingDef> = {
   port: {
     kind: 'port', label: '港口', category: 'infra', skill: 'technician',
     inputs: { stone: 1.0, timber: 0.8, steel: 0.5 }, output: 'transport', capacity: 2.5,
-    cost: 260, duration: 10, opCost: 0.9, infra: { ports: 15 }, requireCoastal: true,
+    cost: 260, duration: 10, opCost: 0.9, infra: { ports: 5 }, requireCoastal: true,
     desc: '产运力 + 贸易容量（出口权联动）。',
   },
   lighthouse: {

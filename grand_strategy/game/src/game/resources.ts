@@ -14,7 +14,7 @@
  *  - 毛皮（fur）不在资源表 —— 由「寒带林」派生（有林场 + 寒带气候，provinceHasFur）
  */
 import { loadMap } from './map';
-import type { GameMap, Province } from './map';
+import type { GameMap, Province, County } from './map';
 import { Rng } from './rng';
 
 export type ResourceId =
@@ -79,49 +79,60 @@ export function provinceCoastal(prov: Province): boolean {
   return coastal;
 }
 
-/** 单省资源（确定性：与导出脚本同序同种子） */
-export function computeProvinceResources(map: GameMap, prov: Province, rng: Rng): ResourceId[] {
-  let hSum = 0;
-  let tSum = 0;
-  let pSum = 0;
-  let maxH = -Infinity;
-  const n = prov.cellIds.length;
-  for (const cid of prov.cellIds) {
+/**
+ * 县级资源（v0.9 县组合）：省内各县按本地地形出产（山地县有矿/低地县有粮），
+ * 省资源 = 各县并集——规避「一省只能出产一种资源」困境（大省既有粮仓又有矿山）。
+ * 确定性：用县 id 哈希代替全局 rng 序列（不改变原种子序列的其余部分）。
+ */
+export function countyResourcesOf(map: GameMap, county: County): ResourceId[] {
+  const res: ResourceId[] = [];
+  let maxH = -Infinity, hSum = 0, tSum = 0, pSum = 0;
+  let coastal = false;
+  const n = Math.max(1, county.cellIds.length);
+  for (const cid of county.cellIds) {
     const cell = map.cellsById.get(cid);
     if (!cell) continue;
-    hSum += cell.h;
-    tSum += cell.temp;
-    pSum += cell.prec;
+    hSum += cell.h; tSum += cell.temp; pSum += cell.prec;
     if (cell.h > maxH) maxH = cell.h;
+    if (!coastal) {
+      for (const nb of cell.neighbors) {
+        const nbC = map.cellsById.get(nb);
+        if (nbC && !nbC.land) { coastal = true; break; }
+      }
+    }
   }
-  const avgH = hSum / n;
-  const avgT = tSum / n;
-  const avgP = pSum / n;
-  const coastal = provinceCoastal(prov);
-  const res: ResourceId[] = [];
-  if (maxH >= 30 || avgH >= 28) {
-    // 山地：矿藏（确定性加权随机）+ 石料（采石场原料）
-    res.push(MINE_POOL[rng.int(0, MINE_POOL.length)]);
-    if (rng.chance(0.4) && !res.includes('coal')) res.push('coal');
-    if (avgH < 45 && rng.chance(0.4)) res.push('timber');
+  const avgH = hSum / n, avgT = tSum / n, avgP = pSum / n;
+  const seed = county.id; // 县 id 哈希（确定性）
+  if (maxH >= 30) {
+    // 山地县：矿藏（哈希选）+ 石料 + 煤铁伴生
+    res.push(MINE_POOL[seed % MINE_POOL.length]);
+    if (seed % 5 === 0) res.push('coal');
+    if (res.includes('iron') && seed % 2 === 0) res.push('coal');
+    if (avgH < 45 && seed % 5 < 2) res.push('timber');
     res.push('stone');
   } else {
-    // 低地：农业
-    if (avgT > -5 && avgP >= 15) {
-      res.push(avgT > 10 && avgP > 30 ? 'cotton' : 'farmland');
-    } else if (avgT > -10) {
-      res.push('farmland');
-    } else {
-      res.push('timber');
-    }
-    if (avgP >= 25 && avgT > -8 && rng.chance(0.5)) res.push('timber');
+    // 低地县：农业
+    if (avgT > -5 && avgP >= 15) res.push(avgT > 10 && avgP > 30 ? 'cotton' : 'farmland');
+    else if (avgT > -10) res.push('farmland');
+    else res.push('timber');
+    if (avgP >= 25 && avgT > -8 && seed % 2 === 0) res.push('timber');
   }
   if (coastal) {
     res.push('fish');
-    if (!res.includes('salt') && rng.chance(0.3)) res.push('salt');
+    if (seed % 3 === 0) res.push('salt');
   }
   if (res.length === 0) res.push('farmland');
   return res;
+}
+
+/** 单省资源（v0.9 = 各县资源并集；确定性） */
+export function computeProvinceResources(map: GameMap, prov: Province, rng: Rng): ResourceId[] {
+  const set = new Set<ResourceId>();
+  for (const cid of prov.countyIds) {
+    const county = map.countyById.get(cid);
+    if (county) for (const r of countyResourcesOf(map, county)) set.add(r);
+  }
+  return [...set];
 }
 
 let resourcesByProvince: Map<number, ResourceId[]> | null = null;
