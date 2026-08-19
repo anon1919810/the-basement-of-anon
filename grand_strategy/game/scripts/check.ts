@@ -4,12 +4,12 @@ import { newGameState, tickDay } from '../src/game/state';
 import { GOODS_LIST } from '../src/game/market';
 import { JOB_LABEL, zeroJobMix } from '../src/game/pops';
 import { CLASS_DEFS } from '../src/game/classes';
-import { BUILDING_KINDS, startInvestment } from '../src/game/buildings';
+import { startInvestment } from '../src/game/buildings';
 import { provinceHasResource } from '../src/game/resources';
 import type { Province } from '../src/game/map';
 import type { BuildingKind } from '../src/game/buildings';
 
-const DAYS_PER_YEAR = 360, DAYS_PER_MONTH = 30, YEARS = 3;
+const DAYS_PER_YEAR = 360, YEARS = 3;
 let issues = 0;
 const issue = (msg: string) => { console.log('⚠ ' + msg); issues++; };
 const ok = (msg: string) => console.log('✓ ' + msg);
@@ -72,7 +72,7 @@ function main(): void {
     const ps = state.provinces[Number(pid)];
     if (ps?.pops) for (const p of ps.pops) classMix[p.class] += p.size;
   }
-  const classStr = [1, 2, 3, 4, 5, 6, 7].map((c) => `${CLASS_DEFS[c as never].label}:${(classMix[c] / total * 100).toFixed(0)}%`).join(' ');
+  const classStr = [1, 2, 3, 4, 5, 6, 7].map((c) => `${(CLASS_DEFS as Record<number, { label: string }>)[c].label}:${(classMix[c] / total * 100).toFixed(0)}%`).join(' ');
   console.log(`\n阶级分布：${classStr}`);
 
   // 4. 生活水平按阶级分化（贵族 vs 奴役）
