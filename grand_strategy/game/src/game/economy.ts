@@ -88,7 +88,17 @@ export const GOOD_PRODUCERS: Partial<Record<GoodId, { inputs: Partial<Record<Goo
   const out: Partial<Record<GoodId, { inputs: Partial<Record<GoodId, number>>; capacity: number }>> = {};
   for (const kind of Object.keys(BUILDING_DEFS) as (keyof typeof BUILDING_DEFS)[]) {
     const def = BUILDING_DEFS[kind];
-    out[def.output] = { inputs: { ...def.inputs }, capacity: def.capacity };
+    if (!def.output) continue; // 服务类建筑（学校/银行/市场）不产商品
+    out[def.output] = {
+      inputs: { ...def.inputs, ...(def.anyOf ? { [def.anyOf[0]]: 1.2 } : {}) },
+      capacity: def.capacity,
+    };
+    for (const v of def.variants ?? []) {
+      out[v.output] = {
+        inputs: { ...v.inputs, ...(v.anyOf ? { [v.anyOf[0]]: 1.2 } : {}) },
+        capacity: def.capacity,
+      };
+    }
   }
   return out;
 })();
@@ -356,7 +366,9 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
   // 政府需求：军费耗武器/煤、基建耗工具/木材/煤、行政耗衣物/煤、宫廷耗奢侈品
   const govDemand = zeroGoods();
   govDemand.clothing = n.spending.admin * 0.004;
-  govDemand.weapons = n.spending.military * 0.003;
+  govDemand.swords = n.spending.military * 0.0012;
+  govDemand.muskets = n.spending.military * 0.001;
+  govDemand.cannons = n.spending.military * 0.0008;
   govDemand.tools = n.spending.infra * 0.005;
   govDemand.luxury = n.spending.court * 0.0008;
   govDemand.coal = n.spending.admin * 0.002 + n.spending.military * 0.001;
@@ -413,9 +425,14 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
     }
   }
   // 已投产（含上月投产）的建筑：技能要求 → 从本省库存预扣输入 → 产出进本省市场供给
+  // 支持：必输 inputs（都要）+ anyOf（任一选库存最足）+ 变体产线（armory）+ 服务类无输出（school/bank/market）
   for (const p of n.projects) {
     if (p.status !== 'active' || newlyCompleted.has(p.id)) continue;
     const def = BUILDING_DEFS[p.kind];
+    const varDef = (def.variants ?? [])[p.variant ?? 0];
+    const baseInputs = { ...def.inputs, ...(varDef?.inputs ?? {}) };
+    const anyOf = (varDef?.anyOf ?? def.anyOf) ?? [];
+    const mainOutput = varDef?.output ?? def.output;
     const ps = state.provinces[p.provId];
     let skillPop = 0;
     if (ps) for (const pop of ps.pops) if (pop.job === def.skill) skillPop += pop.size;
@@ -423,19 +440,34 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
     // 输入可用性：按本省库存（建筑按项目 id 序确定性占用）
     const provStock = n.provStocks[p.provId] ?? (n.provStocks[p.provId] = zeroGoods());
     let avail = 1;
-    const inputGoods = Object.keys(def.inputs) as GoodId[];
+    const inputGoods = Object.keys(baseInputs) as GoodId[];
     for (const g of inputGoods) {
-      const need = (def.inputs[g] ?? 0) * skillFactor;
+      const need = (baseInputs[g] ?? 0) * skillFactor;
       if (need > 0) {
         const have = Math.max(0, provStock[g] ?? 0);
         avail = Math.min(avail, have / need);
+      }
+    }
+    // anyOf：选本省库存最充足的原料（确定性；任一即满足）
+    let chosenAny: GoodId | null = null;
+    if (anyOf.length > 0) {
+      let best: GoodId | null = null;
+      let bestHave = -1;
+      for (const g of anyOf) {
+        const have = Math.max(0, provStock[g] ?? 0);
+        if (have > bestHave) { best = g; bestHave = have; }
+      }
+      if (best) {
+        chosenAny = best;
+        const need = 1.2 * skillFactor;
+        avail = Math.min(avail, Math.max(0, provStock[best] ?? 0) / Math.max(1e-9, need));
       }
     }
     avail = clamp(avail, 0, 1);
     // 预扣输入（从本省库存；守恒 = 生产+进口+净流入 = 消费+出口+Δ库存+建筑消耗）
     const inputUsed = {} as Record<GoodId, number>;
     for (const g of inputGoods) {
-      const need = (def.inputs[g] ?? 0) * skillFactor;
+      const need = (baseInputs[g] ?? 0) * skillFactor;
       const used = need * avail;
       if (used > 0) {
         provStock[g] -= used;
@@ -445,8 +477,17 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
         provGoods(provBuildingDemand, p.provId)[g] += need; // 价格信号用「期望输入」
       }
     }
-    const output = def.capacity * skillFactor * avail;
-    provGoods(provFactorySupply, p.provId)[def.output] += output;
+    if (chosenAny) {
+      const need = 1.2 * skillFactor;
+      const used = need * avail;
+      provStock[chosenAny] -= used;
+      n.stocks[chosenAny] -= used;
+      inputUsed[chosenAny] = used;
+      provGoods(provBuildingConsumed, p.provId)[chosenAny] += used;
+      provGoods(provBuildingDemand, p.provId)[chosenAny] += need;
+    }
+    const output = mainOutput ? def.capacity * skillFactor * avail : 0;
+    if (mainOutput) provGoods(provFactorySupply, p.provId)[mainOutput] += output;
     p.lastSkillFactor = skillFactor;
     p.lastRunFactor = avail;
     p.lastOutput = output;
@@ -493,8 +534,11 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
   for (const p of n.projects) {
     if (p.status === 'active' && !newlyCompleted.has(p.id)) {
       const def = BUILDING_DEFS[p.kind];
+      const varDef = (def.variants ?? [])[p.variant ?? 0];
+      const mainOutput = varDef?.output ?? def.output;
+      if (!mainOutput) continue; // 服务类建筑（学校/银行/市场）无产出现金流
       const provM = n.provinceMarkets[p.provId];
-      const outPrice = provM ? provM[def.output].price : n.market[def.output].price;
+      const outPrice = provM ? provM[mainOutput].price : n.market[mainOutput].price;
       p.lastRevenue = p.lastOutput * outPrice;
       let inputCost = 0;
       for (const g of Object.keys(p.lastInputUsed) as GoodId[]) {

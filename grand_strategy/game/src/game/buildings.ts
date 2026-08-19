@@ -1,13 +1,11 @@
 /**
- * 建筑投资（v0.3，investment.ts 重构为 buildings）：国库投入产业链建筑，按省份选址。
+ * 建筑投资（v0.9 五部门经济）：农业/矿业/加工/工业/基建，42 种建筑。
  *
- *  - 每建筑：{kind, 名称, 输入(每月单位), 输出, 技能要求, 省资源/基建/半成品解锁, 成本/工期/产能/运营成本}
- *  - 加工损耗：输出 < 输入量（铁锭 = 铁矿×2 + 煤×1 → 铁锭×2），价值随加工链上升
- *  - 技能链：农民/矿工/工匠/工程师 —— 建筑需对应职业 POP 在场（skillReqPop），不足则产能打折
- *  - 下游建筑以上游半成品为输入（炼钢厂吃铁锭 → 炼钢厂解锁需铁锭；机械厂/兵工厂需钢材）
- *  - 船坞需沿海 + 港口基建；奢侈品工坊需高识字率
- *  - 运营：建筑消耗输入（从国家库存扣除，参与市场定价）、产出进入国家市场供给
- *    → 月度回报 = 产出 × 市价 − 输入 × 市价 − 运营成本（随市价波动可亏损）
+ *  - 配方语法：inputs=必输（都要）；anyOf=任一输入即可；opt=可选加强项（不输入也正常产出，启用提效）
+ *  - 多输出：output2（如 牲畜农场 肉+皮毛）；变体产线：variants（兵工厂 刀剑/燧发枪/火炮）
+ *  - 服务类建筑（学校/银行/市场）无 output：提供加成（识字率/资本/贸易），阶段 C/D 接入
+ *  - 加工损耗：输出 < 输入量，价值随加工链上升
+ *  - 技能链：farmer/miner/artisan/engineer（职业三分后扩展，见设计文档 v0.9 第十节）
  */
 import type { GameMap, Province } from './map';
 import { isCoastal } from './logistics';
@@ -17,33 +15,57 @@ import { provinceHasResource } from './resources';
 import { zeroGoods } from './market';
 
 export type BuildingKind =
-  | 'farm' // 农场
-  | 'cottonFarm' // 棉田
-  | 'sawmill' // 锯木厂
-  | 'textile' // 纺织厂
-  | 'clothingWorks' // 服装厂
-  | 'coalMine' // 煤矿
-  | 'ironMine' // 铁矿
-  | 'ironWorks' // 炼铁厂
-  | 'steelWorks' // 炼钢厂
-  | 'toolWorks' // 工具厂
-  | 'armory' // 兵工厂
-  | 'shipyard' // 船坞
-  | 'luxuryWorkshop'; // 奢侈品工坊
+  // 农业（9）
+  | 'cottonFarm' | 'wheatFarm' | 'ryeFarm' | 'beetFarm' | 'caneFarm'
+  | 'coffeeFarm' | 'tobaccoFarm' | 'livestockFarm' | 'fishFarm'
+  // 矿业与开采业（8）
+  | 'lumberCamp' | 'quarry' | 'ironMine' | 'coalMine' | 'sulfurMine'
+  | 'copperMine' | 'saltMine' | 'whalingStation'
+  // 加工业一级（8）
+  | 'sawmill' | 'textile' | 'ironWorks' | 'copperWorks' | 'mill'
+  | 'sugarWorks' | 'gunpowderWorks' | 'tannery'
+  // 加工业二级（4）
+  | 'steelWorks' | 'clothingWorks' | 'foodFactory' | 'luxuryWorkshop'
+  // 工业（5）
+  | 'toolWorks' | 'armory' | 'shipyard' | 'dynamiteWorks' | 'machineWorks'
+  // 基建与公共服务（8）
+  | 'road' | 'railroad' | 'canal' | 'port' | 'lighthouse'
+  | 'school' | 'bank' | 'market';
 
-export type BuildingCategory = 'agriculture' | 'extraction' | 'processing' | 'heavy' | 'fine';
+export type BuildingCategory = 'agriculture' | 'extraction' | 'processing' | 'heavy' | 'fine' | 'infra';
+
+export interface BuildingVariant {
+  label: string;
+  output: GoodId;
+  /** 必输（都要） */
+  inputs: Partial<Record<GoodId, number>>;
+  /** 任一输入即可 */
+  anyOf?: GoodId[];
+  /** 可选加强项（不输入也正常产出，输入提效） */
+  opt?: Partial<Record<GoodId, number>>;
+}
 
 export interface BuildingDef {
   kind: BuildingKind;
   label: string;
   category: BuildingCategory;
-  /** 技能要求（对应职业 POP） */
+  /** 技能要求（对应职业 POP；职业三分后扩展） */
   skill: JobId;
-  /** 输入（每月单位，按满产能） */
+  /** 必输输入（每月单位，按满产能；'+'=都要） */
   inputs: Partial<Record<GoodId, number>>;
-  /** 输出商品 */
-  output: GoodId;
-  /** 满产能月产出（单位/月，同时进入国家市场供给） */
+  /** 任一输入即可（'、'=任一） */
+  anyOf?: GoodId[];
+  /** 可选加强项（'/' 斜杠项；不输入也能正常产出，输入则提效） */
+  opt?: Partial<Record<GoodId, number>>;
+  /** 主输出商品（服务类建筑可空） */
+  output?: GoodId;
+  /** 第二输出（如 牲畜农场 皮毛） */
+  output2?: GoodId;
+  /** 输出比例（output2 相对 output 的每月量） */
+  output2Rate?: number;
+  /** 变体产线（兵工厂三武器） */
+  variants?: BuildingVariant[];
+  /** 满产能月产出（单位/月，同时进入市场供给） */
   capacity: number;
   /** 建造成本（万₭） */
   cost: number;
@@ -53,11 +75,11 @@ export interface BuildingDef {
   opCost: number;
   /** 基建门槛 */
   infra: { roads?: number; ports?: number };
-  /** 省资源解锁条件（如棉田需 cotton） */
-  requireResource?: 'coal' | 'iron' | 'cotton' | 'timber';
-  /** 半成品解锁条件（国家已有该商品产出/库存，如炼钢厂需铁锭） */
+  /** 省资源解锁条件 */
+  requireResource?: 'coal' | 'iron' | 'cotton' | 'timber' | 'copper' | 'sulfur' | 'stone' | 'farmland' | 'salt';
+  /** 半成品解锁条件（国家已有该商品产出/库存） */
   requireGood?: GoodId;
-  /** 识字率门槛（奢侈品工坊） */
+  /** 识字率门槛 */
   requireLiteracy?: number;
   /** 需沿海 */
   requireCoastal?: boolean;
@@ -65,204 +87,283 @@ export interface BuildingDef {
 }
 
 export const BUILDING_DEFS: Record<BuildingKind, BuildingDef> = {
-  farm: {
-    kind: 'farm',
-    label: '农场',
-    category: 'agriculture',
-    skill: 'farmer',
-    inputs: {},
-    output: 'food',
-    capacity: 2.5,
-    cost: 80,
-    duration: 4,
-    opCost: 0.3,
-    infra: {},
-    desc: '精耕农田，提高粮食产出；沃土省加成更高。',
-  },
+  // ==================== 农业（9）====================
   cottonFarm: {
-    kind: 'cottonFarm',
-    label: '棉田',
-    category: 'agriculture',
-    skill: 'farmer',
-    inputs: {},
-    output: 'cotton',
-    capacity: 1.6,
-    cost: 100,
-    duration: 5,
-    opCost: 0.35,
-    infra: {},
-    requireResource: 'cotton',
+    kind: 'cottonFarm', label: '棉田', category: 'agriculture', skill: 'farmer',
+    inputs: {}, opt: { tools: 0.2, transport: 0.1 }, output: 'cotton', capacity: 1.6,
+    cost: 100, duration: 5, opCost: 0.35, infra: {}, requireResource: 'cotton',
     desc: '暖湿平原植棉，纺织业原料之源。',
   },
-  sawmill: {
-    kind: 'sawmill',
-    label: '锯木厂',
-    category: 'processing',
-    skill: 'artisan',
-    inputs: { timber: 2.0 },
-    output: 'lumber',
-    capacity: 1.6,
-    cost: 90,
-    duration: 4,
-    opCost: 0.5,
-    infra: {},
-    requireResource: 'timber',
-    desc: '木材 → 木料（损耗 20%），造船/基建的建材。',
+  wheatFarm: {
+    kind: 'wheatFarm', label: '小麦农场', category: 'agriculture', skill: 'farmer',
+    inputs: {}, opt: { tools: 0.2, transport: 0.1 }, output: 'wheat', capacity: 1.8,
+    cost: 110, duration: 5, opCost: 0.35, infra: {}, requireResource: 'farmland',
+    desc: '细粮：更高等的食物，磨坊/食品场上游。',
   },
-  textile: {
-    kind: 'textile',
-    label: '纺织厂',
-    category: 'processing',
-    skill: 'artisan',
-    inputs: { cotton: 2.0 },
-    output: 'cloth',
-    capacity: 1.5,
-    cost: 150,
-    duration: 6,
-    opCost: 0.8,
-    infra: { roads: 10 },
-    desc: '棉花 → 布料（损耗 25%），衣物与帆船的中间品。',
+  ryeFarm: {
+    kind: 'ryeFarm', label: '黑麦农场', category: 'agriculture', skill: 'farmer',
+    inputs: {}, opt: { tools: 0.2, transport: 0.1 }, output: 'food', capacity: 2.0,
+    cost: 80, duration: 4, opCost: 0.3, infra: {}, requireResource: 'farmland',
+    desc: '粗粮：基础口粮，耐寒耐贫瘠。',
   },
-  clothingWorks: {
-    kind: 'clothingWorks',
-    label: '服装厂',
-    category: 'fine',
-    skill: 'artisan',
-    inputs: { cloth: 2.0 },
-    output: 'clothing',
-    capacity: 1.6,
-    cost: 130,
-    duration: 5,
-    opCost: 0.7,
-    infra: {},
-    desc: '布料 → 衣物（损耗 20%），满足大众衣着需求。',
+  beetFarm: {
+    kind: 'beetFarm', label: '甜菜农场', category: 'agriculture', skill: 'farmer',
+    inputs: {}, opt: { tools: 0.2, transport: 0.1 }, output: 'sugar', capacity: 1.0,
+    cost: 100, duration: 5, opCost: 0.35, infra: {}, requireResource: 'farmland',
+    desc: '糖料：较高纬度可种但产量低。',
   },
-  coalMine: {
-    kind: 'coalMine',
-    label: '煤矿',
-    category: 'extraction',
-    skill: 'miner',
-    inputs: {},
-    output: 'coal',
-    capacity: 2.0,
-    cost: 160,
-    duration: 6,
-    opCost: 0.6,
-    infra: { roads: 10 },
-    requireResource: 'coal',
-    desc: '采掘煤炭：冶炼/取暖/蒸汽之源，工业的血液。',
+  caneFarm: {
+    kind: 'caneFarm', label: '甘蔗农场', category: 'agriculture', skill: 'farmer',
+    inputs: {}, opt: { tools: 0.2, transport: 0.1 }, output: 'sugar', capacity: 2.2,
+    cost: 140, duration: 6, opCost: 0.45, infra: {}, requireResource: 'cotton',
+    desc: '糖料：仅低纬度暖湿可种，产量高。',
+  },
+  coffeeFarm: {
+    kind: 'coffeeFarm', label: '咖啡农场', category: 'agriculture', skill: 'farmer',
+    inputs: {}, opt: { tools: 0.2, transport: 0.1 }, output: 'coffee', capacity: 1.2,
+    cost: 150, duration: 6, opCost: 0.5, infra: {}, requireResource: 'cotton',
+    desc: '成瘾物：需求刚性、缺货暴怒、适合高税。',
+  },
+  tobaccoFarm: {
+    kind: 'tobaccoFarm', label: '烟草农场', category: 'agriculture', skill: 'farmer',
+    inputs: {}, opt: { tools: 0.2, transport: 0.1 }, output: 'tobacco', capacity: 1.4,
+    cost: 140, duration: 6, opCost: 0.45, infra: {}, requireResource: 'farmland',
+    desc: '成瘾物：工人烟瘾大（消费矩阵 ×1.6）。',
+  },
+  livestockFarm: {
+    kind: 'livestockFarm', label: '牲畜农场', category: 'agriculture', skill: 'farmer',
+    inputs: {}, opt: { tools: 0.2, transport: 0.1 }, output: 'meat', output2: 'fur', output2Rate: 0.4,
+    capacity: 1.4, cost: 130, duration: 6, opCost: 0.5, infra: {}, requireResource: 'farmland',
+    desc: '肉 + 皮毛，草场畜牧业。',
+  },
+  fishFarm: {
+    kind: 'fishFarm', label: '渔场', category: 'agriculture', skill: 'farmer',
+    inputs: {}, opt: { tools: 0.2, transport: 0.1, sailShip: 0.2 }, output: 'meat', capacity: 1.5,
+    cost: 90, duration: 4, opCost: 0.3, infra: {}, requireCoastal: true,
+    desc: '近海捕捞，沿海肉食来源。',
+  },
+  // ==================== 矿业与开采业（8）====================
+  lumberCamp: {
+    kind: 'lumberCamp', label: '伐木场', category: 'extraction', skill: 'miner',
+    inputs: {}, opt: { tools: 0.2, transport: 0.2 }, output: 'timber', capacity: 2.2,
+    cost: 80, duration: 4, opCost: 0.3, infra: {}, requireResource: 'timber',
+    desc: '林地采伐，建材与造纸之源。',
+  },
+  quarry: {
+    kind: 'quarry', label: '采石场', category: 'extraction', skill: 'miner',
+    inputs: {}, opt: { tools: 0.3, transport: 0.3, dynamite: 0.2 }, output: 'stone', capacity: 2.4,
+    cost: 90, duration: 4, opCost: 0.35, infra: {}, requireResource: 'stone',
+    desc: '石料：基建（公路/铁路/港口）的骨料。',
   },
   ironMine: {
-    kind: 'ironMine',
-    label: '铁矿',
-    category: 'extraction',
-    skill: 'miner',
-    inputs: {},
-    output: 'ironOre',
-    capacity: 1.8,
-    cost: 180,
-    duration: 7,
-    opCost: 0.65,
-    infra: { roads: 10 },
-    requireResource: 'iron',
-    desc: '采掘铁矿石，炼铁厂的上游。',
+    kind: 'ironMine', label: '铁矿场', category: 'extraction', skill: 'miner',
+    inputs: {}, opt: { tools: 0.3, transport: 0.3, dynamite: 0.2 }, output: 'ironOre', capacity: 1.8,
+    cost: 180, duration: 7, opCost: 0.65, infra: { roads: 10 }, requireResource: 'iron',
+    desc: '铁矿石，重工业命脉。',
+  },
+  coalMine: {
+    kind: 'coalMine', label: '煤矿场', category: 'extraction', skill: 'miner',
+    inputs: {}, opt: { tools: 0.3, transport: 0.3, dynamite: 0.2 }, output: 'coal', capacity: 2.0,
+    cost: 160, duration: 6, opCost: 0.6, infra: { roads: 10 }, requireResource: 'coal',
+    desc: '煤炭：冶炼/取暖/蒸汽之源。',
+  },
+  sulfurMine: {
+    kind: 'sulfurMine', label: '硫矿场', category: 'extraction', skill: 'miner',
+    inputs: {}, opt: { tools: 0.3, transport: 0.3, dynamite: 0.2 }, output: 'sulfur', capacity: 1.4,
+    cost: 170, duration: 7, opCost: 0.6, infra: { roads: 10 }, requireResource: 'sulfur',
+    desc: '硫磺：火药/炸药上游。',
+  },
+  copperMine: {
+    kind: 'copperMine', label: '铜矿场', category: 'extraction', skill: 'miner',
+    inputs: {}, opt: { tools: 0.3, transport: 0.3, dynamite: 0.2 }, output: 'copperOre', capacity: 1.6,
+    cost: 190, duration: 7, opCost: 0.65, infra: { roads: 10 }, requireResource: 'copper',
+    desc: '铜矿石：铜锭/机器/银行上游。',
+  },
+  saltMine: {
+    kind: 'saltMine', label: '盐矿场', category: 'extraction', skill: 'miner',
+    inputs: {}, opt: { tools: 0.2, transport: 0.2, dynamite: 0.15 }, output: 'salt', capacity: 2.2,
+    cost: 100, duration: 5, opCost: 0.4, infra: {}, requireResource: 'salt',
+    desc: '内陆/沿海均可采盐。',
+  },
+  whalingStation: {
+    kind: 'whalingStation', label: '捕鲸场', category: 'extraction', skill: 'miner',
+    inputs: {}, opt: { tools: 0.3, sailShip: 0.3 }, output: 'oil', output2: 'meat', output2Rate: 0.5,
+    capacity: 1.2, cost: 200, duration: 8, opCost: 0.8, infra: {}, requireCoastal: true,
+    desc: '鲸油 + 鲸肉，油是火药/化工加强项。',
+  },
+  // ==================== 加工业 · 一级（8）====================
+  sawmill: {
+    kind: 'sawmill', label: '锯木厂', category: 'processing', skill: 'artisan',
+    inputs: { timber: 2.0 }, opt: { tools: 0.3 }, output: 'lumber', capacity: 1.6,
+    cost: 90, duration: 4, opCost: 0.5, infra: {}, requireResource: 'timber',
+    desc: '木材 → 木料（损耗 20%），造船/基建建材。',
+  },
+  textile: {
+    kind: 'textile', label: '纺织厂', category: 'processing', skill: 'artisan',
+    inputs: { cotton: 2.0 }, opt: { tools: 0.3 }, output: 'cloth', capacity: 1.5,
+    cost: 150, duration: 6, opCost: 0.8, infra: { roads: 10 },
+    desc: '棉花 → 布料（损耗 25%），衣物/船帆/奢侈品中间品。',
   },
   ironWorks: {
-    kind: 'ironWorks',
-    label: '炼铁厂',
-    category: 'heavy',
-    skill: 'engineer',
-    inputs: { ironOre: 2.0, coal: 1.0 },
-    output: 'iron',
-    capacity: 2.0,
-    cost: 200,
-    duration: 8,
-    opCost: 1.1,
-    infra: { roads: 15 },
-    desc: '铁矿×2 + 煤×1 → 铁锭×2；需煤矿省或港口（进口矿）。',
+    kind: 'ironWorks', label: '炼铁厂', category: 'heavy', skill: 'engineer',
+    inputs: { ironOre: 2.0, coal: 1.0 }, opt: { tools: 0.3, machines: 0.2, transport: 0.3 },
+    output: 'iron', capacity: 2.0, cost: 200, duration: 8, opCost: 1.1, infra: { roads: 15 },
+    desc: '铁矿石＋煤 → 铁锭；需煤矿省或港口（进口矿）。',
   },
+  copperWorks: {
+    kind: 'copperWorks', label: '炼铜厂', category: 'heavy', skill: 'engineer',
+    inputs: { copperOre: 2.0, coal: 1.0 }, opt: { tools: 0.3, machines: 0.2, transport: 0.3 },
+    output: 'copper', capacity: 2.0, cost: 210, duration: 8, opCost: 1.1, infra: { roads: 15 },
+    desc: '铜矿石＋煤 → 铜锭；机器/银行/船坞上游。',
+  },
+  mill: {
+    kind: 'mill', label: '磨坊', category: 'processing', skill: 'artisan',
+    inputs: {}, anyOf: ['wheat', 'food'], opt: { tools: 0.2 }, output: 'flour', capacity: 1.4,
+    cost: 70, duration: 3, opCost: 0.3, infra: {},
+    desc: '小麦 或 黑麦 → 面粉；食品场上游。',
+  },
+  sugarWorks: {
+    kind: 'sugarWorks', label: '制糖厂', category: 'processing', skill: 'artisan',
+    inputs: { sugar: 1.5 }, opt: { tools: 0.2 }, output: 'sugar', capacity: 1.8,
+    cost: 110, duration: 5, opCost: 0.5, infra: {},
+    desc: '糖料精炼 → 白糖；上层嗜甜。',
+  },
+  gunpowderWorks: {
+    kind: 'gunpowderWorks', label: '火药厂', category: 'heavy', skill: 'artisan',
+    inputs: { sulfur: 1.2 }, opt: { tools: 0.2, machines: 0.2, oil: 0.2 }, output: 'gunpowder', capacity: 1.6,
+    cost: 160, duration: 6, opCost: 0.8, infra: {},
+    desc: '硫磺 → 火药；燧发枪/火炮/炸药上游。',
+  },
+  tannery: {
+    kind: 'tannery', label: '制革场', category: 'processing', skill: 'artisan',
+    inputs: { fur: 1.5 }, opt: { tools: 0.2, machines: 0.15 }, output: 'leather', capacity: 1.5,
+    cost: 120, duration: 5, opCost: 0.6, infra: {},
+    desc: '毛皮 → 皮革；服装/奢侈品原料。',
+  },
+  // ==================== 加工业 · 二级（4）====================
   steelWorks: {
-    kind: 'steelWorks',
-    label: '炼钢厂',
-    category: 'heavy',
-    skill: 'engineer',
-    inputs: { iron: 2.0, coal: 1.0 },
-    output: 'steel',
-    capacity: 2.0,
-    cost: 240,
-    duration: 9,
-    opCost: 1.3,
-    infra: { roads: 15 },
-    requireGood: 'iron',
-    desc: '铁锭×2 + 煤×1 → 钢材×2；需本国已产铁锭。',
+    kind: 'steelWorks', label: '炼钢厂', category: 'heavy', skill: 'engineer',
+    inputs: { iron: 2.0, coal: 1.0 }, opt: { tools: 0.3, machines: 0.2, transport: 0.3 },
+    output: 'steel', capacity: 2.0, cost: 240, duration: 9, opCost: 1.3, infra: { roads: 15 },
+    requireGood: 'iron', desc: '铁锭＋煤 → 钢；工具/武器/铁路上游。',
   },
-  toolWorks: {
-    kind: 'toolWorks',
-    label: '工具厂',
-    category: 'fine',
-    skill: 'engineer',
-    inputs: { steel: 2.0 },
-    output: 'tools',
-    capacity: 1.5,
-    cost: 220,
-    duration: 8,
-    opCost: 1.2,
-    infra: {},
-    requireGood: 'steel',
-    desc: '钢材 → 工具（损耗 25%），基建/农具的必需品。',
+  clothingWorks: {
+    kind: 'clothingWorks', label: '服装厂', category: 'fine', skill: 'artisan',
+    inputs: {}, anyOf: ['cloth', 'fur'], opt: { tools: 0.2, machines: 0.15 },
+    output: 'clothing', capacity: 1.6, cost: 130, duration: 5, opCost: 0.7, infra: {},
+    desc: '布料 或 毛皮 → 服装；大众刚需。',
   },
-  armory: {
-    kind: 'armory',
-    label: '兵工厂',
-    category: 'fine',
-    skill: 'engineer',
-    inputs: { steel: 1.0 },
-    output: 'weapons',
-    capacity: 1.5,
-    cost: 260,
-    duration: 10,
-    opCost: 1.4,
-    infra: {},
-    requireGood: 'steel',
-    desc: '钢材 → 武器；军费消耗武器。',
-  },
-  shipyard: {
-    kind: 'shipyard',
-    label: '船坞',
-    category: 'fine',
-    skill: 'engineer',
-    inputs: { lumber: 1.0, steel: 1.0, cloth: 1.0 },
-    output: 'sailShip',
-    capacity: 1.0,
-    cost: 320,
-    duration: 12,
-    opCost: 1.5,
-    infra: { ports: 15 },
-    requireGood: 'steel',
-    requireCoastal: true,
-    desc: '木料 + 钢材 + 布料 → 帆船；需沿海省份与港口。',
+  foodFactory: {
+    kind: 'foodFactory', label: '食品场', category: 'fine', skill: 'artisan',
+    inputs: {}, anyOf: ['flour', 'sugar', 'meat'], opt: { tools: 0.2 }, output: 'fineFood', capacity: 1.4,
+    cost: 140, duration: 6, opCost: 0.7, infra: {},
+    desc: '面粉/糖/肉 → 高级食物；上层餐桌。',
   },
   luxuryWorkshop: {
-    kind: 'luxuryWorkshop',
-    label: '奢侈品工坊',
-    category: 'fine',
-    skill: 'engineer',
-    inputs: { cloth: 1.0 },
-    output: 'luxury',
-    capacity: 0.8,
-    cost: 280,
-    duration: 10,
-    opCost: 1.3,
-    infra: {},
-    requireLiteracy: 0.55,
-    desc: '布料精工 → 奢侈品；需高识字率工匠，供上层阶级消费。',
+    kind: 'luxuryWorkshop', label: '奢侈品工坊', category: 'fine', skill: 'engineer',
+    inputs: {}, anyOf: ['cloth', 'fur'], opt: { tools: 0.2, machines: 0.15 },
+    output: 'luxury', capacity: 0.8, cost: 280, duration: 10, opCost: 1.3, infra: {},
+    requireLiteracy: 0.55, desc: '精工 → 奢侈品；需高识字率工匠，供上层。',
+  },
+  // ==================== 工业（5）====================
+  toolWorks: {
+    kind: 'toolWorks', label: '工具厂', category: 'fine', skill: 'engineer',
+    inputs: { iron: 1.5 }, anyOf: ['machines', 'steel'], opt: { transport: 0.2 },
+    output: 'tools', capacity: 1.5, cost: 220, duration: 8, opCost: 1.2, infra: {},
+    requireGood: 'iron', desc: '铁锭（/机器/钢）→ 工具；一切加强项的钥匙。',
+  },
+  armory: {
+    kind: 'armory', label: '兵工厂', category: 'fine', skill: 'engineer',
+    inputs: { iron: 1.0 }, output: 'swords', capacity: 1.2, cost: 260, duration: 10, opCost: 1.4,
+    infra: {}, requireGood: 'iron',
+    variants: [
+      { label: '刀剑', output: 'swords', inputs: { iron: 1.0 }, anyOf: ['steel'], opt: { transport: 0.2 } },
+      { label: '燧发枪', output: 'muskets', inputs: { iron: 1.0, gunpowder: 0.8 }, opt: { machines: 0.15 } },
+      { label: '火炮', output: 'cannons', inputs: { iron: 1.5, gunpowder: 1.0 }, opt: { machines: 0.2 } },
+    ],
+    desc: '三产线：刀剑（铁/钢）、燧发枪、火炮（铁＋火药）。',
+  },
+  shipyard: {
+    kind: 'shipyard', label: '造船厂', category: 'fine', skill: 'engineer',
+    inputs: { lumber: 1.0, iron: 1.0, cloth: 1.0, copper: 0.5 }, opt: { tools: 0.3, oil: 0.3 },
+    output: 'sailShip', capacity: 1.0, cost: 320, duration: 12, opCost: 1.5,
+    infra: { ports: 15 }, requireCoastal: true,
+    desc: '木料＋铁锭＋布料＋铜锭 → 帆船；海军与贸易。',
+  },
+  dynamiteWorks: {
+    kind: 'dynamiteWorks', label: '炸药厂', category: 'fine', skill: 'engineer',
+    inputs: { gunpowder: 1.0 }, opt: { machines: 0.15 }, output: 'dynamite', capacity: 1.5,
+    cost: 170, duration: 6, opCost: 0.9, infra: {},
+    desc: '火药 → 炸药；矿场/采石加强项。',
+  },
+  machineWorks: {
+    kind: 'machineWorks', label: '机器厂', category: 'fine', skill: 'engineer',
+    inputs: { steel: 1.5, tools: 0.5 }, output: 'machines', capacity: 1.2,
+    cost: 280, duration: 10, opCost: 1.3, infra: {}, requireGood: 'steel',
+    desc: '钢＋工具 → 机器；工业化的心脏。',
+  },
+  // ==================== 基建与公共服务（8）====================
+  road: {
+    kind: 'road', label: '公路', category: 'infra', skill: 'artisan',
+    inputs: { stone: 1.0, timber: 0.8 }, opt: { tools: 0.2 }, output: 'transport', capacity: 2.0,
+    cost: 120, duration: 6, opCost: 0.5, infra: {},
+    desc: '产运力：平原效率 ×1.4（地形乘数）。',
+  },
+  railroad: {
+    kind: 'railroad', label: '铁路', category: 'infra', skill: 'engineer',
+    inputs: { steel: 1.0, iron: 1.0, stone: 0.8 }, opt: { tools: 0.3, machines: 0.2 },
+    output: 'transport', capacity: 3.0, cost: 300, duration: 12, opCost: 1.0, infra: {},
+    requireGood: 'steel', desc: '产运力：山地效率 ×1.6；重工业时代主力。',
+  },
+  canal: {
+    kind: 'canal', label: '运河', category: 'infra', skill: 'artisan',
+    inputs: { stone: 1.0, timber: 0.8 }, opt: { tools: 0.2, machines: 0.15 },
+    output: 'transport', capacity: 1.5, cost: 200, duration: 9, opCost: 0.6, infra: {},
+    desc: '水路廉价运力；连接水域省。',
+  },
+  port: {
+    kind: 'port', label: '港口', category: 'infra', skill: 'artisan',
+    inputs: { stone: 1.0, timber: 0.8, steel: 0.5 }, output: 'transport', capacity: 2.5,
+    cost: 260, duration: 10, opCost: 0.9, infra: { ports: 15 }, requireCoastal: true,
+    desc: '产运力 + 贸易容量（出口权联动）。',
+  },
+  lighthouse: {
+    kind: 'lighthouse', label: '灯塔', category: 'infra', skill: 'artisan',
+    inputs: { stone: 0.8 }, opt: { tools: 0.15 }, output: 'transport', capacity: 0.8,
+    cost: 100, duration: 5, opCost: 0.3, infra: {}, requireCoastal: true,
+    desc: '轻量运力与贸易加成，便宜。',
+  },
+  school: {
+    kind: 'school', label: '学校', category: 'infra', skill: 'artisan',
+    inputs: { lumber: 0.8, stone: 0.8 }, output: undefined, capacity: 0,
+    cost: 150, duration: 6, opCost: 0.5, infra: {},
+    desc: '公共服务：识字率↑ → 职员/技术工人资质（C 阶段接入）。',
+  },
+  bank: {
+    kind: 'bank', label: '银行', category: 'infra', skill: 'artisan',
+    inputs: { stone: 0.8, copper: 0.5 }, output: undefined, capacity: 0,
+    cost: 220, duration: 8, opCost: 0.8, infra: {},
+    desc: '公共服务：资本积累速度↑（私营扩张加速，D 阶段接入）。',
+  },
+  market: {
+    kind: 'market', label: '市场', category: 'infra', skill: 'artisan',
+    inputs: { lumber: 0.8, stone: 0.8 }, output: undefined, capacity: 0,
+    cost: 130, duration: 5, opCost: 0.4, infra: {},
+    desc: '公共服务：贸易容量↑、价格传导更顺（B 阶段接入）。',
   },
 };
 
 export const BUILDING_KINDS: BuildingKind[] = [
-  'farm', 'cottonFarm', 'sawmill', 'textile', 'clothingWorks',
-  'coalMine', 'ironMine', 'ironWorks', 'steelWorks',
-  'toolWorks', 'armory', 'shipyard', 'luxuryWorkshop',
+  'cottonFarm', 'wheatFarm', 'ryeFarm', 'beetFarm', 'caneFarm',
+  'coffeeFarm', 'tobaccoFarm', 'livestockFarm', 'fishFarm',
+  'lumberCamp', 'quarry', 'ironMine', 'coalMine', 'sulfurMine',
+  'copperMine', 'saltMine', 'whalingStation',
+  'sawmill', 'textile', 'ironWorks', 'copperWorks', 'mill',
+  'sugarWorks', 'gunpowderWorks', 'tannery',
+  'steelWorks', 'clothingWorks', 'foodFactory', 'luxuryWorkshop',
+  'toolWorks', 'armory', 'shipyard', 'dynamiteWorks', 'machineWorks',
+  'road', 'railroad', 'canal', 'port', 'lighthouse',
+  'school', 'bank', 'market',
 ];
 
 /** 建筑技能需求规模（万人）：产能 × 0.3，至少 0.2 万 */
@@ -278,7 +379,9 @@ export interface InvestmentProject {
   duration: number;
   monthsLeft: number;
   status: 'building' | 'active';
-  // ---- v0.3 建筑运营记录（UI/断言用） ----
+  /** 兵工厂产线（未选 = 主输出） */
+  variant?: number;
+  // ---- 建筑运营记录（UI/断言用） ----
   /** 上月技能满足系数 0-1（无对应职业 POP → <1 产能打折） */
   lastSkillFactor: number;
   /** 上月输入可用系数 0-1（库存不足 → 减产） */
@@ -307,21 +410,23 @@ export interface NationBuildingView {
 /** 半成品解锁判定：国家库存 > 0.5 或有在产建筑产出该商品 */
 export function nationHasGood(view: NationBuildingView, g: GoodId): boolean {
   if ((view.stocks[g] ?? 0) > 0.5) return true;
-  return view.projects.some((p) => p.status === 'active' && BUILDING_DEFS[p.kind].output === g);
+  return view.projects.some((p) => {
+    const def = BUILDING_DEFS[p.kind];
+    if (!def.output) return false;
+    if (def.output === g) return true;
+    return (def.variants ?? [])[p.variant ?? 0]?.output === g;
+  });
 }
 
 /** 省份/基建/资源/半成品解锁检查（UI 与 sim 共用） */
-export function buildingUnlock(map: GameMap, kind: BuildingKind, prov: Province, infra: { roads: number; ports: number }, nation: NationBuildingView): UnlockResult {
+export function buildingUnlock(
+  map: GameMap, kind: BuildingKind, prov: Province,
+  infra: { roads: number; ports: number }, nation: NationBuildingView,
+): UnlockResult {
   const def = BUILDING_DEFS[kind];
-  if (infra.roads < (def.infra.roads ?? 0)) {
-    return { ok: false, reason: `道路需 ≥${def.infra.roads}` };
-  }
-  if (infra.ports < (def.infra.ports ?? 0)) {
-    return { ok: false, reason: `港口需 ≥${def.infra.ports}` };
-  }
-  if (def.requireCoastal && !isCoastal(map, prov)) {
-    return { ok: false, reason: '需沿海省份' };
-  }
+  if (infra.roads < (def.infra.roads ?? 0)) return { ok: false, reason: `道路需 ≥${def.infra.roads}` };
+  if (infra.ports < (def.infra.ports ?? 0)) return { ok: false, reason: `港口需 ≥${def.infra.ports}` };
+  if (def.requireCoastal && !isCoastal(map, prov)) return { ok: false, reason: '需沿海省份' };
   if (def.requireResource && !provinceHasResource(prov, def.requireResource)) {
     return { ok: false, reason: `需省资源「${def.requireResource}」` };
   }
@@ -347,7 +452,7 @@ function clamp01(v: number): number {
 }
 
 /** 新建建筑项目（立即从国库扣除成本；失败返回 null） */
-export function startInvestment(state: GameState, map: GameMap, kind: BuildingKind, provId: number): InvestmentProject | null {
+export function startInvestment(state: GameState, map: GameMap, kind: BuildingKind, provId: number, variant?: number): InvestmentProject | null {
   const n = state.nations[state.playerNation];
   const def = BUILDING_DEFS[kind];
   const prov = map.provinceById.get(provId);
@@ -365,6 +470,7 @@ export function startInvestment(state: GameState, map: GameMap, kind: BuildingKi
     duration: def.duration,
     monthsLeft: def.duration,
     status: 'building',
+    variant,
     lastSkillFactor: 0,
     lastRunFactor: 0,
     lastOutput: 0,

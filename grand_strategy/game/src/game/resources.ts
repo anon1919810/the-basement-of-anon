@@ -29,7 +29,8 @@ export type ResourceId =
   | 'fish' // 渔场
   | 'farmland' // 沃土
   | 'timber' // 林场
-  | 'cotton'; // 棉田
+  | 'cotton' // 棉田
+  | 'stone'; // 石料（山地）
 
 export const RESOURCE_LABEL: Record<ResourceId, string> = {
   coal: '煤矿',
@@ -44,6 +45,7 @@ export const RESOURCE_LABEL: Record<ResourceId, string> = {
   farmland: '沃土',
   timber: '林场',
   cotton: '棉田',
+  stone: '石料',
 };
 
 /** 确定性资源种子（与 v0.5 tools/map_resources.py 一致） */
@@ -98,10 +100,11 @@ export function computeProvinceResources(map: GameMap, prov: Province, rng: Rng)
   const coastal = provinceCoastal(prov);
   const res: ResourceId[] = [];
   if (maxH >= 30 || avgH >= 28) {
-    // 山地：矿藏（确定性加权随机）
+    // 山地：矿藏（确定性加权随机）+ 石料（采石场原料）
     res.push(MINE_POOL[rng.int(0, MINE_POOL.length)]);
     if (rng.chance(0.4) && !res.includes('coal')) res.push('coal');
     if (avgH < 45 && rng.chance(0.4)) res.push('timber');
+    res.push('stone');
   } else {
     // 低地：农业
     if (avgT > -5 && avgP >= 15) {

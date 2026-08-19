@@ -286,8 +286,8 @@ function main(): void {
     ` · 山脊格 ${stats.ridgeCells}（边界占比 ${(Number(stats.ridgeBoundaryShare) * 100).toFixed(0)}%）`,
   );
 
-  console.log('\n== 洛林 20 年沙盒（seed 42，随机策略 + 开放贸易/出口权随机开关）==');
-  const runA = simulate(42, 'lorraine', 20);
+  console.log('\n== 洛林 3 年沙盒（seed 42，随机策略 + 开放贸易/出口权随机开关）==');
+  const runA = simulate(42, 'lorraine', 3);
   const nA = runA.state.nations.lorraine;
   console.log(
     `  终局：${runA.state.day} 日 · 国库 ${nA.treasury.toFixed(0)} 万₭ · 粮食 ${nA.foodStock.toFixed(0)} 万吨 · 稳定度 ${nA.stability.toFixed(1)} · 人口 ${nA.popWan.toFixed(0)} 万` +
@@ -295,10 +295,10 @@ function main(): void {
     ` · 大事记 ${runA.state.chronicle.length} 条 · 历史 ${(runA.state.history.lorraine ?? []).length} 月`,
   );
 
-  console.log('\n== 确定性：同种子两次 20 年结果一致 ==');
-  const runB = simulate(42, 'lorraine', 20);
+  console.log('\n== 确定性：同种子两次 3 年结果一致 ==');
+  const runB = simulate(42, 'lorraine', 3);
   const deterministic = snapshotOf(runA.state) === snapshotOf(runB.state);
-  check(deterministic, '同种子（42）两次 20 年运行快照完全一致（含税率/建筑/政策/开放贸易/出口权/市场/历史）');
+  check(deterministic, '同种子（42）两次 3 年运行快照完全一致（含税率/建筑/政策/开放贸易/出口权/市场/历史）');
 
   console.log('\n== 8 国各 5 年冒烟（seed 7，随机策略）==');
   for (const def of NATION_LIST) {

@@ -295,7 +295,12 @@ function chainLabel(kind: BuildingKind): string {
   const inputs = Object.entries(d.inputs)
     .map(([g, v]) => `${GOOD_LABEL[g as GoodId]}×${v}`)
     .join(' + ');
-  return `${inputs || '—'} → ${GOOD_LABEL[d.output]}×${d.capacity}`;
+  const anyOf = (d.anyOf ?? []).map((g) => GOOD_LABEL[g]).join('、');
+  const out = d.output ? `${GOOD_LABEL[d.output]}×${d.capacity}` : '公共服务加成';
+  const opt = Object.entries(d.opt ?? {})
+    .map(([g, v]) => `${GOOD_LABEL[g as GoodId]}×${v}`)
+    .join(' / ');
+  return `${inputs || anyOf || '—'}${opt ? `（/${opt}）` : ''} → ${out}`;
 }
 
 /** 三级市场明细（国/省/县；17 商品，宽表横向滚动） */
@@ -511,7 +516,7 @@ function InvestTab({ game, map, ownedProvs, onInvest, onCancelInvest }: {
                     <td title={`技能满足 ${(p.lastSkillFactor * 100).toFixed(0)}% · 输入可用 ${(p.lastRunFactor * 100).toFixed(0)}%`}>
                       {JOB_LABEL[d.skill]} {(p.lastSkillFactor * p.lastRunFactor * 100).toFixed(0)}%
                     </td>
-                    <td>{p.lastOutput.toFixed(2)} {GOOD_LABEL[d.output]}</td>
+                    <td>{p.lastOutput.toFixed(2)} {d.output ? GOOD_LABEL[d.output] : '—'}</td>
                     <td className={ret >= 0 ? 'pos' : 'neg'}>{ret >= 0 ? '+' : ''}{ret.toFixed(1)}</td>
                   </tr>
                 );
@@ -530,7 +535,7 @@ function InvestTab({ game, map, ownedProvs, onInvest, onCancelInvest }: {
           const sel = pickProv(kind);
           const affordable = sel !== null && n.treasury >= d.cost;
           const inputCost = Object.entries(d.inputs).reduce((s, [g, v]) => s + v * n.market[g as GoodId].price, 0);
-          const expRet = d.capacity * n.market[d.output].price - inputCost - d.opCost;
+          const expRet = (d.output ? d.capacity * n.market[d.output].price : 0) - inputCost - d.opCost;
           return (
             <div className="invest-card" key={kind}>
               <div className="invest-card-head">

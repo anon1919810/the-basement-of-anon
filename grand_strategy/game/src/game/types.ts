@@ -36,30 +36,48 @@ export type RaceId =
 export type JobId = 'farmer' | 'miner' | 'artisan' | 'engineer';
 
 /**
- * 商品（v0.3 产业链：资源 → 半成品 → 工业制成品）。
- * v0.2 兼容：fuel → coal（燃料并入煤炭）；industrial 拆分为 iron/steel/tools/weapons/sailShip/lumber/cloth。
+ * 商品（v0.9 五部门：资源 → 半成品 → 成品，36 种）。
  */
 export type GoodId =
-  // 资源
-  | 'food' // 粮食
-  | 'timber' // 木材
+  // 资源（16）
+  | 'food' // 粗粮（黑麦级）
+  | 'wheat' // 小麦（高端谷物）
   | 'cotton' // 棉花
-  | 'fur' // 毛皮（寒带林产出）
-  | 'coal' // 煤炭（原 fuel）
+  | 'fur' // 皮毛
+  | 'timber' // 木材
+  | 'coal' // 煤炭
   | 'ironOre' // 铁矿石
+  | 'copperOre' // 铜矿石
+  | 'sulfur' // 硫矿石
   | 'salt' // 盐
   | 'fish' // 渔获
-  // 半成品
+  | 'meat' // 肉类
+  | 'stone' // 石料
+  | 'oil' // 油（捕鲸）
+  | 'coffee' // 咖啡（成瘾物）
+  | 'tobacco' // 烟草（成瘾物）
+  // 半成品（11）
   | 'lumber' // 木料
   | 'cloth' // 布料
   | 'iron' // 铁锭
-  | 'steel' // 钢材
-  // 成品
+  | 'copper' // 铜锭
+  | 'steel' // 钢
+  | 'flour' // 面粉
+  | 'sugar' // 糖
+  | 'leather' // 皮革
+  | 'gunpowder' // 火药
+  | 'dynamite' // 炸药
+  | 'machines' // 机器
+  // 成品（9）
   | 'tools' // 工具
-  | 'weapons' // 武器
+  | 'swords' // 刀剑
+  | 'muskets' // 燧发枪
+  | 'cannons' // 火炮
   | 'sailShip' // 帆船
-  | 'clothing' // 衣物
-  | 'luxury'; // 奢侈品
+  | 'clothing' // 服装
+  | 'fineFood' // 高级食物
+  | 'luxury' // 奢侈品
+  | 'transport'; // 运力（基建产出）
 
 /**
  * 阶级（v0.3，7 级，数字越小越上层）。

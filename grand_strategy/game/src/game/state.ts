@@ -292,7 +292,7 @@ function initialStocks(popWan: number, foodMonths: number): Record<GoodId, numbe
   const resBase = popWan * 0.001 * fm;
   for (const g of ['timber', 'cotton', 'fur', 'ironOre', 'salt', 'fish'] as GoodId[]) s[g] = resBase;
   const semiBase = popWan * 0.0003 * fm;
-  for (const g of ['lumber', 'cloth', 'iron', 'steel', 'tools', 'weapons', 'sailShip', 'luxury'] as GoodId[]) {
+  for (const g of ['lumber', 'cloth', 'iron', 'copper', 'steel', 'tools', 'swords', 'muskets', 'cannons', 'sailShip', 'luxury', 'transport'] as GoodId[]) {
     s[g] = semiBase;
   }
   return s;

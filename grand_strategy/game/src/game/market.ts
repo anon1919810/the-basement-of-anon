@@ -23,61 +23,54 @@ export type GoodCategory = 'resource' | 'semi' | 'finished';
 
 export const GOODS_LIST: GoodId[] = [
   // 资源
-  'food', 'timber', 'cotton', 'fur', 'coal', 'ironOre', 'salt', 'fish',
+  'food', 'wheat', 'cotton', 'fur', 'timber', 'coal', 'ironOre', 'copperOre',
+  'sulfur', 'salt', 'fish', 'meat', 'stone', 'oil', 'coffee', 'tobacco',
   // 半成品
-  'lumber', 'cloth', 'iron', 'steel',
+  'lumber', 'cloth', 'iron', 'copper', 'steel', 'flour', 'sugar', 'leather',
+  'gunpowder', 'dynamite', 'machines',
   // 成品
-  'tools', 'weapons', 'sailShip', 'clothing', 'luxury',
+  'tools', 'swords', 'muskets', 'cannons', 'sailShip', 'clothing', 'fineFood',
+  'luxury', 'transport',
 ];
 
 /** 商品类别（UI 分组） */
 export const GOOD_CATEGORY: Record<GoodId, GoodCategory> = {
-  food: 'resource', timber: 'resource', cotton: 'resource', fur: 'resource',
-  coal: 'resource', ironOre: 'resource', salt: 'resource', fish: 'resource',
-  lumber: 'semi', cloth: 'semi', iron: 'semi', steel: 'semi',
-  tools: 'finished', weapons: 'finished', sailShip: 'finished', clothing: 'finished', luxury: 'finished',
+  food: 'resource', wheat: 'resource', cotton: 'resource', fur: 'resource',
+  timber: 'resource', coal: 'resource', ironOre: 'resource', copperOre: 'resource',
+  sulfur: 'resource', salt: 'resource', fish: 'resource', meat: 'resource',
+  stone: 'resource', oil: 'resource', coffee: 'resource', tobacco: 'resource',
+  lumber: 'semi', cloth: 'semi', iron: 'semi', copper: 'semi', steel: 'semi',
+  flour: 'semi', sugar: 'semi', leather: 'semi', gunpowder: 'semi',
+  dynamite: 'semi', machines: 'semi',
+  tools: 'finished', swords: 'finished', muskets: 'finished', cannons: 'finished',
+  sailShip: 'finished', clothing: 'finished', fineFood: 'finished',
+  luxury: 'finished', transport: 'finished',
 };
 
 /** 基础价（万₭/单位）——随加工链价值上升（资源低 → 成品高） */
 export const BASE_PRICE: Record<GoodId, number> = {
-  food: 2.0,
-  timber: 1.0,
-  cotton: 1.4,
-  fur: 1.6,
-  coal: 1.5,
-  ironOre: 1.2,
-  salt: 0.8,
-  fish: 1.1,
-  lumber: 1.7,
-  cloth: 2.0,
-  iron: 2.6,
-  steel: 3.4,
-  tools: 3.0,
-  weapons: 3.2,
-  sailShip: 5.0,
-  clothing: 1.8,
-  luxury: 5.0,
+  food: 2.0, wheat: 2.6, cotton: 1.4, fur: 1.6,
+  timber: 1.0, coal: 1.5, ironOre: 1.2, copperOre: 1.6,
+  sulfur: 1.4, salt: 0.8, fish: 1.1, meat: 2.2,
+  stone: 0.9, oil: 2.0, coffee: 3.0, tobacco: 2.8,
+  lumber: 1.7, cloth: 2.0, iron: 2.6, copper: 3.0, steel: 3.4,
+  flour: 2.8, sugar: 3.2, leather: 2.4, gunpowder: 2.8,
+  dynamite: 3.6, machines: 4.2,
+  tools: 3.0, swords: 3.4, muskets: 4.0, cannons: 4.6,
+  sailShip: 5.0, clothing: 1.8, fineFood: 4.0, luxury: 5.0, transport: 1.6,
 };
 
 /** 世界价（略高于本国基础价：外部市场更大） */
 export const WORLD_PRICE: Record<GoodId, number> = {
-  food: 2.4,
-  timber: 1.4,
-  cotton: 1.9,
-  fur: 2.2,
-  coal: 2.0,
-  ironOre: 1.7,
-  salt: 1.1,
-  fish: 1.5,
-  lumber: 2.3,
-  cloth: 2.8,
-  iron: 3.4,
-  steel: 4.4,
-  tools: 4.0,
-  weapons: 4.2,
-  sailShip: 6.4,
-  clothing: 2.6,
-  luxury: 6.0,
+  food: 2.4, wheat: 3.2, cotton: 1.9, fur: 2.2,
+  timber: 1.4, coal: 2.0, ironOre: 1.7, copperOre: 2.2,
+  sulfur: 2.0, salt: 1.1, fish: 1.5, meat: 2.8,
+  stone: 1.3, oil: 2.6, coffee: 3.8, tobacco: 3.5,
+  lumber: 2.3, cloth: 2.8, iron: 3.4, copper: 3.8, steel: 4.4,
+  flour: 3.6, sugar: 4.0, leather: 3.2, gunpowder: 3.6,
+  dynamite: 4.6, machines: 5.4,
+  tools: 4.0, swords: 4.4, muskets: 5.2, cannons: 6.0,
+  sailShip: 6.4, clothing: 2.6, fineFood: 5.2, luxury: 6.0, transport: 2.2,
 };
 
 /** 价格上下限（基础价 × 系数） */
@@ -86,23 +79,15 @@ export const PRICE_CLAMP_MAX = 2.5;
 
 /** 基础月出口/进口容量（单位/月，基建可提升） */
 export const BASE_TRADE_CAP: Record<GoodId, number> = {
-  food: 3.0,
-  timber: 2.0,
-  cotton: 1.6,
-  fur: 1.2,
-  coal: 2.6,
-  ironOre: 1.6,
-  salt: 2.2,
-  fish: 1.8,
-  lumber: 1.4,
-  cloth: 1.4,
-  iron: 1.2,
-  steel: 0.9,
-  tools: 0.9,
-  weapons: 0.7,
-  sailShip: 0.4,
-  clothing: 2.2,
-  luxury: 0.6,
+  food: 3.0, wheat: 1.4, cotton: 1.6, fur: 1.2,
+  timber: 2.0, coal: 2.6, ironOre: 1.6, copperOre: 1.2,
+  sulfur: 1.0, salt: 2.2, fish: 1.8, meat: 1.4,
+  stone: 2.4, oil: 1.0, coffee: 0.8, tobacco: 0.9,
+  lumber: 1.4, cloth: 1.4, iron: 1.2, copper: 1.0, steel: 0.9,
+  flour: 1.2, sugar: 1.1, leather: 1.0, gunpowder: 0.6,
+  dynamite: 0.5, machines: 0.7,
+  tools: 0.9, swords: 0.7, muskets: 0.5, cannons: 0.4,
+  sailShip: 0.4, clothing: 2.2, fineFood: 0.8, luxury: 0.6, transport: 2.8,
 };
 
 /** 关税税率已迁移至 tax.ts（连续滑块，economy 传入 tariffRate） */

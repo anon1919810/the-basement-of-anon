@@ -42,23 +42,16 @@ export const JOB_LABEL: Record<JobId, string> = {
 
 export const GOODS: GoodId[] = GOODS_LIST;
 export const GOOD_LABEL: Record<GoodId, string> = {
-  food: '粮食',
-  timber: '木材',
-  cotton: '棉花',
-  fur: '毛皮',
-  coal: '煤炭',
-  ironOre: '铁矿石',
-  salt: '盐',
-  fish: '渔获',
-  lumber: '木料',
-  cloth: '布料',
-  iron: '铁锭',
-  steel: '钢材',
-  tools: '工具',
-  weapons: '武器',
-  sailShip: '帆船',
-  clothing: '衣物',
-  luxury: '奢侈品',
+  food: '粗粮', wheat: '小麦', cotton: '棉花', fur: '皮毛',
+  timber: '木材', coal: '煤炭', ironOre: '铁矿石', copperOre: '铜矿石',
+  sulfur: '硫磺', salt: '盐', fish: '渔获', meat: '肉类',
+  stone: '石料', oil: '鲸油', coffee: '咖啡', tobacco: '烟草',
+  lumber: '木料', cloth: '布料', iron: '铁锭', copper: '铜锭', steel: '钢',
+  flour: '面粉', sugar: '糖', leather: '皮革', gunpowder: '火药',
+  dynamite: '炸药', machines: '机器',
+  tools: '工具', swords: '刀剑', muskets: '燧发枪', cannons: '火炮',
+  sailShip: '帆船', clothing: '服装', fineFood: '高级食物',
+  luxury: '奢侈品', transport: '运力',
 };
 
 export const NEEDS: NeedId[] = ['food', 'clothing', 'housing', 'fuel'];
@@ -73,12 +66,19 @@ export const NEED_LABEL: Record<NeedId, string> = {
 /** 每万人月需求（万吨/万件；工具/武器/帆船等由建筑与政府消耗，不走 POP 需求） */
 export const NEED_PER_WAN: Record<GoodId, number> = {
   food: 0.0075,
+  wheat: 0.001, // 细粮（上层多，消费矩阵 C 阶段细化）
+  meat: 0.0015,
   clothing: 0.006,
   coal: 0.005, // 燃料需求并入煤炭
   fish: 0.002, // 渔获作为粮食替代（沿海民食）
-  timber: 0, cotton: 0, fur: 0, ironOre: 0, salt: 0,
-  lumber: 0, cloth: 0, iron: 0, steel: 0,
-  tools: 0, weapons: 0, sailShip: 0, luxury: 0,
+  sugar: 0.0006,
+  coffee: 0.0004,
+  tobacco: 0.0006,
+  fineFood: 0.0003,
+  timber: 0, cotton: 0, fur: 0, ironOre: 0, copperOre: 0, sulfur: 0, salt: 0, stone: 0, oil: 0,
+  lumber: 0, cloth: 0, iron: 0, copper: 0, steel: 0,
+  flour: 0, leather: 0, gunpowder: 0, dynamite: 0, machines: 0,
+  tools: 0, swords: 0, muskets: 0, cannons: 0, sailShip: 0, luxury: 0, transport: 0,
 };
 
 /** 每万从业者月基础产出（基准单位：万吨/万件） */
@@ -97,22 +97,32 @@ export const JOB_GOOD: Record<JobId, GoodId> = {
   engineer: 'tools',
 };
 
-/** 农民省资源附加产出（每万从业者月产，按省资源/沿海/气候） */
+/** 农民省资源附加产出（每万从业者月产，按省资源/沿海/气候；无建筑自然经济底子，不受加强项加成） */
 export const FARMER_EXTRA_OUTPUT: Record<GoodId, number> = {
+  food: 0, // 基础产出口粮（farmerOutput 主产）
+  wheat: 0.002,
   timber: 0.004,
   cotton: 0.005,
   fish: 0.006,
   salt: 0.002,
   fur: 0.0016,
-  food: 0, clothing: 0, coal: 0, ironOre: 0, lumber: 0, cloth: 0, iron: 0, steel: 0, tools: 0, weapons: 0, sailShip: 0, luxury: 0,
+  meat: 0.001,
+  sugar: 0.0008,
+  coffee: 0, tobacco: 0, coal: 0, ironOre: 0, copperOre: 0, sulfur: 0, stone: 0, oil: 0,
+  lumber: 0, cloth: 0, iron: 0, copper: 0, steel: 0, flour: 0, leather: 0, gunpowder: 0, dynamite: 0, machines: 0,
+  tools: 0, swords: 0, muskets: 0, cannons: 0, sailShip: 0, clothing: 0, fineFood: 0, luxury: 0, transport: 0,
 };
 
-/** 矿工产出：煤（矿藏省）/ 铁（矿藏省）；无矿藏省产出 0（资源修正：矿工需矿场） */
+/** 矿工产出：煤（矿藏省）/ 铁 / 铜 / 硫 / 石料（矿藏省）；无矿藏省产出 0（资源修正：矿工需矿场） */
 export const MINER_OUTPUT: Record<GoodId, number> = {
   coal: 0.02,
   ironOre: 0.014,
-  food: 0, timber: 0, cotton: 0, fur: 0, salt: 0, fish: 0,
-  lumber: 0, cloth: 0, iron: 0, steel: 0, tools: 0, weapons: 0, sailShip: 0, clothing: 0, luxury: 0,
+  copperOre: 0.012,
+  sulfur: 0.01,
+  stone: 0.015,
+  food: 0, wheat: 0, timber: 0, cotton: 0, fur: 0, salt: 0, fish: 0, meat: 0, sugar: 0, coffee: 0, tobacco: 0, oil: 0,
+  lumber: 0, cloth: 0, iron: 0, copper: 0, steel: 0, flour: 0, leather: 0, gunpowder: 0, dynamite: 0, machines: 0,
+  tools: 0, swords: 0, muskets: 0, cannons: 0, sailShip: 0, clothing: 0, fineFood: 0, luxury: 0, transport: 0,
 };
 
 /** 奢侈品：工匠/工程师附加产出（每万从业者月产单位；× 省奢侈品潜力） */
@@ -362,11 +372,11 @@ export function provinceFoodMod(prov: Province): number {
   return provinceHasResource(prov, 'farmland') ? 1.2 : 0.9;
 }
 
-/** 农民产出（含资源附加）：沃土修正 × 气候 grainMod */
+/** 农民产出（含资源附加）：沃土修正 × 气候 grainMod；自然经济底子（无建筑也产，不受加强项加成） */
 export function farmerOutput(prov: Province, size: number, mult: number): Record<GoodId, number> {
   const out = zeroGoods();
   out.food = size * JOB_OUTPUT_PER_WAN.farmer * provinceFoodMod(prov) * prov.grainMod * mult;
-  // 省资源附加：棉/木/渔/盐（沿海）/毛皮（寒带林）
+  // 省资源附加：棉/木/渔/盐（沿海）/毛皮（寒带林）/细粮·肉·糖（沃土）
   if (provinceHasResource(prov, 'timber')) out.timber += size * FARMER_EXTRA_OUTPUT.timber * mult;
   if (provinceHasResource(prov, 'cotton')) out.cotton += size * FARMER_EXTRA_OUTPUT.cotton * mult;
   if (provinceCoastal(prov)) {
@@ -374,14 +384,22 @@ export function farmerOutput(prov: Province, size: number, mult: number): Record
     out.salt += size * FARMER_EXTRA_OUTPUT.salt * mult;
   }
   if (provinceHasFur(prov)) out.fur += size * FARMER_EXTRA_OUTPUT.fur * mult;
+  if (provinceHasResource(prov, 'farmland')) {
+    out.wheat += size * FARMER_EXTRA_OUTPUT.wheat * mult;
+    out.meat += size * FARMER_EXTRA_OUTPUT.meat * mult;
+    out.sugar += size * FARMER_EXTRA_OUTPUT.sugar * mult;
+  }
   return out;
 }
 
-/** 矿工产出（按矿藏省：煤/铁；无矿藏 → 0，需建矿场） */
+/** 矿工产出（按矿藏省：煤/铁/铜/硫/石料；无矿藏 → 0，需建矿场） */
 export function minerOutput(prov: Province, size: number, mult: number): Record<GoodId, number> {
   const out = zeroGoods();
   if (provinceHasResource(prov, 'coal')) out.coal += size * MINER_OUTPUT.coal * mult;
   if (provinceHasResource(prov, 'iron')) out.ironOre += size * MINER_OUTPUT.ironOre * mult;
+  if (provinceHasResource(prov, 'copper')) out.copperOre += size * MINER_OUTPUT.copperOre * mult;
+  if (provinceHasResource(prov, 'sulfur')) out.sulfur += size * MINER_OUTPUT.sulfur * mult;
+  if (provinceHasResource(prov, 'stone')) out.stone += size * MINER_OUTPUT.stone * mult;
   return out;
 }
 
