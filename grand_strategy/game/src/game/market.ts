@@ -93,6 +93,8 @@ export const BASE_TRADE_CAP: Record<GoodId, number> = {
 /** 关税税率已迁移至 tax.ts（连续滑块，economy 传入 tariffRate） */
 /** 成本传导过手率：输入品税价差 → 成品价格上浮的比例（0.85 = 85% 传导） */
 export const COST_PUSH_PASS = 0.85;
+/** 贸易吨位运力消耗系数（每吨调运/出口吃多少运力，v0.9 阶段 B） */
+export const TRADE_TRANSPORT = 0.2;
 
 /** 价格信号跨层传导权重（v0.8：省价独立定价，仅保留县←省传导） */
 export const BLEND_COUNTY_FROM_PROV = 0.2; // 本地价格 = 县供需比 × (1-0.2) + 省价格信号 0.2
@@ -338,6 +340,7 @@ export function settleMarket(input: MarketInput, markets: MarketState): MarketSn
   // v0.4 成本传导：供需价（未含传导）与买方有效价（含商品税与上游传导），按 GOODS_LIST 序计算（输入必在上游）
   const sdPriceOf = {} as Record<GoodId, Record<number, number>>;
   const effPriceOf = {} as Record<GoodId, Record<number, number>>;
+  const provFreight: Record<number, number> = {}; // 省 → 调运/出口吨位累计（跨商品；运力消耗记账）
 
   for (const g of GOODS_LIST) {
     const base = BASE_PRICE[g];
@@ -479,6 +482,7 @@ export function settleMarket(input: MarketInput, markets: MarketState): MarketSn
       if (out > 1e-9) {
         stock[pid] -= out;
         freightTonnage += out;
+        provFreight[pid] = (provFreight[pid] ?? 0) + out;
       }
       if (inn > 1e-9) {
         cons[pid] += inn;
@@ -503,6 +507,7 @@ export function settleMarket(input: MarketInput, markets: MarketState): MarketSn
             stock[pid] -= e;
             rem -= e;
             exported += e;
+            provFreight[pid] = (provFreight[pid] ?? 0) + e;
             getProvMarket(markets, pid)[g].exported = e;
           }
         }
@@ -515,6 +520,7 @@ export function settleMarket(input: MarketInput, markets: MarketState): MarketSn
             rem -= e;
             exported += e;
             freightTonnage += e; // 内陆 → 口岸 的运力吨位
+            provFreight[pid] = (provFreight[pid] ?? 0) + e;
             getProvMarket(markets, pid)[g].exported = e;
           }
         }
@@ -602,6 +608,21 @@ export function settleMarket(input: MarketInput, markets: MarketState): MarketSn
     for (const pid of provOrder) bCons += input.provBuildingConsumed[pid]?.[g] ?? 0;
     const taxVol = sumCons + sumImported + bCons + freightTonnage;
     commodityTax += taxRate * taxVol;
+  }
+
+  // ---- 11. 贸易吃运力：调运/出口吨位 × 系数 → 源头省运力库存扣减（按实际库存，不虚记） ----
+  for (const pid of Object.keys(provFreight)) {
+    const eat = (provFreight[Number(pid)] ?? 0) * TRADE_TRANSPORT;
+    if (eat <= 1e-9) continue;
+    const ts = input.provStocks[Number(pid)];
+    if (!ts) continue;
+    const cur = ts.transport ?? 0;
+    const actual = Math.min(eat, Math.max(0, cur));
+    if (actual > 1e-9) {
+      ts.transport = cur - actual;
+      const pmT = markets.province[Number(pid)]?.transport;
+      if (pmT) pmT.consumed = (pmT.consumed ?? 0) + actual;
+    }
   }
 
   return {

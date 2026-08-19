@@ -451,6 +451,26 @@ function clamp01(v: number): number {
   return Math.min(1, Math.max(0, v));
 }
 
+function provAvgH(map: GameMap, prov: Province): number {
+  let s = 0, n = 0;
+  for (const cid of prov.cellIds) {
+    const c = map.cellsById.get(cid);
+    if (c) { s += c.h; n++; }
+  }
+  return n ? s / n : 0;
+}
+
+/** 地形造价系数（v0.9）：山地施工难 → 铁路/公路造价↑；运河旱地挖河贵 */
+export function terrainCostFactor(map: GameMap, kind: BuildingKind, prov: Province): number {
+  const mountainous = provAvgH(map, prov) >= 28;
+  switch (kind) {
+    case 'railroad': return mountainous ? 1.5 : 1.0;
+    case 'road': return mountainous ? 1.3 : 1.0;
+    case 'canal': return 1.3;
+    default: return 1.0;
+  }
+}
+
 /** 新建建筑项目（立即从国库扣除成本；失败返回 null） */
 export function startInvestment(state: GameState, map: GameMap, kind: BuildingKind, provId: number, variant?: number): InvestmentProject | null {
   const n = state.nations[state.playerNation];
@@ -459,14 +479,15 @@ export function startInvestment(state: GameState, map: GameMap, kind: BuildingKi
   if (!prov) return null;
   const unlock = buildingUnlock(map, kind, prov, n.infra, { stocks: n.stocks, projects: n.projects, literacy: n.literacy });
   if (!unlock.ok) return null;
-  if (n.treasury < def.cost) return null;
-  n.treasury -= def.cost;
-  n.investCostAcc += def.cost;
+  const cost = def.cost * terrainCostFactor(map, kind, prov); // 地形造价（山地基建贵）
+  if (n.treasury < cost) return null;
+  n.treasury -= cost;
+  n.investCostAcc += cost;
   const p: InvestmentProject = {
     id: n.nextProjectId++,
     kind,
     provId,
-    totalCost: def.cost,
+    totalCost: cost,
     duration: def.duration,
     monthsLeft: def.duration,
     status: 'building',

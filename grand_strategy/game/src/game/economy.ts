@@ -46,9 +46,9 @@ import { LABOR_DEMAND_PER_CELL, applyClassMobility, computeWages } from './labor
 import { settleMarket } from './market';
 import type { CountyFlow, MarketState } from './market';
 import { BASE_PRICE, GOODS_LIST, zeroGoods } from './market';
-import { countyFreightFactor, provinceFreightFactor } from './logistics';
+import { countyFreightFactor, provinceFreightFactor, isCoastal } from './logistics';
 import { BUILDING_DEFS, buildingSkillReqPop } from './buildings';
-import type { InvestmentProject } from './buildings';
+import type { BuildingCategory, BuildingKind, InvestmentProject } from './buildings';
 import { provinceHasResource } from './resources';
 
 // ---- 税率（v0.4 连续滑块 0%-30%，见 tax.ts；TAX_RATES/TAX_LEVELS 已移除） ----
@@ -202,6 +202,60 @@ export function infraCapacity(n: NationState): number {
 /** 商路系数（海路=港口、陆路=道路 → 贸易容量放大） */
 export function routeCoef(n: NationState): number {
   return 1 + (n.infra.ports / 100) * 0.5 + (n.infra.roads / 100) * 0.3;
+}
+
+// ---- 运力系统（v0.9 阶段 B）：基建产运力 → 加强项可选购 → 贸易吃运力 ----
+/** 部门运力消耗（每产能单位/月）：采矿>工业>加工>农业（用户定稿） */
+export const TRANSPORT_USE: Record<BuildingCategory, number> = {
+  agriculture: 0.1, extraction: 0.5, processing: 0.3, heavy: 0.4, fine: 0.4, infra: 0,
+};
+/** 启用运力加强项的产能加成（按部门差异化，v0.9 E 阶段实测调参） */
+export const TRANSPORT_BOOST: Record<BuildingCategory, number> = {
+  agriculture: 1.2, extraction: 1.3, processing: 1.25, heavy: 1.3, fine: 1.3, infra: 1,
+};
+/** 每省运力限额基数（地形容量；基建/科技提升上限） */
+export const TRANSPORT_CAP_BASE = 24;
+/** 贸易吨位运力消耗系数（每吨调运/出口吃多少运力） */
+export const TRADE_TRANSPORT = 0.2;
+
+function provAvgH(map: GameMap, prov: Province): number {
+  let s = 0, n = 0;
+  for (const cid of prov.cellIds) {
+    const c = map.cellsById.get(cid);
+    if (c) { s += c.h; n++; }
+  }
+  return n ? s / n : 0;
+}
+
+/** 基建地形乘数：公路平原好 / 铁路山地好 / 港口沿海 */
+export function transportTerrainFactor(map: GameMap, kind: BuildingKind, prov: Province): number {
+  const avgH = provAvgH(map, prov);
+  const coastal = isCoastal(map, prov);
+  switch (kind) {
+    case 'road': return avgH < 28 ? 1.4 : 0.9;
+    case 'railroad': return avgH >= 28 ? 1.6 : 1.1;
+    case 'canal': return 1.3;
+    case 'port': return coastal ? 1.5 : 0.5;
+    case 'lighthouse': return coastal ? 1.2 : 0.6;
+    default: return 1;
+  }
+}
+
+/** 省运力限额（地形容量）：基数 × 地形（平原/山地） */
+export function provinceTransportCap(map: GameMap, prov: Province): number {
+  return TRANSPORT_CAP_BASE * (provAvgH(map, prov) < 28 ? 1.4 : 1.15);
+}
+
+/** 全国运力充足度（0.25-1）：运力紧 → 贸易容量收缩 */
+export function transportAdequacy(n: NationState): number {
+  let stock = 0, demand = 0;
+  for (const pid of Object.keys(n.provStocks)) stock += n.provStocks[Number(pid)]?.transport ?? 0;
+  for (const p of n.projects) {
+    if (p.status !== 'active') continue;
+    const def = BUILDING_DEFS[p.kind];
+    if (def.output) demand += (TRANSPORT_USE[def.category] ?? 0.3) * def.capacity;
+  }
+  return clamp(stock / Math.max(1e-9, stock + demand), 0.25, 1);
 }
 
 /** 国家政治影响力构成（阶级规模 × 政治权重；含普选修正）——UI「权势构成」 */
@@ -424,6 +478,23 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
       }
     }
   }
+  // ---- 运力预计算（省级自动启用加强项）：省运输库存 ≥ 需求 → 启用 ----
+  const transpPolicy = n.transportPolicy !== 'off';
+  const provTUse: Record<number, number> = {};
+  for (const p of n.projects) {
+    if (p.status !== 'active' || newlyCompleted.has(p.id)) continue;
+    const def = BUILDING_DEFS[p.kind];
+    if (!def.output) continue; // 基建建筑产运力，不消耗
+    provTUse[p.provId] = (provTUse[p.provId] ?? 0) + (TRANSPORT_USE[def.category] ?? 0.3) * def.capacity;
+  }
+  const provTEnabled: Record<number, boolean> = {};
+  if (transpPolicy) {
+    for (const pid of Object.keys(provTUse)) {
+      const stock = n.provStocks[Number(pid)]?.transport ?? 0;
+      provTEnabled[Number(pid)] = stock >= (provTUse[Number(pid)] ?? 0);
+    }
+  }
+  const transpAdequacy = transportAdequacy(n);
   // 已投产（含上月投产）的建筑：技能要求 → 从本省库存预扣输入 → 产出进本省市场供给
   // 支持：必输 inputs（都要）+ anyOf（任一选库存最足）+ 变体产线（armory）+ 服务类无输出（school/bank/market）
   for (const p of n.projects) {
@@ -486,7 +557,35 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
       provGoods(provBuildingConsumed, p.provId)[chosenAny] += used;
       provGoods(provBuildingDemand, p.provId)[chosenAny] += need;
     }
-    const output = mainOutput ? def.capacity * skillFactor * avail : 0;
+    // 运力加强项（省级自动启用）：运力需求并入 avail（不足则减产），预扣同普通输入
+    const isInfra = def.category === 'infra';
+    const boosted = !isInfra && !!provTEnabled[p.provId];
+    const tNeed = boosted ? ((TRANSPORT_USE[def.category] ?? 0.3) * def.capacity) * skillFactor : 0;
+    if (tNeed > 1e-9) {
+      avail = Math.min(avail, Math.max(0, provStock.transport ?? 0) / tNeed);
+    }
+    avail = clamp(avail, 0, 1);
+    if (boosted && tNeed > 1e-9) {
+      const tUse = tNeed * avail;
+      if (tUse > 1e-9) {
+        provStock.transport = Math.max(0, (provStock.transport ?? 0) - tUse);
+        n.stocks.transport = Math.max(0, (n.stocks.transport ?? 0) - tUse);
+        inputUsed.transport = tUse;
+        provGoods(provBuildingConsumed, p.provId).transport += tUse;
+        provGoods(provBuildingDemand, p.provId).transport += tNeed;
+      }
+    }
+    // 地形乘数（基建）+ 运力加强项产能加成
+    const provB = map.provinceById.get(p.provId);
+    const terrain = isInfra && mainOutput && provB ? transportTerrainFactor(map, def.kind, provB) : 1;
+    const boost = boosted ? (TRANSPORT_BOOST[def.category] ?? 1.25) : 1;
+    let output = mainOutput ? def.capacity * skillFactor * avail * terrain * boost : 0;
+    // 运力限额（产出端）：基建产出不超省地形容量，守恒成立
+    if (mainOutput === 'transport' && provB) {
+      const cap = provinceTransportCap(map, provB);
+      const cur = provStock.transport ?? 0;
+      output = Math.max(0, Math.min(output, Math.max(0, cap - cur)));
+    }
     if (mainOutput) provGoods(provFactorySupply, p.provId)[mainOutput] += output;
     p.lastSkillFactor = skillFactor;
     p.lastRunFactor = avail;
@@ -495,7 +594,6 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
     p.lastInputCost = 0;
     p.lastRevenue = 0;
   }
-
   // ---- 6. 市场（v0.8 省为结算单元）+ 国际贸易（建筑输入参与省价格形成与守恒） ----
   const marketState: MarketState = {
     national: n.market,
@@ -510,7 +608,7 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
       provBuildingConsumed,
       govDemand,
       provStocks: n.provStocks,
-      routeCoef: routeCoef(n),
+      routeCoef: routeCoef(n) * transpAdequacy, // 运力不足 → 贸易容量收缩
       tariffRate: tax.rates.tariff,
       goodsTax: tax.goods,
       producers: GOOD_PRODUCERS,

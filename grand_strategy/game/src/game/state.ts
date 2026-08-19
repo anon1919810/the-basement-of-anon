@@ -72,6 +72,8 @@ export interface NationState {
   openTrade: boolean;
   /** v0.8 出口权：省 id → 是否获权（沿海/港口省默认获权，内陆省可授予/收回） */
   exportRights: Record<number, boolean>;
+  /** v0.9 运力政策：'auto'=省运力库存足则自动启用加强项；'off'=全部禁用 */
+  transportPolicy: 'auto' | 'off';
   // ---- 投资（v0.3 产业链建筑） ----
   projects: InvestmentProject[]; // 在建/已投产项目
   nextProjectId: number;
@@ -339,6 +341,7 @@ export function newGameState(playerNation: NationId, seed: number, map: GameMap)
       provStocks,
       openTrade: false,
       exportRights,
+      transportPolicy: 'auto',
       projects: [],
       nextProjectId: 1,
       investCostAcc: 0,
