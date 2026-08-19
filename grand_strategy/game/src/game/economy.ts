@@ -732,33 +732,39 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
   }
 
   // ---- 8. 劳动力市场：工资 ----
-  const supply = zeroJobMix();
-  const demand = zeroJobMix();
+  // ---- 8. 劳动力市场：工资（v0.9 按省供需比——首都岗位需求大 → 工资高，而非全国统一） ----
+  const wages = computeWages(zeroJobMix(), zeroJobMix()); // 全国兜底（极少用到）
+  const provWages: Record<number, Record<JobId, number>> = {};
   for (const pid of provIds) {
     const ps = state.provinces[pid];
     const prov = map.provinceById.get(pid);
     if (!prov) continue;
-    for (const pop of ps.pops) supply[pop.job] += pop.size;
-    for (const job of JOBS) demand[job] += prov.cellIds.length * LABOR_DEMAND_PER_CELL[job];
+    const s = zeroJobMix();
+    const d = zeroJobMix();
+    for (const pop of ps.pops) s[pop.job] += pop.size;
+    for (const job of JOBS) d[job] += prov.cellIds.length * LABOR_DEMAND_PER_CELL[job];
+    // 军人/官僚俸禄挂钩军费/行政开支（按省摊）：开支低 → 俸禄低 → 穷官僚/军饷不足
+    d.soldier += (n.spending.military * 0.02) / Math.max(1, provIds.length);
+    d.bureaucrat += (n.spending.admin * 0.02) / Math.max(1, provIds.length);
+    provWages[pid] = computeWages(s, d);
   }
-  // 军人/官僚俸禄挂钩军费/行政开支：开支低 → 岗位需求低 → 俸禄低 → 穷官僚/军饷不足
-  demand.soldier += n.spending.military * 0.02;
-  demand.bureaucrat += n.spending.admin * 0.02;
-  const wages = computeWages(supply, demand);
-  // 低俸禄改行：官僚/军人俸禄 < 0.75×基准 → 每月 2% 转回平民职业（边缘省穷官僚寻求改变）
-  for (const pid of provIds) {
-    const ps = state.provinces[pid];
-    for (const pop of ps.pops) {
-      const lowWage = (pop.job === 'soldier' && wages.soldier < BASE_WAGE.soldier * 0.75) ||
-                      (pop.job === 'bureaucrat' && wages.bureaucrat < BASE_WAGE.bureaucrat * 0.75);
-      if (!lowWage) continue;
-      const leave = pop.size * 0.02;
-      if (leave <= 0.01) continue;
-      const fallback: JobId = pop.job === 'soldier' ? 'worker' : 'clerk';
-      pop.size -= leave;
-      const t = ps.pops.find((p2) => p2.job === fallback && p2.race === pop.race && p2.class === pop.class);
-      if (t) t.size += leave;
-      else ps.pops.push({ ...pop, job: fallback, size: leave });
+  // 低俸禄改行移至幸福度段（pop.wage 按省设定后判断）
+
+  // ---- 8.5 义务兵役（v0.9 仅战时）：按政体强度从自耕农/工人强制征兵；平时禁止强制转职 ----
+  if (n.warTime) {
+    const govRate = /独裁|帝国/.test(n.gov) ? 0.006 : /共和|城邦/.test(n.gov) ? 0.002 : 0.003;
+    for (const pid of provIds) {
+      const ps = state.provinces[pid];
+      for (const pop of ps.pops) {
+        if (pop.job !== 'peasant' && pop.job !== 'worker') continue;
+        if (pop.class > 6) continue; // 奴役(7) 不征兵
+        const amount = pop.size * govRate;
+        if (amount <= 0.01) continue;
+        pop.size -= amount;
+        const t = ps.pops.find((p2) => p2.job === 'soldier' && p2.race === pop.race && p2.class === pop.class);
+        if (t) t.size += amount;
+        else ps.pops.push({ ...pop, job: 'soldier', size: amount, expected: EXPECTED_STD.soldier, unrest: 0 });
+      }
     }
   }
 
@@ -817,14 +823,22 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
       : 1;
     let hSum = 0;
     for (const pop of ps.pops) {
-      pop.wage = wages[pop.job];
+      pop.wage = provWages[pid]?.[pop.job] ?? wages[pop.job];
       // 收入 = 工资（劳动） + 投资收入（上层；年化计入）
       const effWage = pop.wage + (pop.investIncome * 12) / Math.max(pop.size, 1e-9);
       const wageFactor = effWage / BASE_WAGE[pop.job];
       const needsSat = 0.35 * satFood + 0.2 * satCloth + 0.15 * satFuel + 0.3 * housingSat;
       pop.sat = { food: satFood, clothing: satCloth, housing: housingSat, fuel: satFuel };
-      // ---- v0.9 生活水平指数 = 实际收入/生活成本 × 0.5 + 满足度 × 0.5（刻度 0-100） ----
-      const realIncome = effWage / Math.max(0.4, priceIdx); // 实际购买力（省物价修正）
+      // ---- v0.9 生活水平 = 实际收入/生活成本 × 0.5 + 满足度 × 0.5 ----
+      // 首都悖论解法：名义工资随省供需比涨（首都岗位多）且随省物价溢价（工资货币化），
+      // 除以全国均价 → 首都实际购买力高于边远（工资优渥 > 物价负担）；边远省工资低×物价低 → 更贫困
+      const natPriceIdx = provIds.length > 0
+        ? provIds.reduce((s2, pid2) => {
+            const m2 = n.provinceMarkets[pid2];
+            return s2 + (m2 ? (m2.food.price / 2.0) * 0.5 + (m2.clothing.price / 1.8) * 0.3 + (m2.coal.price / 1.5) * 0.2 : 1);
+          }, 0) / provIds.length
+        : 1;
+      const realIncome = effWage * (priceIdx / Math.max(0.4, natPriceIdx)); // 省工资 × 物价溢价 / 全国均价
       const incomeRatio = realIncome / BASE_WAGE[pop.job];
       const satAvg = (pop.sat.food + pop.sat.clothing + pop.sat.housing + pop.sat.fuel) / 4;
       pop.livingStd = clamp(50 * incomeRatio + 50 * satAvg, 0, 100);
@@ -832,6 +846,18 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
       // 不满：低于预期每点缺口 +1/月；满意则缓释
       if (pop.livingStd < pop.expected) pop.unrest += pop.expected - pop.livingStd;
       else pop.unrest = Math.max(0, pop.unrest - 2);
+      // 低俸禄改行：官僚/军人俸禄 < 0.75×基准 → 每月 2% 转回平民（穷官僚/军饷不足，非强制）
+      if ((pop.job === 'soldier' && pop.wage < BASE_WAGE.soldier * 0.75) ||
+          (pop.job === 'bureaucrat' && pop.wage < BASE_WAGE.bureaucrat * 0.75)) {
+        const leave = pop.size * 0.02;
+        if (leave > 0.01) {
+          const fallback: JobId = pop.job === 'soldier' ? 'worker' : 'clerk';
+          pop.size -= leave;
+          const t = ps.pops.find((p2) => p2.job === fallback && p2.race === pop.race && p2.class === pop.class);
+          if (t) t.size += leave;
+          else ps.pops.push({ ...pop, job: fallback, size: leave });
+        }
+      }
       // ---- 自发改行：不满 + 省内存在高薪可得岗位 → 概率转职（不满越高越积极；转职后不满减半） ----
       if (pop.unrest >= 5) {
         const options: JobId[] = [];
@@ -841,7 +867,7 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
         let best: JobId | null = null;
         let bestW = -1;
         for (const o of options) {
-          const w = wages[o] ?? 0;
+          const w = provWages[pid]?.[o] ?? wages[o] ?? 0;
           if (w > bestW) { bestW = w; best = o; }
         }
         if (best && bestW > pop.wage * 1.05) {

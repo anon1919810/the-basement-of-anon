@@ -1085,7 +1085,7 @@ export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSp
                     <tbody>
                       {focusPs.pops.map((pop, i) => {
                         const { next, literacyReq } = nextJobThreshold(pop.job);
-                        const canRetrain = next !== null && n.literacy >= literacyReq && pop.size > 0.001;
+                        const canRetrain = n.warTime && next !== null && n.literacy >= literacyReq && pop.size > 0.001;
                         return (
                           <tr key={i}>
                             <td>{RACE_LABEL[pop.race]}{JOB_LABEL[pop.job]}<em className="dim">·{CLASS_DEFS[pop.class].label}</em></td>
@@ -1098,7 +1098,7 @@ export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSp
                                   className={`retrain-btn ${canRetrain ? '' : 'disabled'}`}
                                   disabled={!canRetrain}
                                   onClick={() => onRetrain(focusProv.id, i)}
-                                  title={canRetrain ? '转职：3 个月产出减半' : `识字率需 ≥${(literacyReq * 100).toFixed(0)}%`}
+                                  title={!n.warTime ? '仅战时强制转职（平时靠待遇吸引/自发改行）' : canRetrain ? '转职：3 个月产出减半' : `识字率需 ≥${(literacyReq * 100).toFixed(0)}%`}
                                 >
                                   转{next === 'worker' ? '工' : next === 'technician' ? '技' : next === 'clerk' ? '职' : next === 'merchant' ? '商' : next === 'capitalist' ? '资' : '升'}
                                 </button>

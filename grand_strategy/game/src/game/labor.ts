@@ -69,18 +69,19 @@ export function nextJobThreshold(job: JobId): { next: JobId | null; literacyReq:
 }
 
 /**
- * 转职：把指定 POP 升至技能梯子下一级。
- * 要求：识字率达标、有下一级；代价 = 3 个月产出减半（retrainMonths=3）。
- * 返回是否成功。
+ * 转职（v0.9 限制）：把指定 POP 升至技能梯子下一级。
+ * 要求：**仅战时可用**（义务兵役强制）；平时禁止国家强行改变职业，军人靠待遇吸引（自发改行）。
+ * 识字率达标、有下一级；代价 = 3 个月产出减半（retrainMonths=3）。
  */
 export function retrainPop(state: GameState, _map: GameMap, provId: number, popIndex: number): boolean {
+  const n = state.nations[state.playerNation];
+  if (!n.warTime) return false; // 平时禁止强制转职
   const ps = state.provinces[provId];
   if (!ps) return false;
   const pop = ps.pops[popIndex];
   if (!pop) return false;
   const { next, literacyReq } = nextJobThreshold(pop.job);
   if (!next) return false;
-  const n = state.nations[state.playerNation];
   if (n.literacy < literacyReq) return false;
   pop.job = next;
   pop.retrainMonths = RETRAIN_MONTHS;

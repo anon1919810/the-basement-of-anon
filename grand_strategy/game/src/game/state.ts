@@ -76,6 +76,10 @@ export interface NationState {
   transportPolicy: 'auto' | 'off';
   /** v0.9 双轨制：资本财富池（资本家/银行家积累 → 私营自动投资） */
   capitalWealth: number;
+  /** v0.9 战时状态：战时开放义务兵役（强制征兵）；平时禁止国家强行转职（靠待遇吸引） */
+  warTime: boolean;
+  /** 政体（义务兵役率/征兵强度判定） */
+  gov: string;
   // ---- 投资（v0.3 产业链建筑） ----
   projects: InvestmentProject[]; // 在建/已投产项目
   nextProjectId: number;
@@ -347,6 +351,8 @@ export function newGameState(playerNation: NationId, seed: number, map: GameMap)
       exportRights,
       transportPolicy: 'auto',
       capitalWealth: 60, // 初始资本（资本家/银行家底子）
+      warTime: false,
+      gov: def.gov,
       projects: [],
       nextProjectId: 1,
       investCostAcc: 0,
