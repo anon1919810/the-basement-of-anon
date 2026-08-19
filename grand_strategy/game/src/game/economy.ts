@@ -787,9 +787,33 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
   const perUnit = eliteWealth > 1e-9 ? capitalPool / eliteWealth : 0;
   for (const pid of provIds) {
     for (const pop of state.provinces[pid].pops) {
-      const wc = classDef(pop.class).wealthCoef;
+      // v0.9 资本收入只给资本侧职业 + 贵族（经营/投资/交易所得）：商人/资本家/银行家 + 阶级 1-2
+      const isCapitalist = pop.job === 'merchant' || pop.job === 'capitalist' || pop.job === 'banker' || pop.class <= 2;
+      const wc = isCapitalist ? classDef(pop.class).wealthCoef : 0;
       pop.investIncome = wc > 0 ? pop.size * wc * perUnit : 0;
     }
+  }
+
+  // ---- 9.5 省农业产出价值（v0.9 农民以卖产品收入，非工资；首都基建好/卖价高 → 农民不穷） ----
+  const AGRI_GOODS: GoodId[] = ['food', 'wheat', 'meat', 'fish', 'sugar', 'cotton', 'timber', 'fur'];
+  const agriValue: Record<number, number> = {};
+  const agriTotal: Record<number, number> = {};
+  for (const pid of provIds) {
+    const ps0 = state.provinces[pid];
+    const provM0 = n.provinceMarkets[pid];
+    let v = 0;
+    if (ps0 && provM0) {
+      for (const g of AGRI_GOODS) v += (ps0.output[g] ?? 0) * (provM0[g]?.price ?? 0);
+    }
+    agriValue[pid] = v;
+    let tot = 0;
+    for (const pop of ps0.pops) {
+      if (pop.job === 'peasant' || pop.job === 'slave') {
+        const w = pop.job === 'slave' ? 0.5 : pop.class <= 3 ? classDef(pop.class).landCoef : 1;
+        tot += w * pop.size;
+      }
+    }
+    agriTotal[pid] = tot;
   }
 
   // ---- 10. 幸福度 & 效率（按省：三级市场消费/需求；阶级基础幸福/税负/政策修正；奴隶恒低） ----
@@ -823,7 +847,24 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
       : 1;
     let hSum = 0;
     for (const pop of ps.pops) {
-      pop.wage = provWages[pid]?.[pop.job] ?? wages[pop.job];
+      // ---- v0.9 收入按职业来源分流 ----
+      if (pop.job === 'peasant' || pop.job === 'slave') {
+        // 农业：卖产品收入（省农业产出价值 × 份额；地主 landCoef 加权）——首都基建好/卖价高 → 农民不穷
+        const w = pop.job === 'slave' ? 0.5 : pop.class <= 3 ? classDef(pop.class).landCoef : 1;
+        pop.wage = agriTotal[pid] > 1e-9
+          ? (agriValue[pid] * 12 * w) / agriTotal[pid]
+          : (provWages[pid]?.[pop.job] ?? wages[pop.job] ?? 0);
+      } else if (pop.job === 'shopkeeper') {
+        // 店主：工资 × 物价综合（物价高 → 店主赚更多）
+        pop.wage = (provWages[pid]?.shopkeeper ?? wages.shopkeeper ?? 0) * (0.7 + 0.3 * priceIdx);
+      } else if (pop.job === 'merchant' || pop.job === 'capitalist' || pop.job === 'banker') {
+        // 资本侧：工资为基准（主要收入来自 investIncome 资本池分成）
+        pop.wage = (provWages[pid]?.[pop.job] ?? wages[pop.job] ?? 0) * 0.6;
+      } else {
+        pop.wage = provWages[pid]?.[pop.job] ?? wages[pop.job] ?? 0;
+      }
+      // 贵族多源：土地/经营附加
+      if (pop.class <= 2) pop.wage += 0.3 * classDef(pop.class).landCoef;
       // 收入 = 工资（劳动） + 投资收入（上层；年化计入）
       const effWage = pop.wage + (pop.investIncome * 12) / Math.max(pop.size, 1e-9);
       const wageFactor = effWage / BASE_WAGE[pop.job];
