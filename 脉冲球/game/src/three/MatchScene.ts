@@ -51,8 +51,11 @@ export const PHYS = {
   DAMP: 4.2,           // 阻尼（力/速度）
   MAX_V: 30,           // 踢球初速上限（m/s）
   MAX_VY: 16,          // 垂直初速上限
+  MAX_F: 100,          // 力钳制（防碰撞弹飞 → 距离大 → 力爆炸 的正反馈发散）
+  MAX_SPEED: 40,       // 速度钳制（同上）
   RESTITUTION: 0.52,   // 球地反弹
   SNAP_DIST: 0.4,      // 距目标该距离内吸附
+  RESET_DIST: 6,       // 异常远离（>6m 或垂直差>8m）→ 快照吸附修复
 };
 
 // 球员碰撞（kinematic 胶囊推球）+ 转播镜头
@@ -634,23 +637,35 @@ export class MatchScene {
     }
 
     // 物理球：目标 = 轨迹采样点；弹簧-阻尼力拉向目标（质量感/惯性），重力+反弹保弧线，
-    // 近点吸附防漂移（保证事件起点精确）
+    // 近点吸附防漂移（保证事件起点精确）；力/速度钳制 + 异常远离快照修复（防碰撞发散）
     if (this.world && this.ballBody) {
       const target = new THREE.Vector3(wx(bx), BALL_R + arc, wz(by));
       const pos = this.ballBody.translation();
       const pv = this.ballBody.linvel();
+      const clampF = (v: number) => Math.max(-PHYS.MAX_F, Math.min(PHYS.MAX_F, v));
       this.ballBody.addForce(
         {
-          x: (target.x - pos.x) * PHYS.K_F - pv.x * PHYS.DAMP,
-          y: (target.y - pos.y) * PHYS.K_FY - pv.y * PHYS.DAMP,
-          z: (target.z - pos.z) * PHYS.K_F - pv.z * PHYS.DAMP,
+          x: clampF((target.x - pos.x) * PHYS.K_F - pv.x * PHYS.DAMP),
+          y: clampF((target.y - pos.y) * PHYS.K_FY - pv.y * PHYS.DAMP),
+          z: clampF((target.z - pos.z) * PHYS.K_F - pv.z * PHYS.DAMP),
         },
         true,
       );
       const steps = Math.max(1, Math.round(dt * 60));
       for (let i = 0; i < steps; i++) this.world.step();
+      // 速度钳制（碰撞弹飞防发散）
+      const pv2 = this.ballBody.linvel();
+      const sp = Math.hypot(pv2.x, pv2.y, pv2.z);
+      if (sp > PHYS.MAX_SPEED) {
+        const s = PHYS.MAX_SPEED / sp;
+        this.ballBody.setLinvel({ x: pv2.x * s, y: pv2.y * s, z: pv2.z * s }, true);
+      }
       const bpos = this.ballBody.translation();
-      const snap = u >= 0.985 || Math.hypot(target.x - bpos.x, target.z - bpos.z) < PHYS.SNAP_DIST;
+      const snap =
+        u >= 0.985 ||
+        Math.hypot(target.x - bpos.x, target.z - bpos.z) < PHYS.SNAP_DIST ||
+        Math.hypot(target.x - bpos.x, target.z - bpos.z) > PHYS.RESET_DIST ||
+        Math.abs(bpos.y - target.y) > 8;
       if (snap) {
         this.ballBody.setTranslation({ x: target.x, y: target.y, z: target.z }, true);
         this.ballBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
@@ -763,6 +778,14 @@ export class MatchScene {
     }
     this.controls.target.lerp(this.followTarget, kT);
     this.controls.update();
+
+    // 调试探针（Playwright 排障用）
+    (window as any).__pb = {
+      ball: [this.ball.position.x, this.ball.position.y, this.ball.position.z],
+      cam: [this.camera.position.x, this.camera.position.y, this.camera.position.z],
+      target: [this.followTarget.x, this.followTarget.z],
+      slow: now < this.slowUntil,
+    };
 
     this.renderer.render(this.scene, this.camera);
   }

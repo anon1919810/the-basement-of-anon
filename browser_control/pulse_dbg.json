@@ -1,0 +1,8 @@
+[
+  {"act": "wait", "ms": 1500},
+  {"act": "eval", "js": "[...document.querySelectorAll('button')].find(b=>b.innerText.includes('开始比赛'))?.click()"},
+  {"act": "wait", "ms": 4000},
+  {"act": "eval", "js": "({ready: window.__pulse3dReady, pb: window.__pb})"},
+  {"act": "wait", "ms": 15000},
+  {"act": "eval", "js": "({pb: window.__pb, score: document.querySelector('.score')?.textContent})"}
+]

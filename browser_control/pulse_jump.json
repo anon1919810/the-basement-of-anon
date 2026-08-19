@@ -1,0 +1,10 @@
+[
+  {"act": "wait", "ms": 1500},
+  {"act": "eval", "js": "[...document.querySelectorAll('button')].find(b=>b.innerText.includes('开始比赛'))?.click()"},
+  {"act": "wait", "ms": 3500},
+  {"act": "eval", "js": "[...document.querySelectorAll('button')].find(b=>b.innerText==='4x')?.click()"},
+  {"act": "wait", "ms": 12000},
+  {"act": "eval", "js": "[...document.querySelectorAll('button')].find(b=>b.innerText==='中节末')?.click()"},
+  {"act": "wait", "ms": 2500},
+  {"act": "eval", "js": "({pb: window.__pb, score: document.querySelector('.score')?.textContent, time: document.querySelector('.meta span:nth-child(2)')?.textContent})"}
+]
