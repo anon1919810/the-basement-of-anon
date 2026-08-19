@@ -819,6 +819,15 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
   // ---- 9.5 投资池流入（端明ちゃん 模型）：Σ(分红/经营盈余 × 贡献比例 × 投资效率) → 汇入投资池（私营再投资本金）
   // 记账口径：不实际扣减 POP 分红（避免生活水平连锁触发改行导致市场账本抖动）
   const law = n.policies.economicLaw;
+  // 全国平均收入（pop 加权，生活水平参照系）
+  let natIncSum = 0, natIncW = 0;
+  for (const pid of provIds) {
+    for (const pop of state.provinces[pid].pops) {
+      natIncSum += (provWages[pid]?.[pop.job] ?? 0) * pop.size;
+      natIncW += pop.size;
+    }
+  }
+  const natAvgIncome = natIncW > 0 ? natIncSum / natIncW : 3;
   const effOf = (job: JobId, cls: ClassId): number => {
     const key: JobId | 'noble' | 'landlord' =
       cls <= 2 ? 'noble' : job === 'peasant' && cls <= 3 ? 'landlord' : job;
@@ -859,7 +868,7 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
     let tot = 0;
     for (const pop of ps0.pops) {
       if (pop.job === 'peasant' || pop.job === 'slave') {
-        const w = pop.job === 'slave' ? 0.5 : pop.class <= 3 ? classDef(pop.class).landCoef : 1;
+        const w = pop.job === 'slave' ? 0.2 : pop.class <= 3 ? classDef(pop.class).landCoef : 1;
         tot += w * pop.size;
       }
     }
@@ -900,7 +909,7 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
       // ---- v0.9 收入按职业来源分流 ----
       if (pop.job === 'peasant' || pop.job === 'slave') {
         // 农业：卖产品收入（省农业产出价值 × 份额；地主 landCoef 加权）——首都基建好/卖价高 → 农民不穷
-        const w = pop.job === 'slave' ? 0.5 : pop.class <= 3 ? classDef(pop.class).landCoef : 1;
+        const w = pop.job === 'slave' ? 0.2 : pop.class <= 3 ? classDef(pop.class).landCoef : 1;
         pop.wage = agriTotal[pid] > 1e-9
           ? (agriValue[pid] * 12 * w) / agriTotal[pid]
           : (provWages[pid]?.[pop.job] ?? wages[pop.job] ?? 0);
@@ -931,12 +940,12 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
           }, 0) / provIds.length
         : 1;
       const realIncome = effWage * (priceIdx / Math.max(0.4, natPriceIdx)); // 省工资 × 物价溢价 / 全国均价
-      const incomeRatio = realIncome / BASE_WAGE[pop.job];
+      const incomeRatio = realIncome / Math.max(1e-9, natAvgIncome); // 相对全国平均收入（高低分化）
       // v0.9 满足度含成瘾品（咖啡/烟草）与服装：成瘾品缺货 → 生活水平降（需求非摆设；刚性 = 固定量不随价变）
       const satCoffee = satOf('coffee');
       const satTobacco = satOf('tobacco');
       const satAvg = (pop.sat.food + pop.sat.clothing + pop.sat.housing + pop.sat.fuel + satCoffee * 0.5 + satTobacco * 0.5) / 6;
-      pop.livingStd = clamp(50 * incomeRatio + 50 * satAvg, 0, 100);
+      pop.livingStd = clamp(60 * incomeRatio + 40 * satAvg, 0, 100);
       pop.expected = EXPECTED_STD[pop.job];
       // 不满：低于预期每点缺口 +1/月；满意则缓释
       if (pop.livingStd < pop.expected) pop.unrest += pop.expected - pop.livingStd;

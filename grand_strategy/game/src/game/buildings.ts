@@ -550,8 +550,8 @@ export function startInvestment(
   } else {
     if (n.treasury < cost) { n.buildPower += bCost; return null; }
     n.treasury -= cost;
+    n.investCostAcc += cost; // 仅国营记账（私营自动投资扣资本池，不记国库投资成本，守恒自洽）
   }
-  n.investCostAcc += cost; // 仅国营路径扣国库（私营扣资本池）；记账口径一致
   const p: InvestmentProject = {
     id: n.nextProjectId++,
     kind,
