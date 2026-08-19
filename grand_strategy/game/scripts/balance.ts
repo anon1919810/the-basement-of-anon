@@ -3,8 +3,8 @@
 import { loadMap } from '../src/game/map';
 import { newGameState, tickDay } from '../src/game/state';
 import { GOODS_LIST, BASE_PRICE } from '../src/game/market';
-import { GOOD_LABEL, JOB_LABEL, zeroJobMix } from '../src/game/pops';
-import { BUILDING_DEFS, BUILDING_KINDS, buildingUnlock, startInvestment, terrainCostFactor } from '../src/game/buildings';
+import { GOOD_LABEL } from '../src/game/pops';
+import { BUILDING_DEFS, BUILDING_KINDS, buildingUnlock, startInvestment } from '../src/game/buildings';
 import { provinceHasResource } from '../src/game/resources';
 import type { GameState } from '../src/game/state';
 import type { GameMap, Province } from '../src/game/map';

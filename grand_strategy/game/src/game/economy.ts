@@ -54,8 +54,8 @@ import { provinceHasResource } from './resources';
 
 // ---- 税率（v0.4 连续滑块 0%-30%，见 tax.ts；TAX_RATES/TAX_LEVELS 已移除） ----
 
-/** 人均年收入（₭/人/年）≈ 1780 年代水平 */
-export const PER_CAPITA_INCOME = 3.0;
+/** 人均年收入（万₭/人/年）≈ 1780 年代水平（v0.9 平衡：3.0→4.0，税收与消费同步升，缩小收支缺口） */
+export const PER_CAPITA_INCOME = 4.0;
 /** 人均年粮食消耗（吨/人/年）→ 每万人 0.09 万吨/年 */
 export const GRAIN_PER_WAN_PERSON = 0.09;
 /** 每陆地格基础年产粮（万吨/年，× 省份 grainMod） */

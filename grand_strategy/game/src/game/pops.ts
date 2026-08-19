@@ -71,7 +71,7 @@ export const NEED_PER_WAN: Record<GoodId, number> = {
   food: 0.0075,
   wheat: 0.001, // 细粮（上层多，消费矩阵 C 阶段细化）
   meat: 0.0015,
-  clothing: 0.006,
+  clothing: 0.004, // v0.9 平衡：0.006→0.004（穿衣需求更现实）
   coal: 0.005, // 燃料需求并入煤炭
   fish: 0.002, // 渔获作为粮食替代（沿海民食）
   sugar: 0.0006,
@@ -144,8 +144,8 @@ export const LUXURY_OUTPUT_PER_WAN: Record<JobId, number> = {
   engineer: 0.0008,
   merchant: 0, capitalist: 0, banker: 0,
 };
-/** 奢侈品需求基数（× 阶级奢侈权重 × 幸福度系数 × 国家财富系数） */
-export const LUXURY_NEED_BASE = 0.0022;
+/** 奢侈品需求基数（× 阶级奢侈权重 × 幸福度系数 × 国家财富系数）；v0.9 平衡：0.0022→0.0006（工业化前奢侈品本就稀少） */
+export const LUXURY_NEED_BASE = 0.0006;
 /** 国家财富系数 clamp 范围（国民财富↑ → 奢侈品需求↑） */
 export const LUXURY_WEALTH_MIN = 0.7;
 export const LUXURY_WEALTH_MAX = 2.2;

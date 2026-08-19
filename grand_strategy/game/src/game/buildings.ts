@@ -90,7 +90,7 @@ export const BUILDING_DEFS: Record<BuildingKind, BuildingDef> = {
   // ==================== 农业（9）====================
   cottonFarm: {
     kind: 'cottonFarm', label: '棉田', category: 'agriculture', skill: 'peasant',
-    inputs: {}, opt: { tools: 0.2, transport: 0.1 }, output: 'cotton', capacity: 1.6,
+    inputs: {}, opt: { tools: 0.2, transport: 0.1 }, output: 'cotton', capacity: 2.4,
     cost: 100, duration: 5, opCost: 0.35, infra: {}, requireResource: 'cotton',
     desc: '暖湿平原植棉，纺织业原料之源。',
   },
@@ -200,7 +200,7 @@ export const BUILDING_DEFS: Record<BuildingKind, BuildingDef> = {
   },
   textile: {
     kind: 'textile', label: '纺织厂', category: 'processing', skill: 'technician',
-    inputs: { cotton: 2.0 }, opt: { tools: 0.3 }, output: 'cloth', capacity: 1.5,
+    inputs: { cotton: 2.0 }, opt: { tools: 0.3 }, output: 'cloth', capacity: 2.0,
     cost: 150, duration: 6, opCost: 0.8, infra: { roads: 10 },
     desc: '棉花 → 布料（损耗 25%），衣物/船帆/奢侈品中间品。',
   },
@@ -250,7 +250,7 @@ export const BUILDING_DEFS: Record<BuildingKind, BuildingDef> = {
   clothingWorks: {
     kind: 'clothingWorks', label: '服装厂', category: 'fine', skill: 'technician',
     inputs: {}, anyOf: ['cloth', 'fur'], opt: { tools: 0.2, machines: 0.15 },
-    output: 'clothing', capacity: 1.6, cost: 130, duration: 5, opCost: 0.7, infra: {},
+    output: 'clothing', capacity: 2.2, cost: 100, duration: 5, opCost: 0.7, infra: {},
     desc: '布料 或 毛皮 → 服装；大众刚需。',
   },
   foodFactory: {
@@ -305,7 +305,7 @@ export const BUILDING_DEFS: Record<BuildingKind, BuildingDef> = {
   // ==================== 基建与公共服务（8）====================
   road: {
     kind: 'road', label: '公路', category: 'infra', skill: 'technician',
-    inputs: { stone: 1.0, timber: 0.8 }, opt: { tools: 0.2 }, output: 'transport', capacity: 2.0,
+    inputs: { stone: 1.0, timber: 0.8 }, opt: { tools: 0.2 }, output: 'transport', capacity: 3.0,
     cost: 120, duration: 6, opCost: 0.5, infra: {},
     desc: '产运力：平原效率 ×1.4（地形乘数）。',
   },
@@ -323,7 +323,7 @@ export const BUILDING_DEFS: Record<BuildingKind, BuildingDef> = {
   },
   port: {
     kind: 'port', label: '港口', category: 'infra', skill: 'technician',
-    inputs: { stone: 1.0, timber: 0.8, steel: 0.5 }, output: 'transport', capacity: 2.5,
+    inputs: { stone: 1.0, timber: 0.8, steel: 0.5 }, output: 'transport', capacity: 3.5,
     cost: 260, duration: 10, opCost: 0.9, infra: { ports: 5 }, requireCoastal: true,
     desc: '产运力 + 贸易容量（出口权联动）。',
   },

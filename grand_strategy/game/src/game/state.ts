@@ -336,7 +336,7 @@ export function newGameState(playerNation: NationId, seed: number, map: GameMap)
       foodStock: stocks.food,
       stability: def.stability,
       tax: defaultNationTax(def.taxDefaults),
-      spending: { ...def.defaultSpending, court: 8, health: 5 },
+      spending: { ...def.defaultSpending, court: 6, health: 5 },
       cells: nationCellCount(map, id),
       stocks,
       market: newMarket(),
