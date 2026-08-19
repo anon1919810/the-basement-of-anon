@@ -1166,10 +1166,10 @@ export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSp
                         title={
                           l === 'traditionalism' ? '传统主义：政府分红 -10%' :
                           l === 'laissezFaire' ? '自由放任：中性' :
-                          '龙本主义：政府分红 +15%'
+                          '农本主义：政府分红 +15%，农民地主贵族投资 +50%'
                         }
                       >
-                        {l === 'traditionalism' ? '传统主义' : l === 'laissezFaire' ? '自由放任' : '龙本主义'}
+                        {l === 'traditionalism' ? '传统主义' : l === 'laissezFaire' ? '自由放任' : '农本主义'}
                       </button>
                     ))}
                   </span>

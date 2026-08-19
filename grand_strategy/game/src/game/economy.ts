@@ -51,7 +51,7 @@ import type { NationTax } from './tax';
 import { LABOR_DEMAND_PER_CELL, applyClassMobility, computeWages } from './labor';
 import { settleMarket } from './market';
 import type { CountyFlow, MarketState } from './market';
-import { BASE_PRICE, GOODS_LIST, zeroGoods } from './market';
+import { BASE_PRICE, GOODS_LIST, GOOD_CATEGORY, zeroGoods } from './market';
 import { countyFreightFactor, provinceFreightFactor, isCoastal } from './logistics';
 import { BUILDING_DEFS, BUILDING_KINDS, buildingSkillReqPop, buildingUnlock, startInvestment, terrainCostFactor } from './buildings';
 import type { BuildingCategory, BuildingKind, InvestmentProject } from './buildings';
@@ -79,6 +79,19 @@ export const INFRA_DECAY = 0.008;
 /** 全国资本回报池系数（v0.3 上层阶级投资收入） */
 export const CAPITAL_POOL_TRADE = 0.4; // 贸易顺差计入比例
 export const CAPITAL_POOL_INDUSTRY = 0.5; // 建筑工业利润计入比例
+
+// ---- v0.9 投资池（端明ちゃん 模型：分红 × 贡献比例 × 投资效率修正）----
+/** 各人群投资贡献比例（分红/盈余中缴入投资池的比例） */
+export const INVEST_RATE: Partial<Record<JobId, number>> & { noble: number; landlord: number } = {
+  banker: 0.2, capitalist: 0.15, merchant: 0.05, shopkeeper: 0.05,
+  peasant: 0.05, noble: 0.1, landlord: 0.07,
+};
+/** 经济体制 → 投资效率修正（试验数值；缺省 = 1 无修正） */
+export const INVEST_EFF: Record<EconomicLaw, Partial<Record<JobId, number>> & { noble?: number; landlord?: number }> = {
+  traditionalism: { banker: 0.5, capitalist: 0.5, merchant: 0.5, shopkeeper: 0.5, noble: 0.5, landlord: 0.5 },
+  laissezFaire: { banker: 1.25, capitalist: 1.25, shopkeeper: 1.25, merchant: 1.15 },
+  draconian: { peasant: 1.5, landlord: 1.5, noble: 1.5 },
+};
 
 // ---- v0.9 政府分红（国企利润 → 国库，效率受经济体制）----
 export const GOV_DIV_EFF: Record<EconomicLaw, number> = {
@@ -702,8 +715,7 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
       const idleScale = 0.3 + 0.7 * p.lastRunFactor * p.lastSkillFactor;
       const profit = p.lastRevenue - inputCost - def.opCost * idleScale;
       if (p.owner === 'private') {
-        n.capitalWealth += profit * 0.4; // 40% 留存本金（资本家再投资）
-        privateDividend += profit * 0.6; // 60% 进入分红池（当月分给资本侧/贵族）
+        privateDividend += profit; // 私营利润 100% 进分红池（投资池从分红按贡献比例抽取）
         p.lossMonths = profit < -1 ? p.lossMonths + 1 : 0;
         if (p.lossMonths >= 3) bankrupt.push(p); // 连续 3 月亏损 → 破产
       } else {
@@ -726,6 +738,7 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
     for (const kind of BUILDING_KINDS) {
       const def = BUILDING_DEFS[kind];
       if (!def.output) continue; // 只投商品建筑（服务加成阶段 D 不自动投）
+      if (GOOD_CATEGORY[def.output] === 'semi') continue; // 中间品无直接需求，资本家不建卖不动的厂
       const estProfit = def.capacity * n.market[def.output].price - def.opCost;
       if (estProfit <= 0) continue;
       for (const pid of provIds) {
@@ -802,6 +815,34 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
       pop.investIncome = wc > 0 ? pop.size * wc * perUnit : 0;
     }
   }
+
+  // ---- 9.5 投资池流入（端明ちゃん 模型）：Σ(分红/经营盈余 × 贡献比例 × 投资效率) → 汇入投资池（私营再投资本金）
+  // 记账口径：不实际扣减 POP 分红（避免生活水平连锁触发改行导致市场账本抖动）
+  const law = n.policies.economicLaw;
+  const effOf = (job: JobId, cls: ClassId): number => {
+    const key: JobId | 'noble' | 'landlord' =
+      cls <= 2 ? 'noble' : job === 'peasant' && cls <= 3 ? 'landlord' : job;
+    return INVEST_EFF[law][key as never] ?? 1;
+  };
+  let investPoolIn = 0;
+  for (const pid of provIds) {
+    for (const pop of state.provinces[pid].pops) {
+      const isCap = pop.job === 'banker' || pop.job === 'capitalist' || pop.job === 'merchant' || pop.class <= 2;
+      if (isCap) {
+        const rateKey: JobId | 'noble' =
+          pop.job === 'banker' || pop.job === 'capitalist' || pop.job === 'merchant' ? pop.job : 'noble';
+        const rate = INVEST_RATE[rateKey] ?? 0;
+        investPoolIn += pop.investIncome * rate * effOf(pop.job, pop.class);
+      } else if (pop.job === 'shopkeeper' || pop.job === 'peasant') {
+        // 店主/自耕农/地主：经营盈余（收入 − 基准生活成本） × 比例 × 效率
+        const surplus = Math.max(0, pop.wage - BASE_WAGE.peasant * 0.8);
+        const rateKey: JobId | 'landlord' = pop.job === 'peasant' && pop.class <= 3 ? 'landlord' : pop.job;
+        const rate = INVEST_RATE[rateKey] ?? 0;
+        investPoolIn += surplus * rate * effOf(pop.job, pop.class);
+      }
+    }
+  }
+  n.capitalWealth += investPoolIn; // 汇入投资池（私营自动建设本金）
 
   // ---- 9.5 省农业产出价值（v0.9 农民以卖产品收入，非工资；首都基建好/卖价高 → 农民不穷） ----
   const AGRI_GOODS: GoodId[] = ['food', 'wheat', 'meat', 'fish', 'sugar', 'cotton', 'timber', 'fur'];

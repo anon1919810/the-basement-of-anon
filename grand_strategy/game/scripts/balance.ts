@@ -125,6 +125,7 @@ function main(): void {
   n.tax.rates.poll = 0.2;
   n.tax.rates.consumption = 0.1;
   for (const g of GOODS_LIST) n.tax.goods[g] = 0.15;
+  n.buildPower = 500; // 测试环境：放开建造力限制，专注价格/供需平衡（真实开局需先建建造部门）
 
   // 开局预置基础产业链（模拟已发展国家，测价格传导与循环）
   const findProv = (pred: (p: Province) => boolean): Province | null =>

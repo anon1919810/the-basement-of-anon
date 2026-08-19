@@ -455,6 +455,13 @@ export function buildingMaxCount(kind: BuildingKind, infra: { roads: number; por
   return Math.ceil(base * (1 + (infra.roads + infra.ports) * 0.004));
 }
 
+/** 建造力分配（v0.9 经济政策）：政府干预多 → 国营五五平分；少干预 → 倾斜私营（国营占比） */
+export const BUILD_POWER_STATE_SHARE: Record<string, number> = {
+  traditionalism: 0.5, // 传统：国营/私营五五
+  laissezFaire: 0.3,   // 自由放任：向私营倾斜
+  draconian: 0.5,      // 农本：国营/私营五五
+};
+
 /** 同省同 kind 在产/在建项目数 */
 export function countOfKind(projects: InvestmentProject[], provId: number, kind: BuildingKind): number {
   let c = 0;
@@ -531,8 +538,11 @@ export function startInvestment(
   if (!unlock.ok) return null;
   const cost = def.cost * terrainCostFactor(map, kind, prov); // 地形造价（山地基建贵）
   // 建造力：建筑建造需消耗建造力池（建造部门产出，全国通用不耗运力）
+  // v0.9 经济政策分配：政府干预多 → 建造力五五平分；少干预 → 倾斜私营（owner 配额检查）
   const bCost = buildCostOf(def);
-  if (n.buildPower < bCost) return null;
+  const stateShare = BUILD_POWER_STATE_SHARE[n.policies.economicLaw] ?? 0.5;
+  const quota = n.buildPower * (owner === 'private' ? 1 - stateShare : stateShare);
+  if (n.buildPower < bCost || quota < bCost) return null;
   n.buildPower -= bCost;
   if (owner === 'private') {
     if (n.capitalWealth < cost) { n.buildPower += bCost; return null; }
@@ -541,7 +551,7 @@ export function startInvestment(
     if (n.treasury < cost) { n.buildPower += bCost; return null; }
     n.treasury -= cost;
   }
-  n.investCostAcc += cost;
+  n.investCostAcc += cost; // 仅国营路径扣国库（私营扣资本池）；记账口径一致
   const p: InvestmentProject = {
     id: n.nextProjectId++,
     kind,

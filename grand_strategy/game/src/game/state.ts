@@ -484,7 +484,7 @@ export function setEconomicLaw(state: GameState, law: EconomicLaw): void {
   const n = state.nations[state.playerNation];
   n.policies.economicLaw = law;
   const label: Record<EconomicLaw, string> = {
-    traditionalism: '传统主义', laissezFaire: '自由放任', draconian: '龙本主义',
+    traditionalism: '传统主义', laissezFaire: '自由放任', draconian: '农本主义',
   };
   addChronicle(state, `经济体制改为「${label[law]}」`, '政府分红与投资池效率修正生效');
 }
