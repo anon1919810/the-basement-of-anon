@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 import { api, apiBlob, apiSSE } from '../lib/api'
 import { toast } from '../lib/toast'
+import { formatEra, guessBookName } from '../lib/era'
 import StatsCharts from '../components/StatsCharts'
 
 interface Entry {
@@ -87,6 +88,18 @@ function buildLocalStats(entries: Entry[]): any {
 export default function Workbench() {
   // ---- 上传提取（支持多文件） ----
   const [files, setFiles] = useState<File[]>([])
+  const lastGuessRef = useRef('') // 上次自动识别的书名（判断是否需要覆盖）
+
+  // 选择文件时自动识别书名（可修改）：仅当书名为空或仍等于上次推断值时覆盖
+  const pickFiles = (list: File[]) => {
+    setFiles(list)
+    if (!list.length) return
+    const g = guessBookName(list[0].name)
+    if (!bookName || bookName === lastGuessRef.current) {
+      lastGuessRef.current = g
+      setBookName(g)
+    }
+  }
   const [dragOver, setDragOver] = useState(false)
   const [bookName, setBookName] = useState('')
   const [maxOnly, setMaxOnly] = useState(true)
@@ -304,9 +317,13 @@ export default function Workbench() {
     }
   }
 
+  // 导出前把"时间"公元化（只影响导出，不写回存储）
+  const eraEntries = (list: any[]) =>
+    list.map((e) => ({ ...e, 时间: formatEra(String(e.时间 ?? '')) || '' }))
+
   function exportExcel() {
     if (!shownEntries.length) return
-    apiBlob('/api/extract/export', { book_name: bookName, entries: shownEntries })
+    apiBlob('/api/extract/export', { book_name: bookName, entries: eraEntries(shownEntries) })
       .then((blob) => {
         const a = document.createElement('a')
         a.href = URL.createObjectURL(blob)
@@ -328,7 +345,7 @@ export default function Workbench() {
   // GB/T 7714 参考文献格式
   function exportGbt() {
     if (!shownEntries.length) return
-    const lines = shownEntries.map(
+    const lines = eraEntries(shownEntries).map(
       (e, i) =>
         `${i + 1}. ${e.名称}[M]//${bookName || '地方志'}．${e.时间 || ''}．${e.空间 || ''}．${e.基础信息 || ''}`,
     )
@@ -340,7 +357,7 @@ export default function Workbench() {
   function exportRis() {
     if (!shownEntries.length) return
     const lines = ['TY - GEN', `T1 - ${bookName || '地方志'} 文化要素`]
-    shownEntries.forEach((e) => {
+    eraEntries(shownEntries).forEach((e) => {
       lines.push(`N1 - ${e.名称}：${e.基础信息 || ''}（${e.时间 || ''}；${e.空间 || ''}）`)
     })
     lines.push('ER - ')
@@ -427,7 +444,7 @@ export default function Workbench() {
               e.preventDefault()
               setDragOver(false)
               const dropped = Array.from(e.dataTransfer.files ?? [])
-              if (dropped.length) setFiles(dropped)
+              if (dropped.length) pickFiles(dropped)
             }}
             onClick={() => fileRef.current?.click()}
           >
@@ -437,7 +454,7 @@ export default function Workbench() {
               accept=".pdf,.docx,.doc"
               multiple
               hidden
-              onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
+              onChange={(e) => pickFiles(Array.from(e.target.files ?? []))}
             />
             {files.length ? (
               <span className="btn-icon" style={{ justifyContent: 'center', flexWrap: 'wrap' }}>
@@ -624,7 +641,11 @@ export default function Workbench() {
                               }}
                             />
                           ) : (
-                            <span title="点击编辑">{(e as any)[f] ?? '—'}</span>
+                            <span title="点击编辑">
+                              {f === '时间'
+                                ? formatEra(String((e as any)[f] ?? '')) || '—'
+                                : ((e as any)[f] ?? '—')}
+                            </span>
                           )}
                         </td>
                       )
