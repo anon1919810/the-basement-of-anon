@@ -39,6 +39,8 @@ import {
   luxuryWealthCoef,
   minerOutput,
   provinceLuxuryPotential,
+  CONSUME_MATRIX,
+  JOB_CONSUME,
 } from './pops';
 import { classPoliticalWeight, PROGRESSIVE_HAPPINESS, SUFFRAGE_HAPPINESS } from './classes';
 import { classTaxCoefFor, taxPenalty, policyGrowthCoef } from './tax';
@@ -404,8 +406,10 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
       } else if (pop.job === 'worker') {
         const o = minerOutput(prov, pop.size, eff);
         for (const g of GOODS) out[g] += o[g];
-      } else if (pop.job === 'technician' || pop.job === 'clerk') {
+      } else if (pop.job === 'technician' || pop.job === 'clerk' || pop.job === 'bureaucrat') {
         out.clothing += pop.size * JOB_OUTPUT_PER_WAN[pop.job] * eff;
+      } else if (pop.job === 'soldier') {
+        // 军人：无产出（吃军饷）
       } else if (pop.job === 'merchant' || pop.job === 'capitalist' || pop.job === 'banker') {
         out.luxury += pop.size * JOB_OUTPUT_PER_WAN[pop.job] * eff;
       } else {
@@ -422,14 +426,22 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
     }
     ps.output = out;
     for (const g of GOODS) prodAgg[g] += out[g];
-    // 需求（阶级消费倍率；渔获为粮食替代）
+    // 需求（v0.9 消费矩阵：基础需求 × 阶级权重 × 职业乘数 × 阶级消费倍率；渔获为粮食替代）
     const d = zeroGoods();
     for (const pop of ps.pops) {
       const cons = classDef(pop.class).consumptionMult;
-      d.food += pop.size * NEED_PER_WAN.food * cons;
-      d.clothing += pop.size * NEED_PER_WAN.clothing * cons;
-      d.coal += pop.size * NEED_PER_WAN.coal * cons;
-      d.fish += pop.size * NEED_PER_WAN.fish * cons;
+      const jm = JOB_CONSUME;
+      const m = (g: GoodId, base: number) => base * cons * CONSUME_MATRIX[g][pop.class] * (jm[g]?.[pop.job] ?? 1);
+      d.food += pop.size * m('food', NEED_PER_WAN.food);
+      d.wheat += pop.size * m('wheat', NEED_PER_WAN.wheat);
+      d.meat += pop.size * m('meat', NEED_PER_WAN.meat);
+      d.fish += pop.size * m('fish', NEED_PER_WAN.fish);
+      d.sugar += pop.size * m('sugar', NEED_PER_WAN.sugar);
+      d.coffee += pop.size * m('coffee', NEED_PER_WAN.coffee);
+      d.tobacco += pop.size * m('tobacco', NEED_PER_WAN.tobacco);
+      d.clothing += pop.size * m('clothing', NEED_PER_WAN.clothing);
+      d.fineFood += pop.size * m('fineFood', NEED_PER_WAN.fineFood);
+      d.coal += pop.size * m('coal', NEED_PER_WAN.coal);
     }
     d.luxury = luxDemand * LUXURY_NEED_BASE * wealthCoef;
     ps.demand = d;
@@ -726,7 +738,26 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
     for (const pop of ps.pops) supply[pop.job] += pop.size;
     for (const job of JOBS) demand[job] += prov.cellIds.length * LABOR_DEMAND_PER_CELL[job];
   }
+  // 军人/官僚俸禄挂钩军费/行政开支：开支低 → 岗位需求低 → 俸禄低 → 穷官僚/军饷不足
+  demand.soldier += n.spending.military * 0.02;
+  demand.bureaucrat += n.spending.admin * 0.02;
   const wages = computeWages(supply, demand);
+  // 低俸禄改行：官僚/军人俸禄 < 0.75×基准 → 每月 2% 转回平民职业（边缘省穷官僚寻求改变）
+  for (const pid of provIds) {
+    const ps = state.provinces[pid];
+    for (const pop of ps.pops) {
+      const lowWage = (pop.job === 'soldier' && wages.soldier < BASE_WAGE.soldier * 0.75) ||
+                      (pop.job === 'bureaucrat' && wages.bureaucrat < BASE_WAGE.bureaucrat * 0.75);
+      if (!lowWage) continue;
+      const leave = pop.size * 0.02;
+      if (leave <= 0.01) continue;
+      const fallback: JobId = pop.job === 'soldier' ? 'worker' : 'clerk';
+      pop.size -= leave;
+      const t = ps.pops.find((p2) => p2.job === fallback && p2.race === pop.race && p2.class === pop.class);
+      if (t) t.size += leave;
+      else ps.pops.push({ ...pop, job: fallback, size: leave });
+    }
+  }
 
   // ---- 9. POP 投资收入：上层阶级（1-4）按国家财富占比分得资本回报池 ----
   // 池 = 贸易顺差一部分 + 建筑工业利润一部分（万₭/月）

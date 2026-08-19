@@ -32,15 +32,19 @@ export const RACE_LABEL: Record<RaceId, string> = {
   norman: '诺曼',
 };
 
-export const JOBS: JobId[] = ['slave', 'peasant', 'worker', 'technician', 'clerk', 'engineer', 'merchant', 'capitalist', 'banker'];
+export const JOBS: JobId[] = ['slave', 'peasant', 'worker', 'technician', 'clerk', 'engineer', 'soldier', 'bureaucrat', 'merchant', 'capitalist', 'banker'];
 export const JOB_LABEL: Record<JobId, string> = {
   slave: '奴隶', peasant: '自耕农', worker: '工人', technician: '技术工人',
-  clerk: '职员', engineer: '工程师', merchant: '商人', capitalist: '资本家', banker: '银行家',
+  clerk: '职员', engineer: '工程师', soldier: '军人', bureaucrat: '官僚',
+  merchant: '商人', capitalist: '资本家', banker: '银行家',
 };
 
 /** 零职业分布（UI/统计初始化用） */
 export function zeroJobMix(): Record<JobId, number> {
-  return { slave: 0, peasant: 0, worker: 0, technician: 0, clerk: 0, engineer: 0, merchant: 0, capitalist: 0, banker: 0 };
+  return {
+    slave: 0, peasant: 0, worker: 0, technician: 0, clerk: 0, engineer: 0,
+    soldier: 0, bureaucrat: 0, merchant: 0, capitalist: 0, banker: 0,
+  };
 }
 
 export const GOODS: GoodId[] = GOODS_LIST;
@@ -84,7 +88,7 @@ export const NEED_PER_WAN: Record<GoodId, number> = {
   tools: 0, swords: 0, muskets: 0, cannons: 0, sailShip: 0, luxury: 0, transport: 0,
 };
 
-/** 每万从业者月基础产出（基准单位：万吨/万件） */
+/** 每万从业者月基础产出（基准单位：万吨/万件；军人/官僚为俸禄职业不产商品） */
 export const JOB_OUTPUT_PER_WAN: Record<JobId, number> = {
   slave: 0.008,
   peasant: 0.022,
@@ -92,6 +96,8 @@ export const JOB_OUTPUT_PER_WAN: Record<JobId, number> = {
   technician: 0.012, // 技术工种（精加工前夜）
   clerk: 0.004,      // 管理岗（产出少，效率加成角色）
   engineer: 0.002,
+  soldier: 0,        // 军人：吃军饷
+  bureaucrat: 0.002, // 官僚：行政管理产出
   merchant: 0, capitalist: 0, banker: 0, // 资本侧不出产商品
 };
 
@@ -103,6 +109,8 @@ export const JOB_GOOD: Record<JobId, GoodId> = {
   technician: 'clothing',
   clerk: 'clothing',
   engineer: 'tools',
+  soldier: 'food',
+  bureaucrat: 'clothing',
   merchant: 'luxury',
   capitalist: 'luxury',
   banker: 'luxury',
@@ -142,6 +150,7 @@ export const LUXURY_OUTPUT_PER_WAN: Record<JobId, number> = {
   technician: 0.001,
   clerk: 0,
   engineer: 0.0008,
+  soldier: 0, bureaucrat: 0,
   merchant: 0, capitalist: 0, banker: 0,
 };
 /** 奢侈品需求基数（× 阶级奢侈权重 × 幸福度系数 × 国家财富系数）；v0.9 平衡：0.0022→0.0006（工业化前奢侈品本就稀少） */
@@ -149,6 +158,40 @@ export const LUXURY_NEED_BASE = 0.0006;
 /** 国家财富系数 clamp 范围（国民财富↑ → 奢侈品需求↑） */
 export const LUXURY_WEALTH_MIN = 0.7;
 export const LUXURY_WEALTH_MAX = 2.2;
+
+// ---- 消费矩阵（v0.9 10.4：商品 × 阶级权重 + 商品 × 职业乘数）----
+/** 消费性商品（设矩阵；生产性商品不设） */
+export const CONSUMER_GOODS: GoodId[] = [
+  'food', 'wheat', 'meat', 'fish', 'sugar', 'coffee', 'tobacco',
+  'clothing', 'fineFood', 'luxury', 'coal',
+];
+
+/** 商品 × 阶级（1 贵族→7 奴役）消费权重：上层细粮糖奢侈品多，下层粗粮多 */
+export const CONSUME_MATRIX: Record<GoodId, Record<ClassId, number>> = {
+  food: { 1: 0.6, 2: 0.7, 3: 0.85, 4: 1.0, 5: 1.1, 6: 1.2, 7: 1.3 },
+  wheat: { 1: 1.8, 2: 1.5, 3: 1.2, 4: 0.9, 5: 0.6, 6: 0.4, 7: 0.2 },
+  meat: { 1: 2.0, 2: 1.7, 3: 1.3, 4: 1.0, 5: 0.8, 6: 0.6, 7: 0.4 },
+  fish: { 1: 1.2, 2: 1.1, 3: 1.0, 4: 1.0, 5: 0.95, 6: 0.9, 7: 0.85 },
+  sugar: { 1: 2.5, 2: 2.0, 3: 1.5, 4: 1.0, 5: 0.5, 6: 0.2, 7: 0.1 },
+  coffee: { 1: 2.0, 2: 1.7, 3: 1.3, 4: 1.0, 5: 0.6, 6: 0.3, 7: 0.1 },
+  tobacco: { 1: 1.2, 2: 1.2, 3: 1.1, 4: 1.0, 5: 1.1, 6: 1.0, 7: 0.6 },
+  clothing: { 1: 1.5, 2: 1.4, 3: 1.2, 4: 1.0, 5: 0.9, 6: 0.8, 7: 0.6 },
+  fineFood: { 1: 3.0, 2: 2.2, 3: 1.5, 4: 0.8, 5: 0.3, 6: 0.1, 7: 0 },
+  luxury: { 1: 4.0, 2: 2.5, 3: 1.0, 4: 0.2, 5: 0, 6: 0, 7: 0 },
+  coal: { 1: 1.3, 2: 1.2, 3: 1.1, 4: 1.0, 5: 0.95, 6: 0.9, 7: 0.8 },
+};
+
+/** 商品 × 职业消费乘数（默认 1；军人烟酒多、官僚服装咖啡多、工人烟草多） */
+export const JOB_CONSUME: Record<GoodId, Partial<Record<JobId, number>>> = {
+  food: { soldier: 1.5, peasant: 1.3, worker: 1.1, bureaucrat: 1.2 },
+  meat: { soldier: 1.5, peasant: 1.1, worker: 1.1, merchant: 1.2 },
+  tobacco: { soldier: 2.0, worker: 1.6, peasant: 1.2, bureaucrat: 1.2, merchant: 1.3 },
+  coffee: { bureaucrat: 2.5, clerk: 1.8, merchant: 1.5, capitalist: 1.5, banker: 1.6, soldier: 1.2 },
+  clothing: { bureaucrat: 1.8, clerk: 1.3, engineer: 1.2, soldier: 1.2, capitalist: 1.3 },
+  fineFood: { bureaucrat: 1.5, merchant: 1.3, capitalist: 1.4, banker: 1.5, soldier: 1.2 },
+  sugar: { capitalist: 1.3, banker: 1.4, merchant: 1.2 },
+  luxury: { capitalist: 1.2, banker: 1.3, merchant: 1.2 },
+};
 
 /** 省奢侈品潜力（省份文化/财富系数，由经济产出倍率推导，0.5-1.5） */
 export function provinceLuxuryPotential(prov: Province): number {
@@ -159,7 +202,7 @@ export function luxuryWealthCoef(n: { popWan: number; treasury: number }): numbe
   const annualIncome = n.popWan * 3.0; // PER_CAPITA_INCOME 常量内联，避免循环依赖
   return clamp(0.8 + annualIncome / 6000 + Math.max(0, n.treasury) / 8000, LUXURY_WEALTH_MIN, LUXURY_WEALTH_MAX);
 }
-/** 职业基础年薪（万₭/人/年） */
+/** 职业基础年薪（万₭/人/年）；军人/官僚俸禄随军费/行政开支调整（economy 挂钩） */
 export const BASE_WAGE: Record<JobId, number> = {
   slave: 1.0,
   peasant: 2.4,
@@ -167,6 +210,8 @@ export const BASE_WAGE: Record<JobId, number> = {
   technician: 3.4,
   clerk: 3.2,
   engineer: 4.2,
+  soldier: 3.0,
+  bureaucrat: 3.8,
   merchant: 4.0,
   capitalist: 5.0,
   banker: 5.5,
@@ -235,14 +280,16 @@ export const NATION_RACE_MIX: Record<NationId, Record<RaceId, number>> = {
     ursus: 0, draco: 0, feline: 0, zalak: 0,
   },
 };
-/** 初始职业构成（工业化前夜；资本侧少量） */
+/** 初始职业构成（工业化前夜；军人/官僚/资本侧少量） */
 export const INITIAL_JOB_MIX: Record<JobId, number> = {
-  slave: 0.05,
-  peasant: 0.5,
-  worker: 0.15,
+  slave: 0.04,
+  peasant: 0.46,
+  worker: 0.14,
   technician: 0.12,
   clerk: 0.05,
-  engineer: 0.05,
+  engineer: 0.04,
+  soldier: 0.04,
+  bureaucrat: 0.03,
   merchant: 0.05,
   capitalist: 0.02,
   banker: 0.01,
@@ -301,6 +348,8 @@ export function createProvincePops(
       for (const c of CLASSES) {
         const w = classDist[c] ?? 0;
         if (w <= 0) continue;
+        // 军人/官僚为俸禄职业：不到赤贫/奴役（阶级 1-5；边缘省穷官僚由低行政开支造成）
+        if ((job === 'soldier' || job === 'bureaucrat') && c > 5) continue;
         const size = provincePop * raceShare * jobShare * w;
         if (size < 0.001) continue;
         pops.push({
