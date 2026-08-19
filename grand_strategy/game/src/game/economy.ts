@@ -93,6 +93,15 @@ export const INVEST_EFF: Record<EconomicLaw, Partial<Record<JobId, number>> & { 
   draconian: { peasant: 1.5, landlord: 1.5, noble: 1.5 },
 };
 
+// ---- v0.9 生活水平阶级偏移（收入端分化：贵族生活 ≈ 奴隶 5-10 倍；阶级=财富地位，流动为调节阀）----
+export const CLASS_STD_SHIFT: Record<ClassId, number> = {
+  1: 48, 2: 36, 3: 24, 4: 10, 5: -6, 6: -14, 7: -18,
+};
+/** 阶级财富乘数（v0.9：收入 = 职业收入 × 阶级乘数——贵族收入 ≈ 奴隶 6 倍，财富地位直接变现） */
+export const CLASS_WAGE_MULT: Record<ClassId, number> = {
+  1: 2.5, 2: 2.0, 3: 1.5, 4: 1.1, 5: 0.9, 6: 0.7, 7: 0.4,
+};
+
 // ---- v0.9 政府分红（国企利润 → 国库，效率受经济体制）----
 export const GOV_DIV_EFF: Record<EconomicLaw, number> = {
   traditionalism: 0.9, // 传统体制国企利润抽取效率略低
@@ -828,6 +837,7 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
     }
   }
   const natAvgIncome = natIncW > 0 ? natIncSum / natIncW : 3;
+  n.avgIncome = natAvgIncome; // 阶级流动参照系
   const effOf = (job: JobId, cls: ClassId): number => {
     const key: JobId | 'noble' | 'landlord' =
       cls <= 2 ? 'noble' : job === 'peasant' && cls <= 3 ? 'landlord' : job;
@@ -854,9 +864,11 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
   n.capitalWealth += investPoolIn; // 汇入投资池（私营自动建设本金）
 
   // ---- 9.5 省农业产出价值（v0.9 农民以卖产品收入，非工资；首都基建好/卖价高 → 农民不穷） ----
+  // 分配：地主（阶级≤3 的 peasant）先拿 40% 大份（土地资本），其余 60% 按人口分（农民 1 / 奴隶 0.1 权重）
   const AGRI_GOODS: GoodId[] = ['food', 'wheat', 'meat', 'fish', 'sugar', 'cotton', 'timber', 'fur'];
   const agriValue: Record<number, number> = {};
-  const agriTotal: Record<number, number> = {};
+  const landlordPop: Record<number, number> = {};
+  const farmerPopW: Record<number, number> = {};
   for (const pid of provIds) {
     const ps0 = state.provinces[pid];
     const provM0 = n.provinceMarkets[pid];
@@ -865,14 +877,15 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
       for (const g of AGRI_GOODS) v += (ps0.output[g] ?? 0) * (provM0[g]?.price ?? 0);
     }
     agriValue[pid] = v;
-    let tot = 0;
+    let ld = 0, fm = 0;
     for (const pop of ps0.pops) {
       if (pop.job === 'peasant' || pop.job === 'slave') {
-        const w = pop.job === 'slave' ? 0.2 : pop.class <= 3 ? classDef(pop.class).landCoef : 1;
-        tot += w * pop.size;
+        if (pop.class <= 3) ld += pop.size;
+        else fm += pop.size * (pop.job === 'slave' ? 0.1 : 1);
       }
     }
-    agriTotal[pid] = tot;
+    landlordPop[pid] = ld;
+    farmerPopW[pid] = fm;
   }
 
   // ---- 10. 幸福度 & 效率（按省：三级市场消费/需求；阶级基础幸福/税负/政策修正；奴隶恒低） ----
@@ -908,11 +921,13 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
     for (const pop of ps.pops) {
       // ---- v0.9 收入按职业来源分流 ----
       if (pop.job === 'peasant' || pop.job === 'slave') {
-        // 农业：卖产品收入（省农业产出价值 × 份额；地主 landCoef 加权）——首都基建好/卖价高 → 农民不穷
-        const w = pop.job === 'slave' ? 0.2 : pop.class <= 3 ? classDef(pop.class).landCoef : 1;
-        pop.wage = agriTotal[pid] > 1e-9
-          ? (agriValue[pid] * 12 * w) / agriTotal[pid]
-          : (provWages[pid]?.[pop.job] ?? wages[pop.job] ?? 0);
+        // 农业：地主（阶级≤3）拿农业价值 40% 大份（土地资本）；农民/奴隶分 60%（奴隶 0.1 权重）——首都卖价高 → 地主农民都不穷
+        if (pop.class <= 3) {
+          pop.wage = landlordPop[pid] > 1e-9 ? (agriValue[pid] * 12 * 0.55) / landlordPop[pid] : 0;
+        } else {
+          const w = pop.job === 'slave' ? 0.1 : 1;
+          pop.wage = farmerPopW[pid] > 1e-9 ? (agriValue[pid] * 12 * 0.45 * w) / farmerPopW[pid] : 0;
+        }
       } else if (pop.job === 'shopkeeper') {
         // 店主：工资 × 物价综合（物价高 → 店主赚更多）
         pop.wage = (provWages[pid]?.shopkeeper ?? wages.shopkeeper ?? 0) * (0.7 + 0.3 * priceIdx);
@@ -924,6 +939,8 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
       }
       // 贵族多源：土地/经营附加
       if (pop.class <= 2) pop.wage += 0.3 * classDef(pop.class).landCoef;
+      // v0.9 阶级财富乘数：收入 = 职业收入 × 阶级乘数（贵族 ×2.5 / 奴役 ×0.3）——财富地位直接变现
+      pop.wage *= CLASS_WAGE_MULT[pop.class] ?? 1;
       // 收入 = 工资（劳动） + 投资收入（上层；年化计入）
       const effWage = pop.wage + (pop.investIncome * 12) / Math.max(pop.size, 1e-9);
       const wageFactor = effWage / BASE_WAGE[pop.job];
@@ -945,7 +962,9 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
       const satCoffee = satOf('coffee');
       const satTobacco = satOf('tobacco');
       const satAvg = (pop.sat.food + pop.sat.clothing + pop.sat.housing + pop.sat.fuel + satCoffee * 0.5 + satTobacco * 0.5) / 6;
-      pop.livingStd = clamp(60 * incomeRatio + 40 * satAvg, 0, 100);
+      // v0.9 阶级分化：收入端（相对全国均值）+ 阶级偏移（贵族 +35 / 奴役 -28）→ 贵族生活 ≈ 奴隶 5-10 倍
+      const shift = CLASS_STD_SHIFT[pop.class] ?? 0;
+      pop.livingStd = clamp(clamp(incomeRatio, 0, 2) * 50 + satAvg * 20 + shift, 0, 100);
       pop.expected = EXPECTED_STD[pop.job];
       // 不满：低于预期每点缺口 +1/月；满意则缓释
       if (pop.livingStd < pop.expected) pop.unrest += pop.expected - pop.livingStd;

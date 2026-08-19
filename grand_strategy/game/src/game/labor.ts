@@ -138,16 +138,17 @@ export function applyClassMobility(state: GameState, map: GameMap): void {
 
   for (const pid of provIds) {
     const ps = state.provinces[pid];
-    // 1) 向上流动（生活水平高于预期）
+    // 1) 向上流动（收入高于全国均值 25%：真实收入驱动，生活水平含阶级偏移不参与——避免新贵族稀释分化）
+    const upThreshold = Math.max(1e-9, (n.avgIncome ?? 0) * 1.25);
     for (const rule of UP_MOBILITY) {
       const { from, to } = rule;
       const candidates = ps.pops.filter((p) => p.class === from);
       for (const pop of candidates) {
         if (pop.size <= 0.0001) continue;
-        const stdFactor = pop.expected > 0 ? clamp(pop.livingStd / pop.expected, 0.5, 1.5) : 1;
-        if (stdFactor <= 1.15) continue; // 生活水平不足预期 115% 不向上
+        if (pop.wage <= upThreshold) continue; // 收入不足全国均值 125% 不向上
+        const incomeGap = clamp(pop.wage / Math.max(1e-9, upThreshold), 1, 2);
         const litFactor = lit >= rule.literacyReq ? 1 : 0.3;
-        const rate = Math.min(MOBILITY_CAP, rule.baseRate * litFactor * (stdFactor - 1.0));
+        const rate = Math.min(MOBILITY_CAP, rule.baseRate * litFactor * (incomeGap - 0.95));
         const amount = Math.min(pop.size * rate, pop.size * 0.5);
         if (amount <= 0) continue;
         let target = findClassPop(ps.pops, pop.job, pop.race, to);
@@ -156,12 +157,13 @@ export function applyClassMobility(state: GameState, map: GameMap): void {
         target.size += amount;
       }
     }
-    // 2) 向下流动（生活水平低迷）：class < 6，跌入 class+1（奴隶除外）
+    // 2) 向下流动（收入低于全国均值 60%）：class < 6，跌入 class+1（奴隶除外）
+    const downThreshold = Math.max(1e-9, (n.avgIncome ?? 0) * 0.6);
     const downCandidates = ps.pops.filter((p) => p.class < 6 && p.class >= 1 && p.size > 0.0001);
     for (const pop of downCandidates) {
-      const stdFactor = pop.expected > 0 ? pop.livingStd / pop.expected : 1;
-      if (stdFactor >= 0.7) continue;
-      const rate = 0.002 * (0.7 - stdFactor);
+      if (pop.wage >= downThreshold) continue;
+      const incomeGap = clamp(pop.wage / Math.max(1e-9, downThreshold), 0, 1);
+      const rate = 0.002 * (1 - incomeGap);
       const amount = Math.min(pop.size * rate, pop.size * 0.5);
       if (amount <= 0) continue;
       const to = Math.min(6, pop.class + 1) as ClassId;

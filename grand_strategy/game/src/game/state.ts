@@ -82,6 +82,8 @@ export interface NationState {
   capitalWealth: number;
   /** v0.9 建造力池（建造部门产出，建筑建造消耗；全国通用不耗运力，非市场资源） */
   buildPower: number;
+  /** v0.9 全国平均收入（pop 加权，阶级流动参照系：收入高于均值升、低于降） */
+  avgIncome: number;
   /** v0.9 战时状态：战时开放义务兵役（强制征兵）；平时禁止国家强行转职（靠待遇吸引） */
   warTime: boolean;
   /** 政体（义务兵役率/征兵强度判定） */
@@ -358,6 +360,7 @@ export function newGameState(playerNation: NationId, seed: number, map: GameMap)
       transportPolicy: 'auto',
       capitalWealth: 60, // 初始资本（资本家/银行家底子）
       buildPower: 40, // 初始建造力（可先建 3-4 个基础建筑）
+      avgIncome: 3,
       warTime: false,
       gov: def.gov,
       projects: [],

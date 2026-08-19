@@ -53,10 +53,13 @@ function main(): void {
   else ok('国库可玩（> -500）');
   if (n.capitalWealth > 60) ok(`投资池增长 ${(n.capitalWealth - 60).toFixed(1)}`); else issue('投资池未增长（私营不赚钱）');
 
-  // 2. 职业分布（12 职业占比）
+  // 2. 职业分布（12 职业占比）——仅玩家国家省（他国省为静态背景，不结算）
+  const nationProvIds = map.provinces
+    .filter((p) => p.owner === 'lorraine' && !p.isUndiscovered)
+    .map((p) => p.id);
   const jobMix = zeroJobMix();
-  for (const pid of Object.keys(state.provinces)) {
-    const ps = state.provinces[Number(pid)];
+  for (const pid of nationProvIds) {
+    const ps = state.provinces[pid];
     if (ps?.pops) for (const p of ps.pops) jobMix[p.job] += p.size;
   }
   const total = Object.values(jobMix).reduce((a, b) => a + b, 0) || 1;
@@ -68,8 +71,8 @@ function main(): void {
 
   // 3. 阶级分布（金字塔）
   const classMix: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0 };
-  for (const pid of Object.keys(state.provinces)) {
-    const ps = state.provinces[Number(pid)];
+  for (const pid of nationProvIds) {
+    const ps = state.provinces[pid];
     if (ps?.pops) for (const p of ps.pops) classMix[p.class] += p.size;
   }
   const classStr = [1, 2, 3, 4, 5, 6, 7].map((c) => `${(CLASS_DEFS as Record<number, { label: string }>)[c].label}:${(classMix[c] / total * 100).toFixed(0)}%`).join(' ');
@@ -78,8 +81,8 @@ function main(): void {
   // 4. 生活水平按阶级分化（贵族 vs 奴役）
   let stdByClass: Record<number, { sum: number; w: number }> = {};
   for (let c = 1; c <= 7; c++) stdByClass[c] = { sum: 0, w: 0 };
-  for (const pid of Object.keys(state.provinces)) {
-    const ps = state.provinces[Number(pid)];
+  for (const pid of nationProvIds) {
+    const ps = state.provinces[pid];
     if (ps?.pops) for (const p of ps.pops) { stdByClass[p.class].sum += p.livingStd * p.size; stdByClass[p.class].w += p.size; }
   }
   const avgOf = (c: number) => (stdByClass[c].w > 0 ? stdByClass[c].sum / stdByClass[c].w : 0);
