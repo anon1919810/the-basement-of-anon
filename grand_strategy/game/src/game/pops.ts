@@ -77,7 +77,7 @@ export const NEED_PER_WAN: Record<GoodId, number> = {
   wheat: 0.001, // 细粮（上层多，消费矩阵 C 阶段细化）
   meat: 0.0015,
   clothing: 0.004, // v0.9 平衡：0.006→0.004（穿衣需求更现实）
-  coal: 0.005, // 燃料需求并入煤炭
+  coal: 0.006, // 燃料需求（v0.9 平衡：0.005→0.006，消煤过剩不过头）
   fish: 0.002, // 渔获作为粮食替代（沿海民食）
   sugar: 0.0006,
   coffee: 0.0004,

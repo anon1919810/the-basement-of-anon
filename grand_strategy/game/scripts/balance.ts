@@ -25,6 +25,8 @@ interface MonthRec {
   profitPos: number;
   profitNeg: number;
   loss: number;
+  avgStd: number;      // 平均生活水平（全省 POP 加权）
+  unrestful: number;   // 不满 ≥20 的 POP 数（改行前兆）
 }
 
 function provAvgPrice(state: GameState, g: string): number {
@@ -36,9 +38,22 @@ function provAvgPrice(state: GameState, g: string): number {
   return w > 0 ? s / w : BASE_PRICE[g as never];
 }
 
-// 温和策略：每月投一个"产出<需求"的商品建筑（补缺口；私营自动进行）
+// 温和策略：运力价高优先建基建（破死循环）；否则补"产出<需求"的商品建筑（私营自动进行）
 function investBalanced(state: GameState, map: ReturnType<typeof loadMap>): void {
   const n = state.nations[state.playerNation];
+  // 运力价 > 2.2×base → 先修基建（road 便宜/port 沿海）
+  if (n.market.transport.price > 2.2 * BASE_PRICE.transport) {
+    for (const kind of ['road', 'port', 'lighthouse'] as const) {
+      const def = BUILDING_DEFS[kind];
+      for (const p of map.provinces) {
+        if (p.owner !== 'lorraine' || p.isUndiscovered) continue;
+        const unlock = buildingUnlock(map, kind, p, n.infra, { stocks: n.stocks, projects: n.projects, literacy: n.literacy });
+        if (!unlock.ok) continue;
+        startInvestment(state, map, kind, p.id);
+        return;
+      }
+    }
+  }
   // 找缺口商品
   let best: { g: string; gap: number } | null = null;
   for (const g of GOODS_LIST) {
@@ -76,6 +91,17 @@ function record(state: GameState): MonthRec {
     const ret = p.lastRevenue - p.lastInputCost - def.opCost;
     if (ret >= 0) profitPos++; else { profitNeg++; if (ret < -def.opCost) loss++; }
   }
+  // 生活水平统计
+  let stdSum = 0, stdW = 0, unrestful = 0;
+  for (const pid of Object.keys(state.provinces)) {
+    const ps = state.provinces[Number(pid)];
+    if (!ps || !ps.pops) continue;
+    for (const pop of ps.pops) {
+      stdSum += pop.livingStd * pop.size;
+      stdW += pop.size;
+      if (pop.unrest >= 20) unrestful++;
+    }
+  }
   return {
     day: state.day,
     price,
@@ -87,6 +113,8 @@ function record(state: GameState): MonthRec {
     profitPos,
     profitNeg,
     loss,
+    avgStd: stdW > 0 ? stdSum / stdW : 0,
+    unrestful,
   };
 }
 
@@ -118,10 +146,10 @@ function main(): void {
   build('cottonFarm', (p) => provinceHasResource(p, 'cotton'));
   build('textile', (p) => provinceHasResource(p, 'cotton'));
   build('clothingWorks', (p) => provinceHasResource(p, 'cotton') || provinceHasResource(p, 'farmland'));
-  build('lumberCamp', (p) => provinceHasResource(p, 'timber'));
+  build('road', (p) => provinceHasResource(p, 'stone'));
+  build('port', (p) => true);
   build('fishFarm', (p) => true);
   build('mill', (p) => provinceHasResource(p, 'farmland'));
-  build('port', (p) => true);
 
   const recs: MonthRec[] = [];
   for (let d = 0; d < YEARS * DAYS_PER_YEAR; d++) {
@@ -150,6 +178,7 @@ function main(): void {
   const last = recs[recs.length - 1];
   console.log(`\n=== 终局（${last.day} 日）===\n国库 ${last.treasury.toFixed(0)} · 资本池 ${last.capitalWealth.toFixed(0)} · 运力价 ${last.transpPrice.toFixed(2)}（base 1.6）· 运力库存 ${last.transpStock.toFixed(1)}`);
   console.log(`建筑：盈利 ${last.profitPos} / 亏损 ${last.profitNeg}（严重 ${last.loss}）`);
+  console.log(`生活水平：均值 ${last.avgStd.toFixed(1)} · 不满 POP ${last.unrestful} 个`);
 
   // ---- 平衡警告 ----
   console.log('\n=== 平衡警告 ===');

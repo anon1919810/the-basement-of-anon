@@ -320,7 +320,7 @@ export function newGameState(playerNation: NationId, seed: number, map: GameMap)
       const ps = zeroGoods();
       for (const g of GOODS_LIST) ps[g] = initial[g] * share;
       // v0.9 初始运力库存：沿海省给基础运力（现有港口/码头），破「无运力→无贸易→无钱建基建」死循环
-      ps.transport = isCoastal(map, p) ? 12 : 6;
+      ps.transport = isCoastal(map, p) ? 18 : 10;
       provStocks[p.id] = ps;
       exportRights[p.id] = isCoastal(map, p);
     }

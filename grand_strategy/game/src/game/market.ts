@@ -56,7 +56,7 @@ export const BASE_PRICE: Record<GoodId, number> = {
   lumber: 1.7, cloth: 2.0, iron: 2.6, copper: 3.0, steel: 3.4,
   flour: 2.8, sugar: 3.2, leather: 2.4, gunpowder: 2.8,
   dynamite: 3.6, machines: 4.2,
-  tools: 3.0, swords: 3.4, muskets: 4.0, cannons: 4.6,
+  tools: 2.7, swords: 3.4, muskets: 4.0, cannons: 4.6,
   sailShip: 5.0, clothing: 1.8, fineFood: 4.0, luxury: 5.0, transport: 1.6,
 };
 
@@ -69,7 +69,7 @@ export const WORLD_PRICE: Record<GoodId, number> = {
   lumber: 2.3, cloth: 2.8, iron: 3.4, copper: 3.8, steel: 4.4,
   flour: 3.6, sugar: 4.0, leather: 3.2, gunpowder: 3.6,
   dynamite: 4.6, machines: 5.4,
-  tools: 4.0, swords: 4.4, muskets: 5.2, cannons: 6.0,
+  tools: 3.4, swords: 4.4, muskets: 5.2, cannons: 6.0,
   sailShip: 6.4, clothing: 2.6, fineFood: 5.2, luxury: 6.0, transport: 2.2,
 };
 
@@ -93,8 +93,8 @@ export const BASE_TRADE_CAP: Record<GoodId, number> = {
 /** 关税税率已迁移至 tax.ts（连续滑块，economy 传入 tariffRate） */
 /** 成本传导过手率：输入品税价差 → 成品价格上浮的比例（0.85 = 85% 传导） */
 export const COST_PUSH_PASS = 0.85;
-/** 贸易吨位运力消耗系数（每吨调运/出口吃多少运力，v0.9 阶段 B；0.08 实测调） */
-export const TRADE_TRANSPORT = 0.08;
+/** 贸易吨位运力消耗系数（每吨调运/出口吃多少运力，v0.9；0.02 平衡后：运力耐用，基础基建可撑贸易） */
+export const TRADE_TRANSPORT = 0.02;
 
 /** 价格信号跨层传导权重（v0.8：省价独立定价，仅保留县←省传导） */
 export const BLEND_COUNTY_FROM_PROV = 0.2; // 本地价格 = 县供需比 × (1-0.2) + 省价格信号 0.2
@@ -488,7 +488,7 @@ export function settleMarket(input: MarketInput, markets: MarketState): MarketSn
       if (out > 1e-9) {
         stock[pid] -= out;
         freightTonnage += out;
-        provFreight[pid] = (provFreight[pid] ?? 0) + out;
+        if (g !== 'transport') provFreight[pid] = (provFreight[pid] ?? 0) + out; // 运力商品自身调运不计吨位（防自指吃运力）
       }
       if (inn > 1e-9) {
         cons[pid] += inn;
@@ -513,7 +513,7 @@ export function settleMarket(input: MarketInput, markets: MarketState): MarketSn
             stock[pid] -= e;
             rem -= e;
             exported += e;
-            provFreight[pid] = (provFreight[pid] ?? 0) + e;
+            if (g !== 'transport') provFreight[pid] = (provFreight[pid] ?? 0) + e;
             getProvMarket(markets, pid)[g].exported = e;
           }
         }
@@ -526,7 +526,7 @@ export function settleMarket(input: MarketInput, markets: MarketState): MarketSn
             rem -= e;
             exported += e;
             freightTonnage += e; // 内陆 → 口岸 的运力吨位
-            provFreight[pid] = (provFreight[pid] ?? 0) + e;
+            if (g !== 'transport') provFreight[pid] = (provFreight[pid] ?? 0) + e;
             getProvMarket(markets, pid)[g].exported = e;
           }
         }

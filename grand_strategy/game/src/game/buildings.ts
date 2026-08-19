@@ -269,7 +269,7 @@ export const BUILDING_DEFS: Record<BuildingKind, BuildingDef> = {
   toolWorks: {
     kind: 'toolWorks', label: '工具厂', category: 'fine', skill: 'engineer',
     inputs: { iron: 1.5 }, anyOf: ['machines', 'steel'], opt: { transport: 0.2 },
-    output: 'tools', capacity: 1.5, cost: 220, duration: 8, opCost: 1.2, infra: {},
+    output: 'tools', capacity: 2.2, cost: 220, duration: 8, opCost: 1.2, infra: {},
     requireGood: 'iron', desc: '铁锭（/机器/钢）→ 工具；一切加强项的钥匙。',
   },
   armory: {
