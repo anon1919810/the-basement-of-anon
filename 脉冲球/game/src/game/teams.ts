@@ -1,4 +1,5 @@
-// 球队：9 人制 2-3-2-1（门将/后卫2/中场3/前腰2/前锋1），端明ちゃん风格队名
+// 球队：9 人制（1 门将 + 8 场上），位置四类 GK/DF/MF/FW
+// 阵型预设：平衡 1-3-3-2 / 中场控制 1-2-4-1 / 防守 1-4-3-1 / 快反 1-2-3-2
 import type { RNG } from './rng';
 import { mulberry32 } from './rng';
 import type { Position } from './attributes';
@@ -19,13 +20,26 @@ export interface Team {
   tactics: { aerial: number; pressing: number; line: number };
 }
 
-export const FORMATION: Position[] = ['GK', 'DF', 'DF', 'MF', 'MF', 'MF', 'AM', 'AM', 'FW'];
+export type FormationName = '平衡' | '中场控制' | '防守' | '快反';
+
+export const FORMATIONS: Record<FormationName, Position[]> = {
+  '平衡': ['GK', 'DF', 'DF', 'DF', 'MF', 'MF', 'MF', 'FW', 'FW'],
+  '中场控制': ['GK', 'DF', 'DF', 'MF', 'MF', 'MF', 'MF', 'FW'],
+  '防守': ['GK', 'DF', 'DF', 'DF', 'DF', 'MF', 'MF', 'MF', 'FW'],
+  '快反': ['GK', 'DF', 'DF', 'MF', 'MF', 'MF', 'FW', 'FW'],
+};
 
 const IMPERIAL = ['洛伦茨', '卡尔海因茨', '迪特里希', '施特凡', '弗里德里希', '汉斯', '沃尔夫冈', '康拉德', '奥托'];
 const LORRAINE = ['让', '皮埃尔', '吕克', '米歇尔', '安托万', '克洛德', '菲利普', '巴蒂斯特', '阿尔诺'];
 
-export function createTeam(rng: RNG, name: string, short: string, names: string[]): Team {
-  const players: Player[] = FORMATION.map((pos, i) => ({
+export function createTeam(
+  rng: RNG,
+  name: string,
+  short: string,
+  names: string[],
+  formation: Position[] = FORMATIONS['平衡'],
+): Team {
+  const players: Player[] = formation.map((pos, i) => ({
     id: i,
     name: names[i],
     number: i + 1,
@@ -44,9 +58,9 @@ export function createTeam(rng: RNG, name: string, short: string, names: string[
   };
 }
 
-export function createDefaultTeams(seed: number): [Team, Team] {
+export function createDefaultTeams(seed: number, formation?: Position[]): [Team, Team] {
   const rng = mulberry32(seed);
-  const a = createTeam(rng, '帝国', '帝国', IMPERIAL);
-  const b = createTeam(rng, '洛林', '洛林', LORRAINE);
+  const a = createTeam(rng, '帝国', '帝国', IMPERIAL, formation);
+  const b = createTeam(rng, '洛林', '洛林', LORRAINE, formation);
   return [a, b];
 }

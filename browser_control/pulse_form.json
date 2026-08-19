@@ -1,0 +1,11 @@
+[
+  {"act": "wait", "ms": 1500},
+  {"act": "eval", "js": "[...document.querySelectorAll('.formation-pick select option')].map(o=>o.textContent)"},
+  {"act": "eval", "js": "(()=>{const s=document.querySelector('.formation-pick select'); s.value='防守'; s.dispatchEvent(new Event('change',{bubbles:true})); return s.value})()"},
+  {"act": "wait", "ms": 400},
+  {"act": "eval", "js": "[...document.querySelectorAll('button')].find(b=>b.innerText.includes('开始比赛'))?.click()"},
+  {"act": "wait", "ms": 4500},
+  {"act": "eval", "js": "({ready: window.__pulse3dReady, pb: window.__pb, body: document.body.innerText.includes('帝国') ? 'OK' : 'ERR'})"},
+  {"act": "wait", "ms": 6000},
+  {"act": "eval", "js": "({pb: window.__pb, score: document.querySelector('.score')?.textContent})"}
+]

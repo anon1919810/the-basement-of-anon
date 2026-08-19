@@ -5,6 +5,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { MatchEvent } from '../game/match';
 import { FIELD_W, FIELD_H } from '../game/match';
+import type { Position } from '../game/attributes';
 import type { Team } from '../game/teams';
 
 export const PULSE_COLORS = ['#9ca3af', '#9ca3af', '#3b82f6', '#22c55e', '#eab308', '#ef4444'];
@@ -83,23 +84,34 @@ function eventIndexAt(events: MatchEvent[], t: number): number {
   return ans;
 }
 
-// ---- 阵型跑位（表现层，事件流驱动）：进攻 2-3-2-1 围绕球展开 / 防守压缩布防 / 无球前插·回追 ----
-// 偏移表：fwd 沿进攻方向为正（进攻=朝对方球门；防守=朝本方球门回撤深度），side 为横向
-const ATT_OFFS: [number, number][] = [
-  [-4, -4.5], [-4, 4.5],        // 后卫 ×2：球后一层
-  [-2, 0], [-3, -8], [-3, 8],   // 中场 ×3：中路靠后 + 双边拉开
-  [5, -6.5], [5, 6.5],          // 前腰 ×2：球前一层
-  [10, 0],                      // 前锋 ×1：最前
-];
-const DEF_OFFS: [number, number][] = [
-  [3, -3.5], [3, 3.5],          // 后卫线贴近球
-  [7.5, 0], [9, -5.5], [9, 5.5],// 中场回撤
-  [14, -4.5], [14, 4.5],        // 前腰更深
-  [19, 0],                      // 前锋最深，护本方禁区
-];
-// 阵型随球的横向偏转权重：前场跟球、后场保持中轴（球在哪一侧阵型偏转）
-const ATT_TILT = [0.5, 0.5, 0.6, 0.6, 0.6, 0.85, 0.85, 0.95];
-const DEF_TILT = [0.8, 0.8, 0.6, 0.6, 0.6, 0.45, 0.45, 0.35];
+// ---- 阵型跑位（表现层，事件流驱动）：进攻围绕球展开 / 防守压缩布防 / 无球前插·回追 ----
+// 偏移按位置四类生成（前场沿进攻方向为正），横向组内均分；tilt = 阵型随球横向偏转权重
+function buildOffsets(positions: Position[]): {
+  att: [number, number][]; def: [number, number][]; tilt: number[]; tiltDef: number[];
+} {
+  const att: [number, number][] = [];
+  const def: [number, number][] = [];
+  const tilt: number[] = [];
+  const tiltDef: number[] = [];
+  const cnt: Record<string, number> = { DF: 0, MF: 0, FW: 0 };
+  const SO_ATT: Record<string, number[]> = { DF: [-4, 4, 0], MF: [-7, 7, 0, -3.5, 3.5], FW: [-6, 6, 0] };
+  const SO_DEF: Record<string, number[]> = { DF: [-3.5, 3.5, 0], MF: [-5.5, 5.5, 0, -3, 3], FW: [-4.5, 4.5, 0] };
+  const FO_ATT: Record<string, number> = { DF: -4, MF: -0.5, FW: 9 };
+  const FO_DEF: Record<string, number> = { DF: 3, MF: 8, FW: 17 };
+  const T: Record<string, number> = { DF: 0.5, MF: 0.7, FW: 0.9 };    // 进攻：前场跟球强
+  const TD: Record<string, number> = { DF: 0.8, MF: 0.6, FW: 0.4 };  // 防守：后卫跟球、前锋护禁区
+  for (let i = 1; i < positions.length; i++) {
+    const pos = positions[i];
+    const k = cnt[pos] ?? 0;
+    cnt[pos] = k + 1;
+    att.push([FO_ATT[pos], SO_ATT[pos][k % SO_ATT[pos].length]]);
+    def.push([FO_DEF[pos], SO_DEF[pos][k % SO_DEF[pos].length]]);
+    tilt.push(T[pos]);
+    tiltDef.push(TD[pos]);
+  }
+  return { att, def, tilt, tiltDef };
+}
+
 // 长传/反击/球权转换类事件 → 触发无球前插与回追
 const RUN_TRIGGERS = new Set([
   'pass', 'tackle', 'throwin', 'kickoff', 'goal',
@@ -181,6 +193,11 @@ export class MatchScene {
   private actorNames: [string[], string[]];
   private runs: (RunState | null)[] = new Array(18).fill(null);
   private lastIdx = -1;
+  private attOffs: [number, number][] = [];
+  private defOffs: [number, number][] = [];
+  private attTilt: number[] = [];
+  private defTilt: number[] = [];
+  private teamPos: Position[][] = [];
 
   constructor(container: HTMLElement, teams: [Team, Team], events: MatchEvent[]) {    this.events = events;
     this.actorNames = [
@@ -225,6 +242,14 @@ export class MatchScene {
     this.halo = this.buildHalo();
     this.actorRing = this.buildActorRing();
     this.buildPlayers(teams);
+
+    // 阵型偏移（表现层）按位置四类生成，两队同阵型
+    this.teamPos = [teams[0].players.map((p) => p.position), teams[1].players.map((p) => p.position)];
+    const offs = buildOffsets(this.teamPos[0]);
+    this.attOffs = offs.att;
+    this.defOffs = offs.def;
+    this.attTilt = offs.tilt;
+    this.defTilt = offs.tiltDef;
 
     // 初始落位：0 秒事件的球位
     const e0 = events.length ? events[eventIndexAt(events, 0)] : undefined;
@@ -508,7 +533,7 @@ export class MatchScene {
     return (h ^ (h >>> 16)) >>> 0;
   }
 
-  // 事件驱动无球跑位：进攻方前锋必插 + 一名边前腰前插，防守方 1 名后卫回追
+  // 事件驱动无球跑位：前锋必插 + 一名中场前插，防守方 1 名后卫回追（按位置四类查找，兼容任意阵型）
   private maybeTriggerRuns(idx: number, e: MatchEvent, now: number): void {
     if (!RUN_TRIGGERS.has(e.type)) return;
     const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
@@ -517,27 +542,40 @@ export class MatchScene {
     const dirF = att === 0 ? 1 : -1; // 进攻推进方向
     const dur = 850 + (this.hash2(idx, 7) % 500); // 0.85~1.35 真实秒，任何倍速/暂停都可见
     const r01 = (k: number) => (this.hash2(idx, k) % 1000) / 1000;
+    const attPos = this.teamPos[att];
+    const defPos = this.teamPos[def];
 
     // 前锋前插（必触发），向对方球门冲刺
-    this.runs[att * 9 + 8] = {
-      until: now + dur,
-      tx: clamp(e.x + dirF * (15 + r01(1) * 6), 2, FIELD_W - 2),
-      ty: clamp(e.y + (r01(2) - 0.5) * 7, 2, FIELD_H - 2),
-    };
-    // 一名边前腰（左右交替）沿边路前插
-    const wide = this.hash2(idx, 3) % 2 === 0 ? 6 : 7;
-    this.runs[att * 9 + wide] = {
-      until: now + dur * 0.85,
-      tx: clamp(e.x + dirF * (10 + r01(5) * 5), 2, FIELD_W - 2),
-      ty: clamp(e.y + (wide === 6 ? -6 : 6) + (r01(6) - 0.5) * 3, 2, FIELD_H - 2),
-    };
+    const fw = attPos.lastIndexOf('FW');
+    if (fw > 0) {
+      this.runs[att * 9 + fw] = {
+        until: now + dur,
+        tx: clamp(e.x + dirF * (15 + r01(1) * 6), 2, FIELD_W - 2),
+        ty: clamp(e.y + (r01(2) - 0.5) * 7, 2, FIELD_H - 2),
+      };
+    }
+    // 一名中场前插（hash 交替选择）
+    const mfs: number[] = [];
+    for (let i = 1; i < 9; i++) if (attPos[i] === 'MF') mfs.push(i);
+    if (mfs.length) {
+      const wide = mfs[this.hash2(idx, 3) % mfs.length];
+      this.runs[att * 9 + wide] = {
+        until: now + dur * 0.85,
+        tx: clamp(e.x + dirF * (10 + r01(5) * 5), 2, FIELD_W - 2),
+        ty: clamp(e.y + (wide % 2 === 0 ? -6 : 6) + (r01(6) - 0.5) * 3, 2, FIELD_H - 2),
+      };
+    }
     // 防守方 1 名后卫回追，向本方球门方向收
-    const df = (this.hash2(idx, 9) % 2) + 1;
-    this.runs[def * 9 + df] = {
-      until: now + dur * 1.1,
-      tx: clamp(e.x + dirF * 8, 2, FIELD_W - 2),
-      ty: clamp(HALF_H + (e.y - HALF_H) * 0.4, 2, FIELD_H - 2),
-    };
+    const dfs: number[] = [];
+    for (let i = 1; i < 9; i++) if (defPos[i] === 'DF') dfs.push(i);
+    if (dfs.length) {
+      const df = dfs[this.hash2(idx, 9) % dfs.length];
+      this.runs[def * 9 + df] = {
+        until: now + dur * 1.1,
+        tx: clamp(e.x + dirF * 8, 2, FIELD_W - 2),
+        ty: clamp(HALF_H + (e.y - HALF_H) * 0.4, 2, FIELD_H - 2),
+      };
+    }
   }
 
   // 阵型落位：控球方以球为中心展开攻击阵型（纵深分层 + 横向拉开 + 随球偏转），
@@ -554,8 +592,8 @@ export class MatchScene {
         x: gkX,
         y: clamp(HALF_H + (by - HALF_H) * 0.3, HALF_H - 3.5, HALF_H + 3.5),
       };
-      const offs = isAtt ? ATT_OFFS : DEF_OFFS;
-      const tilts = isAtt ? ATT_TILT : DEF_TILT;
+      const offs = isAtt ? this.attOffs : this.defOffs;
+      const tilts = isAtt ? this.attTilt : this.defTilt;
       for (let i = 1; i <= 8; i++) {
         const [fo, so] = offs[i - 1];
         const ay = HALF_H + (by - HALF_H) * tilts[i - 1]; // 球在哪一侧，该层随之偏转

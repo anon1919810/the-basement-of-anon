@@ -1,7 +1,8 @@
 // 球员属性（0-99）：技术/身体/精神 + 门将专属
+// 位置四类：门将 / 后卫 / 中场 / 前锋（前腰并入中场）
 import type { RNG } from './rng';
 
-export type Position = 'GK' | 'DF' | 'MF' | 'AM' | 'FW';
+export type Position = 'GK' | 'DF' | 'MF' | 'FW';
 
 export interface Attributes {
   // 技术
@@ -48,8 +49,7 @@ export function randomAttributes(rng: RNG, pos: Position): Attributes {
   } else {
     const up = (k: keyof Attributes, n: number) => { A[k] = clamp(A[k] + Math.floor(rng() * n)); };
     if (pos === 'DF') { up('strength', 20); up('anticipation', 20); up('tactical', 20); up('speed', 12); }
-    if (pos === 'MF') { up('passing', 20); up('control', 18); up('spatial', 18); up('stamina', 15); }
-    if (pos === 'AM') { up('passing', 15); up('dribble', 20); up('spatial', 18); up('shooting', 10); }
+    if (pos === 'MF') { up('passing', 20); up('control', 18); up('spatial', 18); up('stamina', 15); up('dribble', 12); }
     if (pos === 'FW') { up('shooting', 20); up('calm', 18); up('speed', 15); up('dribble', 10); }
   }
   return A;

@@ -201,7 +201,7 @@ function doPass(m: MatchState, attIdx: 0 | 1, defIdx: 0 | 1): MatchEvent {
   const rec = receivers[pickIndex(m.rng(), weights)];
   const receiver = rec.p;
 
-  const TEND: Record<Position, number> = { FW: 14, AM: 9, MF: 3, DF: -4, GK: -12 };
+  const TEND: Record<Position, number> = { FW: 14, MF: 6, DF: -4, GK: -12 };
   const rx = clamp(m.ball.x + dir * TEND[receiver.position] * (0.6 + m.rng() * 0.8), 2, FIELD_W - 2);
   const ry = clamp(m.ball.y + (m.rng() - 0.5) * 16, 2, FIELD_H - 2);
 
@@ -211,7 +211,7 @@ function doPass(m: MatchState, attIdx: 0 | 1, defIdx: 0 | 1): MatchEvent {
   const offsidePos = attIdx === 0 ? rx > defLine + 2 : rx < defLine - 2;
   if (inOppHalf && offsidePos) {
     const defTactical = def.players.reduce((s, p) => s + p.attrs.tactical, 0) / (def.players.length * 100);
-    const fwdFactor = receiver.position === 'FW' || receiver.position === 'AM' ? 1 : 0.35;
+    const fwdFactor = receiver.position === 'FW' ? 1 : 0.35;
     const offChance = 0.02 + defTactical * fwdFactor * 0.05;
     if (m.rng() < offChance) {
       m.pulse = 0;
