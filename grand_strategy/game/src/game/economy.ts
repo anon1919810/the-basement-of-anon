@@ -932,7 +932,10 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
         : 1;
       const realIncome = effWage * (priceIdx / Math.max(0.4, natPriceIdx)); // 省工资 × 物价溢价 / 全国均价
       const incomeRatio = realIncome / BASE_WAGE[pop.job];
-      const satAvg = (pop.sat.food + pop.sat.clothing + pop.sat.housing + pop.sat.fuel) / 4;
+      // v0.9 满足度含成瘾品（咖啡/烟草）与服装：成瘾品缺货 → 生活水平降（需求非摆设；刚性 = 固定量不随价变）
+      const satCoffee = satOf('coffee');
+      const satTobacco = satOf('tobacco');
+      const satAvg = (pop.sat.food + pop.sat.clothing + pop.sat.housing + pop.sat.fuel + satCoffee * 0.5 + satTobacco * 0.5) / 6;
       pop.livingStd = clamp(50 * incomeRatio + 50 * satAvg, 0, 100);
       pop.expected = EXPECTED_STD[pop.job];
       // 不满：低于预期每点缺口 +1/月；满意则缓释

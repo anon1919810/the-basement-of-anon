@@ -1093,6 +1093,10 @@ export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSp
                             <td>{RACE_LABEL[pop.race]}{JOB_LABEL[pop.job]}<em className="dim">·{CLASS_DEFS[pop.class].label}</em></td>
                             <td>{pop.size.toFixed(1)}万</td>
                             <td className={pop.happiness >= 60 ? 'pos' : pop.happiness >= 40 ? '' : 'neg'}>{pop.happiness.toFixed(0)}</td>
+                            <td title={`生活水平 ${pop.livingStd.toFixed(0)} / 预期 ${pop.expected}`}>
+                              生活{pop.livingStd.toFixed(0)}<em className="dim">/预期{pop.expected}</em>
+                              {pop.unrest >= 5 ? <em className="neg">·不满{pop.unrest.toFixed(0)}</em> : null}
+                            </td>
                             <td>₭{pop.wage.toFixed(1)}{pop.investIncome > 0.01 ? <em className="dim">+投{pop.investIncome.toFixed(1)}</em> : null}</td>
                             <td>
                               {next ? (
