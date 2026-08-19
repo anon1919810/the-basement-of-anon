@@ -61,6 +61,11 @@ assert data["record_id"] == 999, "应走打桩的入库"
 names = [e.get("名称") for e in data["entries"]]
 print("提取到:", names[:6])
 assert any("黄鹤楼" in n for n in names), "应包含黄鹤楼"
-print("[PASS] T5 提取 API：鉴权→类型校验→docx提取→入库桩 全通")
+# 引文格式：《书名》："引文"
+for e in data["entries"]:
+    q = e.get("历史文献") or ""
+    if q:
+        assert q.startswith("《测试文献》：“"), f"引文应带书名格式，实际：{q[:30]}"
+print("[PASS] T5 提取 API：鉴权→类型校验→docx提取→入库桩→引文《书名》格式 全通")
 
 print("\nALL EXTRACT TESTS PASS")

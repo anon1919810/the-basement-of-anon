@@ -94,6 +94,11 @@ async def extract(
             all_entries.extend(extract_mod.process_pdf_file(sp, book_name or "未命名文献"))
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
+    # 历史文献标注来源：《书名》："引文"（与命令行导出格式一致）
+    for _e in all_entries:
+        _q = _e.get("历史文献")
+        if _q:
+            _e["历史文献"] = extract_mod.format_quote(_q, book_name)
     record_id = _finish(user, book_name, ", ".join(os.path.basename(p) for p in save_paths), all_entries)
     return {"ok": True, "record_id": record_id, "entry_count": len(all_entries), "entries": all_entries}
 
@@ -122,6 +127,11 @@ async def extract_stream(
                        "message": f"处理 {idx}/{total}：{name}"})
                 entries = extract_mod.process_pdf_file(sp, book_name or "未命名文献")
                 all_entries.extend(entries)
+            # 历史文献标注来源：《书名》："引文"
+            for _e in all_entries:
+                _q = _e.get("历史文献")
+                if _q:
+                    _e["历史文献"] = extract_mod.format_quote(_q, book_name)
             _emit({"type": "stage", "stage": "merging",
                    "message": f"合并完成，共 {len(all_entries)} 条"})
             record_id = _finish(user, book_name,
