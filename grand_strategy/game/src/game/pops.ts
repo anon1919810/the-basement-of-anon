@@ -33,11 +33,12 @@ export const RACE_LABEL: Record<RaceId, string> = {
   norman: '诺曼',
 };
 
-export const JOBS: JobId[] = ['slave', 'peasant', 'worker', 'technician', 'clerk', 'engineer', 'shopkeeper', 'soldier', 'bureaucrat', 'teacher', 'priest', 'merchant', 'capitalist', 'banker'];
+export const JOBS: JobId[] = ['slave', 'peasant', 'worker', 'technician', 'clerk', 'engineer', 'shopkeeper', 'soldier', 'sailor', 'marine', 'bureaucrat', 'teacher', 'priest', 'merchant', 'capitalist', 'banker'];
 export const JOB_LABEL: Record<JobId, string> = {
   slave: '奴隶', peasant: '自耕农', worker: '工人', technician: '技术工人',
   clerk: '职员', engineer: '工程师', shopkeeper: '店主',
-  soldier: '军人', bureaucrat: '官僚', teacher: '教师', priest: '教士',
+  soldier: '军人', sailor: '水手', marine: '海员',
+  bureaucrat: '官僚', teacher: '教师', priest: '教士',
   merchant: '商人', capitalist: '资本家', banker: '银行家',
 };
 
@@ -45,7 +46,7 @@ export const JOB_LABEL: Record<JobId, string> = {
 export function zeroJobMix(): Record<JobId, number> {
   return {
     slave: 0, peasant: 0, worker: 0, technician: 0, clerk: 0, engineer: 0,
-    shopkeeper: 0, soldier: 0, bureaucrat: 0, teacher: 0, priest: 0, merchant: 0, capitalist: 0, banker: 0,
+    shopkeeper: 0, soldier: 0, sailor: 0, marine: 0, bureaucrat: 0, teacher: 0, priest: 0, merchant: 0, capitalist: 0, banker: 0,
   };
 }
 
@@ -59,8 +60,9 @@ export const GOOD_LABEL: Record<GoodId, string> = {
   flour: '面粉', sugar: '糖', leather: '皮革', gunpowder: '火药',
   dynamite: '炸药', machines: '机器', paper: '纸张',
   tools: '工具', swords: '刀剑', muskets: '燧发枪', cannons: '火炮',
-  sailShip: '帆船', clothing: '服装', fineFood: '高级食物',
-  luxury: '奢侈品', liquor: '烈酒', wine: '葡萄酒', train: '火车', transport: '运力',
+  clothing: '服装', fineFood: '高级食物',
+  luxury: '奢侈品', merchantShip: '商船', navyShip: '军舰',
+  liquor: '烈酒', wine: '葡萄酒', train: '火车', transport: '运力',
 };
 
 export const NEEDS: NeedId[] = ['food', 'clothing', 'housing', 'fuel'];
@@ -89,7 +91,7 @@ export const NEED_PER_WAN: Record<GoodId, number> = {
   timber: 0, cotton: 0, fur: 0, ironOre: 0, copperOre: 0, sulfur: 0, salt: 0, stone: 0, oil: 0,
   lumber: 0, cloth: 0, iron: 0, copper: 0, steel: 0,
   flour: 0, leather: 0, gunpowder: 0, dynamite: 0, machines: 0, paper: 0,
-  tools: 0, swords: 0, muskets: 0, cannons: 0, sailShip: 0, luxury: 0, train: 0, transport: 0,
+  tools: 0, swords: 0, muskets: 0, cannons: 0, merchantShip: 0, navyShip: 0, luxury: 0, train: 0, transport: 0,
 };
 
 /** 每万从业者月基础产出（基准单位：万吨/万件；军人/官僚/教师为俸禄/服务职业不产商品） */
@@ -102,6 +104,8 @@ export const JOB_OUTPUT_PER_WAN: Record<JobId, number> = {
   engineer: 0.002,
   shopkeeper: 0.001, // 店主：小商业（小资产阶级）
   soldier: 0,        // 军人：吃军饷
+  sailor: 0,         // 水手：海运劳动力（商船运营，v0.15）
+  marine: 0,         // 海员：军舰服役（v0.15）
   bureaucrat: 0.002, // 官僚：行政管理产出
   teacher: 0,        // 教师：教育服务（大学资质加成）
   priest: 0,         // 教士：宗教服务（教会建筑加成）
@@ -118,6 +122,8 @@ export const JOB_GOOD: Record<JobId, GoodId> = {
   engineer: 'tools',
   shopkeeper: 'luxury',
   soldier: 'food',
+  sailor: 'luxury',
+  marine: 'luxury',
   bureaucrat: 'clothing',
   teacher: 'clothing',
   priest: 'clothing',
@@ -139,7 +145,7 @@ export const FARMER_EXTRA_OUTPUT: Record<GoodId, number> = {
   sugar: 0.0008,
   coffee: 0, tobacco: 0, coal: 0, ironOre: 0, copperOre: 0, sulfur: 0, stone: 0, oil: 0,
   lumber: 0, cloth: 0, iron: 0, copper: 0, steel: 0, flour: 0, leather: 0, gunpowder: 0, dynamite: 0, machines: 0, paper: 0,
-  tools: 0, swords: 0, muskets: 0, cannons: 0, sailShip: 0, clothing: 0, fineFood: 0, luxury: 0, liquor: 0, wine: 0, train: 0, transport: 0,
+  tools: 0, swords: 0, muskets: 0, cannons: 0, merchantShip: 0, navyShip: 0, clothing: 0, fineFood: 0, luxury: 0, liquor: 0, wine: 0, train: 0, transport: 0,
 };
 
 /** 矿工产出：煤（矿藏省）/ 铁 / 铜 / 硫 / 石料（矿藏省）；无矿藏省产出 0（资源修正：矿工需矿场） */
@@ -151,7 +157,7 @@ export const MINER_OUTPUT: Record<GoodId, number> = {
   stone: 0.015,
   food: 0, wheat: 0, timber: 0, cotton: 0, fur: 0, salt: 0, fish: 0, meat: 0, sugar: 0, coffee: 0, tobacco: 0, oil: 0,
   lumber: 0, cloth: 0, iron: 0, copper: 0, steel: 0, flour: 0, leather: 0, gunpowder: 0, dynamite: 0, machines: 0, paper: 0,
-  tools: 0, swords: 0, muskets: 0, cannons: 0, sailShip: 0, clothing: 0, fineFood: 0, luxury: 0, liquor: 0, wine: 0, train: 0, transport: 0,
+  tools: 0, swords: 0, muskets: 0, cannons: 0, merchantShip: 0, navyShip: 0, clothing: 0, fineFood: 0, luxury: 0, liquor: 0, wine: 0, train: 0, transport: 0,
 };
 
 /** 奢侈品：工匠/工程师附加产出（每万从业者月产单位；× 省奢侈品潜力） */
@@ -161,7 +167,7 @@ export const LUXURY_OUTPUT_PER_WAN: Record<JobId, number> = {
   clerk: 0,
   engineer: 0.0008,
   shopkeeper: 0.0004,
-  soldier: 0, bureaucrat: 0, teacher: 0, priest: 0,
+  soldier: 0, sailor: 0, marine: 0, bureaucrat: 0, teacher: 0, priest: 0,
   merchant: 0, capitalist: 0, banker: 0,
 };
 /** 奢侈品需求基数（× 阶级奢侈权重 × 幸福度系数 × 国家财富系数）；v0.9 平衡：0.0022→0.0006（工业化前奢侈品本就稀少） */
@@ -226,6 +232,8 @@ export const BASE_WAGE: Record<JobId, number> = {
   engineer: 4.2,
   shopkeeper: 3.5, // 店主：小资产阶级
   soldier: 3.0,
+  sailor: 3.2, // 水手：地位同工人、工资略高（海上辛苦钱，v0.15）
+  marine: 3.2, // 海员：军人级（水手升职而来，v0.15）
   bureaucrat: 3.8,
   teacher: 3.2, // 教师：地位与职员相近（v0.12）
   priest: 3.5, // 教士：略高于教师（v0.14）
@@ -243,11 +251,13 @@ export const JOB_LADDER: Record<JobId, JobId | null> = {
   slave: 'peasant',
   peasant: 'worker',
   worker: 'technician',
+  sailor: 'marine', // v0.15 水手 → 海员（动员法控制转化）
   technician: 'engineer',
   clerk: 'engineer',
   engineer: null,
   shopkeeper: 'merchant',
   soldier: null,
+  marine: null,
   bureaucrat: null,
   teacher: null,
   priest: null,
@@ -257,13 +267,15 @@ export const JOB_LADDER: Record<JobId, JobId | null> = {
 };
 /** 旁路转职（v0.9）：工人/职员/店主/工程师可获取军人/官僚资质（转职 UI 展开选项） */
 export const JOB_LATERAL: Record<JobId, JobId[]> = {
-  worker: ['soldier'],
+  worker: ['soldier', 'sailor'], // v0.15 工人可上船当水手
   clerk: ['bureaucrat', 'teacher', 'priest'],
   technician: ['bureaucrat', 'teacher', 'priest'],
   engineer: ['soldier', 'bureaucrat'],
   shopkeeper: ['bureaucrat', 'soldier', 'priest'],
   peasant: ['soldier'],
   soldier: ['peasant', 'worker'],
+  sailor: ['worker'], // 水手可还岸当工人
+  marine: ['worker', 'soldier'],
   bureaucrat: ['worker', 'clerk'],
   teacher: ['bureaucrat', 'clerk', 'priest'],
   priest: ['teacher', 'bureaucrat', 'clerk'],
@@ -274,6 +286,8 @@ export const LITERACY_REQ: Record<JobId, number> = {
   slave: 0,
   peasant: 0,
   worker: 0.1,
+  sailor: 0.1, // 水手：识字同工人
+  marine: 0.15, // 海员：同军人
   technician: 0.25,
   clerk: 0.15,
   engineer: 0.5,
@@ -297,6 +311,8 @@ export const EXPECTED_STD: Record<JobId, number> = {
   engineer: 60,
   shopkeeper: 55,
   soldier: 50,
+  sailor: 46, // 水手：同工人级（v0.15）
+  marine: 50, // 海员：同军人级（v0.15）
   bureaucrat: 65,
   teacher: 52, // 教师：预期与职员相当（v0.12）
   priest: 55, // 教士：略高于教师（v0.14）
@@ -379,6 +395,8 @@ export const INITIAL_JOB_MIX: Record<JobId, number> = {
   engineer: 0.04,
   shopkeeper: 0.03,
   soldier: 0.04,
+  sailor: 0.015, // v0.15 水手（海运劳动力，沿海省就业自然增长）
+  marine: 0.003, // v0.15 海员（水手升职，初始稀少）
   bureaucrat: 0.03,
   teacher: 0.01, // v0.12 教师（大学配套）
   priest: 0.01, // v0.14 教士（教会配套）

@@ -46,6 +46,8 @@ export type JobId =
   | 'engineer'
   | 'shopkeeper'
   | 'soldier'
+  | 'sailor'
+  | 'marine'
   | 'bureaucrat'
   | 'teacher'
   | 'priest'
@@ -92,10 +94,11 @@ export type GoodId =
   | 'swords' // 刀剑
   | 'muskets' // 燧发枪
   | 'cannons' // 火炮
-  | 'sailShip' // 帆船
   | 'clothing' // 服装
   | 'fineFood' // 高级食物
   | 'luxury' // 奢侈品
+  | 'merchantShip' // 商船（造船厂产；海运运力/贸易量）
+  | 'navyShip' // 军舰（军用船坞产；海军力量）
   | 'liquor' // 烈酒（穷人嗜好品，v0.13）
   | 'wine' // 葡萄酒（富人嗜好品，v0.13）
   | 'train' // 火车（发动机工厂产出；铁路/运河消耗）

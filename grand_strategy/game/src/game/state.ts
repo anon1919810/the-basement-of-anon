@@ -20,6 +20,7 @@ import {
   settlePoliticsMonth,
   zeroLedger,
 } from './economy';
+import { settleMaritimeMonth } from './maritime';
 import type { MonthlyLedger } from './economy';
 import { initProvinceEcon } from './pops';
 import type { Pop } from './pops';
@@ -199,6 +200,23 @@ export interface NationState {
   inflation: number;
   /** 金融危机冷却（月；资本池超透支触发，投资冻结） */
   finCrisisMonths: number;
+  // ---- v0.15 海军/陆军/商船（贸易-军事耦合） ----
+  /** 商船泊位上限（Σ 港口 berths；海运贸易容量上限） */
+  berthCap: number;
+  /** 有效商船数（≤ 泊位上限；1 商船 = 10 运力） */
+  merchantFleet: number;
+  /** 海军容量（Σ 海军基地 navyCap；军舰上限） */
+  navyCap: number;
+  /** 有效军舰数（≤ 海军容量） */
+  navyShips: number;
+  /** 陆军容量（Σ 陆军基地 armyCap；军人上限） */
+  armyCap: number;
+  /** 海上运力（商船提供，供贸易结算） */
+  seaTransport: number;
+  /** 水手储备（全国水手 POP 总量；海员转化来源） */
+  sailorReserve: number;
+  /** 海员转化中（海军扩建中，月 2-5% 水手→海员） */
+  marineDrafting: number;
 }
 
 export interface ProvinceState {
@@ -478,6 +496,14 @@ export function newGameState(playerNation: NationId, seed: number, map: GameMap)
       mintRate: 0,
       inflation: 0,
       finCrisisMonths: 0,
+      berthCap: 0,
+      merchantFleet: 0,
+      navyCap: 0,
+      navyShips: 0,
+      armyCap: 0,
+      seaTransport: 0,
+      sailorReserve: 0,
+      marineDrafting: 0,
     };
   });
 
@@ -546,6 +572,9 @@ export function settleMonth(state: GameState, map: GameMap): void {
     n.policies.lawProgress = null;
     applyLawPassed(state, map, flag.cat, flag.target);
   }
+
+  // 1a2) v0.15 海上结算（泊位/商船维护/水手转海员/军舰维护）
+  settleMaritimeMonth(state, map);
 
   // 1b) v0.7 月度历史快照（侧栏图表数据源）
   recordHistory(state, map);

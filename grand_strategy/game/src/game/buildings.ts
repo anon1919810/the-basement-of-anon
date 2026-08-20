@@ -29,9 +29,10 @@ export type BuildingKind =
   // 工业（8，v0.12 造纸/发动机；v0.13 酿酒）
   | 'toolWorks' | 'armory' | 'shipyard' | 'dynamiteWorks' | 'machineWorks'
   | 'paperMill' | 'engineFactory' | 'distillery'
-  // 基建与公共服务（9，v0.12 大学）
+  // 基建与公共服务（13，v0.12 大学；v0.15 海军基地/商贸中心/陆军基地/军用船坞）
   | 'road' | 'railroad' | 'canal' | 'port' | 'lighthouse'
   | 'school' | 'bank' | 'market' | 'university'
+  | 'navyDock' | 'navalBase' | 'tradeCenter' | 'armyBase'
   | 'buildyard'; // 建造部门（产建造力）
 
 export type BuildingCategory = 'agriculture' | 'extraction' | 'processing' | 'heavy' | 'fine' | 'infra';
@@ -65,6 +66,14 @@ export interface BuildingDef {
   output?: GoodId;
   /** 建造力产出（建造部门专用：产建造力池，非市场商品） */
   buildPowerPer?: number;
+  /** v0.15 商船泊位（港口提供：海运贸易容量的上限） */
+  berths?: number;
+  /** v0.15 海军容量（海军基地提供：军舰上限） */
+  navyCap?: number;
+  /** v0.15 陆军容量（陆军基地提供：军人上限） */
+  armyCap?: number;
+  /** v0.15 商贸中心：内陆省贸易容量/运力效率/集散加成 */
+  tradeCenter?: boolean;
   /** 第二输出（如 牲畜农场 皮毛） */
   output2?: GoodId;
   /** 输出比例（output2 相对 output 的每月量） */
@@ -144,7 +153,7 @@ export const BUILDING_DEFS: Record<BuildingKind, BuildingDef> = {
   },
   fishFarm: {
     kind: 'fishFarm', label: '渔场', category: 'agriculture', skill: 'peasant',
-    inputs: {}, opt: { tools: 0.2, transport: 0.1, sailShip: 0.2 }, output: 'meat', capacity: 1.5,
+    inputs: {}, opt: { tools: 0.2, transport: 0.1, merchantShip: 0.1 }, output: 'meat', capacity: 1.5,
     cost: 90, duration: 4, opCost: 0.3, infra: {}, requireCoastal: true,
     desc: '近海捕捞，沿海肉食来源。',
   },
@@ -193,7 +202,7 @@ export const BUILDING_DEFS: Record<BuildingKind, BuildingDef> = {
   },
   whalingStation: {
     kind: 'whalingStation', label: '捕鲸场', category: 'extraction', skill: 'worker',
-    inputs: {}, opt: { tools: 0.3, sailShip: 0.3 }, output: 'oil', output2: 'meat', output2Rate: 0.5,
+    inputs: {}, opt: { tools: 0.3, merchantShip: 0.2 }, output: 'oil', output2: 'meat', output2Rate: 0.5,
     capacity: 1.2, cost: 200, duration: 8, opCost: 0.8, infra: {}, requireCoastal: true,
     desc: '鲸油 + 鲸肉，油是火药/化工加强项。',
   },
@@ -291,10 +300,20 @@ export const BUILDING_DEFS: Record<BuildingKind, BuildingDef> = {
   },
   shipyard: {
     kind: 'shipyard', label: '造船厂', category: 'fine', skill: 'engineer',
-    inputs: { lumber: 1.0, iron: 1.0, cloth: 1.0, copper: 0.5 }, opt: { tools: 0.3, oil: 0.3 },
-    output: 'sailShip', capacity: 1.0, cost: 320, duration: 12, opCost: 1.5,
+    employ: ['engineer', 'sailor', 'worker', 'clerk'], // v0.15 水手建造/运营
+    inputs: { lumber: 1.2, iron: 1.0, cloth: 0.8, copper: 0.5 }, opt: { tools: 0.3, machines: 0.2 },
+    output: 'merchantShip', capacity: 0.5, cost: 320, duration: 12, opCost: 1.2,
     infra: { ports: 15 }, requireCoastal: true,
-    desc: '木料＋铁锭＋布料＋铜锭 → 帆船；海军与贸易。',
+    desc: '木料＋铁锭＋布料＋铜 → 商船（船底覆铜）；商船 = 海运运力与贸易量。',
+  },
+  navyDock: {
+    kind: 'navyDock', label: '军用船坞', category: 'heavy', skill: 'engineer',
+    employ: ['engineer', 'marine', 'worker', 'clerk'], // v0.15 海员/水手造舰
+    inputs: { lumber: 1.5, iron: 1.5, cloth: 0.8, copper: 0.8, muskets: 0.4, cannons: 0.4 },
+    opt: { tools: 0.4, machines: 0.3 },
+    output: 'navyShip', capacity: 0.12, cost: 480, duration: 18, opCost: 2.0, // 军舰月产少、昂贵
+    infra: { ports: 20 }, requireCoastal: true, requireGood: 'muskets',
+    desc: '军用船坞（仅国营）：木料＋铁锭＋布料＋铜＋燧发枪＋火炮 → 军舰；舰少而贵，月维护耗铜与火药。',
   },
   dynamiteWorks: {
     kind: 'dynamiteWorks', label: '炸药厂', category: 'fine', skill: 'engineer',
@@ -356,9 +375,35 @@ export const BUILDING_DEFS: Record<BuildingKind, BuildingDef> = {
   },
   port: {
     kind: 'port', label: '港口', category: 'infra', skill: 'technician',
-    inputs: { stone: 1.0, timber: 0.8, steel: 0.5 }, output: 'transport', capacity: 3.5,
-    cost: 260, duration: 10, opCost: 0.9, infra: { ports: 5 }, requireCoastal: true,
-    desc: '产运力 + 贸易容量（出口权联动）。',
+    employ: ['worker', 'technician', 'clerk', 'sailor'],
+    inputs: { stone: 0.6, timber: 0.5 }, output: undefined, capacity: 0,
+    berths: 20, // v0.15 商船泊位（海运贸易容量上限）
+    cost: 260, duration: 10, opCost: 0.6, infra: { ports: 5 }, requireCoastal: true,
+    desc: '商船泊位 ×20：海运贸易容量的上限——有船没港则商船闲置。',
+  },
+  navalBase: {
+    kind: 'navalBase', label: '海军基地', category: 'infra', skill: 'engineer',
+    employ: ['engineer', 'marine', 'sailor', 'clerk'],
+    inputs: { stone: 0.8, iron: 0.5, copper: 0.3 }, output: undefined, capacity: 0,
+    navyCap: 20, // v0.15 海军容量（军舰上限）
+    cost: 400, duration: 14, opCost: 1.5, infra: { ports: 10 }, requireCoastal: true,
+    desc: '海军容量 +20：军舰停靠与补给；无基地则养不起大军。',
+  },
+  tradeCenter: {
+    kind: 'tradeCenter', label: '商贸中心', category: 'infra', skill: 'clerk',
+    employ: ['clerk', 'merchant', 'bureaucrat'],
+    inputs: { lumber: 0.5, cloth: 0.3 }, output: undefined, capacity: 0,
+    tradeCenter: true, // v0.15 内陆集散
+    cost: 180, duration: 8, opCost: 0.7, infra: {},
+    desc: '内陆集散：全国贸易容量 +5%、运力效率 +3%、所在省内陆出口成本 -15%。',
+  },
+  armyBase: {
+    kind: 'armyBase', label: '陆军基地', category: 'infra', skill: 'bureaucrat',
+    employ: ['bureaucrat', 'soldier', 'clerk', 'worker'],
+    inputs: { stone: 1.0, iron: 0.8, lumber: 0.5 }, output: undefined, capacity: 0,
+    armyCap: 10, // v0.15 陆军容量（军人上限）
+    cost: 300, duration: 12, opCost: 1.2, infra: { roads: 10 },
+    desc: '陆军容量 +10 万：扩军需先建基地（动员法定上限、基地定实际容量）。',
   },
   lighthouse: {
     kind: 'lighthouse', label: '灯塔', category: 'infra', skill: 'technician',
@@ -414,6 +459,7 @@ export const BUILDING_KINDS: BuildingKind[] = [
   'paperMill', 'engineFactory', 'distillery',
   'road', 'railroad', 'canal', 'port', 'lighthouse',
   'school', 'bank', 'market', 'university',
+  'navyDock', 'navalBase', 'tradeCenter', 'armyBase',
   'buildyard',
 ];
 

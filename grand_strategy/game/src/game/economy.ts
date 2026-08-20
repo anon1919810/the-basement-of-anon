@@ -870,6 +870,7 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
       openTrade: n.openTrade,
       exportRights: n.exportRights,
       inflation: n.inflation ?? 0, // 上月通胀（滞后一月传导）
+      seaTransport: n.seaTransport ?? 0, // v0.15 商船海运运力（上月结算）
     },
     marketState,
   );

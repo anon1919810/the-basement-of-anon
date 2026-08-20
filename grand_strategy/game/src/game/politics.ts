@@ -278,22 +278,22 @@ export const ETHNIC_STANCE: Record<string, Record<ClassId, Stance>> = {
 export const RELIGION_STANCE_JOB: Record<string, Record<JobId, Stance>> = {
   state: {
     slave: 1, peasant: 1, worker: 1, technician: -1, clerk: 0, engineer: -1,
-    shopkeeper: 0, soldier: 1, bureaucrat: 1, teacher: -1, priest: 2,
+    shopkeeper: 0, soldier: 1, sailor: 1, marine: 1, bureaucrat: 1, teacher: -1, priest: 2,
     merchant: -1, capitalist: -1, banker: -1,
   },
   freedom: {
     slave: 1, peasant: 1, worker: 1, technician: 1, clerk: 1, engineer: 1,
-    shopkeeper: 1, soldier: 0, bureaucrat: 1, teacher: 1, priest: 0,
+    shopkeeper: 1, soldier: 0, sailor: 1, marine: 0, bureaucrat: 1, teacher: 1, priest: 0,
     merchant: 1, capitalist: 1, banker: 0,
   },
   separation: {
     slave: 0, peasant: 0, worker: 0, technician: 1, clerk: 0, engineer: 1,
-    shopkeeper: 0, soldier: 0, bureaucrat: 0, teacher: 1, priest: -1,
+    shopkeeper: 0, soldier: 0, sailor: 0, marine: 0, bureaucrat: 0, teacher: 1, priest: -1,
     merchant: 1, capitalist: 2, banker: 1,
   },
   atheism: {
     slave: -1, peasant: -1, worker: -1, technician: 1, clerk: 0, engineer: 1,
-    shopkeeper: 0, soldier: -1, bureaucrat: 0, teacher: 1, priest: -2,
+    shopkeeper: 0, soldier: -1, sailor: -1, marine: -1, bureaucrat: 0, teacher: 1, priest: -2,
     merchant: 0, capitalist: 1, banker: 1,
   },
 };
