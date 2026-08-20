@@ -95,6 +95,8 @@ export type GoodId =
   | 'clothing' // 服装
   | 'fineFood' // 高级食物
   | 'luxury' // 奢侈品
+  | 'liquor' // 烈酒（穷人嗜好品，v0.13）
+  | 'wine' // 葡萄酒（富人嗜好品，v0.13）
   | 'train' // 火车（发动机工厂产出；铁路/运河消耗）
   | 'transport'; // 运力（基建产出）
 

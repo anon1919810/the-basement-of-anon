@@ -23,6 +23,7 @@ import { clamp } from './pops';
 const INFLATION_SENS: Partial<Record<GoodId, number>> = {
   food: 0.6, wheat: 0.6, coal: 0.7, iron: 0.8, steel: 0.9, tools: 0.8,
   luxury: 1.1, coffee: 1.0, tobacco: 1.0, clothing: 0.7, paper: 0.7, train: 1.0,
+  liquor: 0.8, wine: 1.0,
 };
 function priceInflationFactor(inflation: number, good: GoodId): number {
   const s = INFLATION_SENS[good] ?? 0.8;
@@ -40,7 +41,7 @@ export const GOODS_LIST: GoodId[] = [
   'gunpowder', 'dynamite', 'machines', 'paper',
   // 成品
   'tools', 'swords', 'muskets', 'cannons', 'sailShip', 'clothing', 'fineFood',
-  'luxury', 'train', 'transport',
+  'luxury', 'liquor', 'wine', 'train', 'transport',
 ];
 
 /** 商品类别（UI 分组） */
@@ -54,7 +55,7 @@ export const GOOD_CATEGORY: Record<GoodId, GoodCategory> = {
   dynamite: 'semi', machines: 'semi', paper: 'semi',
   tools: 'finished', swords: 'finished', muskets: 'finished', cannons: 'finished',
   sailShip: 'finished', clothing: 'finished', fineFood: 'finished',
-  luxury: 'finished', train: 'finished', transport: 'finished',
+  luxury: 'finished', liquor: 'finished', wine: 'finished', train: 'finished', transport: 'finished',
 };
 
 /** 基础价（万₭/单位）——随加工链价值上升（资源低 → 成品高） */
@@ -67,7 +68,7 @@ export const BASE_PRICE: Record<GoodId, number> = {
   flour: 2.8, sugar: 3.2, leather: 2.4, gunpowder: 2.8,
   dynamite: 3.6, machines: 4.2, paper: 1.9,
   tools: 2.7, swords: 3.4, muskets: 4.0, cannons: 4.6,
-  sailShip: 5.0, clothing: 1.8, fineFood: 4.0, luxury: 5.0, train: 6.0, transport: 1.6,
+  sailShip: 5.0, clothing: 1.8, fineFood: 4.0, luxury: 5.0, liquor: 2.2, wine: 4.5, train: 6.0, transport: 1.6,
 };
 
 /** 世界价（略高于本国基础价：外部市场更大） */
@@ -80,7 +81,7 @@ export const WORLD_PRICE: Record<GoodId, number> = {
   flour: 3.6, sugar: 4.0, leather: 3.2, gunpowder: 3.6,
   dynamite: 4.6, machines: 5.4, paper: 2.6,
   tools: 3.4, swords: 4.4, muskets: 5.2, cannons: 6.0,
-  sailShip: 6.4, clothing: 2.6, fineFood: 5.2, luxury: 6.0, train: 7.6, transport: 2.2,
+  sailShip: 6.4, clothing: 2.6, fineFood: 5.2, luxury: 6.0, liquor: 3.0, wine: 5.8, train: 7.6, transport: 2.2,
 };
 
 /** 价格上下限（基础价 × 系数） */
@@ -97,7 +98,7 @@ export const BASE_TRADE_CAP: Record<GoodId, number> = {
   flour: 1.2, sugar: 1.1, leather: 1.0, gunpowder: 0.6,
   dynamite: 0.5, machines: 0.7, paper: 1.3,
   tools: 0.9, swords: 0.7, muskets: 0.5, cannons: 0.4,
-  sailShip: 0.4, clothing: 2.2, fineFood: 0.8, luxury: 0.6, train: 0.3, transport: 2.8,
+  sailShip: 0.4, clothing: 2.2, fineFood: 0.8, luxury: 0.6, liquor: 1.5, wine: 0.8, train: 0.3, transport: 2.8,
 };
 
 /** 关税税率已迁移至 tax.ts（连续滑块，economy 传入 tariffRate） */

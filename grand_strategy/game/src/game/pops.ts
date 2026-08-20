@@ -59,7 +59,7 @@ export const GOOD_LABEL: Record<GoodId, string> = {
   dynamite: '炸药', machines: '机器', paper: '纸张',
   tools: '工具', swords: '刀剑', muskets: '燧发枪', cannons: '火炮',
   sailShip: '帆船', clothing: '服装', fineFood: '高级食物',
-  luxury: '奢侈品', train: '火车', transport: '运力',
+  luxury: '奢侈品', liquor: '烈酒', wine: '葡萄酒', train: '火车', transport: '运力',
 };
 
 export const NEEDS: NeedId[] = ['food', 'clothing', 'housing', 'fuel'];
@@ -83,6 +83,8 @@ export const NEED_PER_WAN: Record<GoodId, number> = {
   coffee: 0.0004,
   tobacco: 0.0006,
   fineFood: 0.0003,
+  liquor: 0.0016, // v0.13 烈酒：穷人刚需（乘数在 CONSUME_MATRIX）
+  wine: 0.0005, // v0.13 葡萄酒：富人嗜好
   timber: 0, cotton: 0, fur: 0, ironOre: 0, copperOre: 0, sulfur: 0, salt: 0, stone: 0, oil: 0,
   lumber: 0, cloth: 0, iron: 0, copper: 0, steel: 0,
   flour: 0, leather: 0, gunpowder: 0, dynamite: 0, machines: 0, paper: 0,
@@ -134,7 +136,7 @@ export const FARMER_EXTRA_OUTPUT: Record<GoodId, number> = {
   sugar: 0.0008,
   coffee: 0, tobacco: 0, coal: 0, ironOre: 0, copperOre: 0, sulfur: 0, stone: 0, oil: 0,
   lumber: 0, cloth: 0, iron: 0, copper: 0, steel: 0, flour: 0, leather: 0, gunpowder: 0, dynamite: 0, machines: 0, paper: 0,
-  tools: 0, swords: 0, muskets: 0, cannons: 0, sailShip: 0, clothing: 0, fineFood: 0, luxury: 0, train: 0, transport: 0,
+  tools: 0, swords: 0, muskets: 0, cannons: 0, sailShip: 0, clothing: 0, fineFood: 0, luxury: 0, liquor: 0, wine: 0, train: 0, transport: 0,
 };
 
 /** 矿工产出：煤（矿藏省）/ 铁 / 铜 / 硫 / 石料（矿藏省）；无矿藏省产出 0（资源修正：矿工需矿场） */
@@ -146,7 +148,7 @@ export const MINER_OUTPUT: Record<GoodId, number> = {
   stone: 0.015,
   food: 0, wheat: 0, timber: 0, cotton: 0, fur: 0, salt: 0, fish: 0, meat: 0, sugar: 0, coffee: 0, tobacco: 0, oil: 0,
   lumber: 0, cloth: 0, iron: 0, copper: 0, steel: 0, flour: 0, leather: 0, gunpowder: 0, dynamite: 0, machines: 0, paper: 0,
-  tools: 0, swords: 0, muskets: 0, cannons: 0, sailShip: 0, clothing: 0, fineFood: 0, luxury: 0, train: 0, transport: 0,
+  tools: 0, swords: 0, muskets: 0, cannons: 0, sailShip: 0, clothing: 0, fineFood: 0, luxury: 0, liquor: 0, wine: 0, train: 0, transport: 0,
 };
 
 /** 奢侈品：工匠/工程师附加产出（每万从业者月产单位；× 省奢侈品潜力） */
@@ -169,7 +171,7 @@ export const LUXURY_WEALTH_MAX = 2.2;
 /** 消费性商品（设矩阵；生产性商品不设） */
 export const CONSUMER_GOODS: GoodId[] = [
   'food', 'wheat', 'meat', 'fish', 'sugar', 'coffee', 'tobacco',
-  'clothing', 'fineFood', 'luxury', 'coal',
+  'clothing', 'fineFood', 'luxury', 'coal', 'liquor', 'wine',
 ];
 
 /** 商品 × 阶级（1 贵族→7 奴役）消费权重：上层细粮糖奢侈品多，下层粗粮多（仅消费性商品设矩阵） */
@@ -185,6 +187,9 @@ export const CONSUME_MATRIX: Partial<Record<GoodId, Record<ClassId, number>>> = 
   fineFood: { 1: 3.0, 2: 2.2, 3: 1.5, 4: 0.8, 5: 0.3, 6: 0.1, 7: 0 },
   luxury: { 1: 4.0, 2: 2.5, 3: 1.0, 4: 0.2, 5: 0, 6: 0, 7: 0 },
   coal: { 1: 1.3, 2: 1.2, 3: 1.1, 4: 1.0, 5: 0.95, 6: 0.9, 7: 0.8 },
+  // v0.13 烈酒（穷人刚需）/ 葡萄酒（富人专属）
+  liquor: { 1: 0.3, 2: 0.5, 3: 0.9, 4: 1.4, 5: 1.9, 6: 2.2, 7: 2.2 },
+  wine: { 1: 2.0, 2: 1.7, 3: 1.1, 4: 0.5, 5: 0.2, 6: 0.1, 7: 0.1 },
 };
 
 /** 商品 × 职业消费乘数（默认 1；军人烟酒多、官僚服装咖啡多、工人烟草多；仅消费性商品设矩阵） */
@@ -326,6 +331,36 @@ export const NATION_RACE_MIX: Record<NationId, Record<RaceId, number>> = {
     ursus: 0, draco: 0, feline: 0, zalak: 0,
   },
 };
+
+// ---- v0.13 民族特质（嗜好品需求乘数 + 投资性格）----
+
+/** 民族嗜好品需求乘数（按省种族构成加权；仅消费性商品设表） */
+export const RACE_CONSUME: Record<RaceId, Partial<Record<GoodId, number>>> = {
+  ursus: { liquor: 2.0, wine: 0.6, meat: 1.4, tobacco: 1.4 },
+  draco: { liquor: 1.0, wine: 1.5, coffee: 1.5, luxury: 1.3 },
+  feline: { liquor: 0.8, wine: 1.3, coffee: 1.8, fineFood: 1.3 },
+  liberi: { liquor: 1.0, wine: 1.2, clothing: 1.4, coffee: 1.2 },
+  aegir: { liquor: 0.9, wine: 1.4, luxury: 1.5, fish: 1.3 },
+  zalak: { liquor: 1.3, wine: 0.7, tobacco: 1.3, wheat: 1.2 },
+  sarkaz: { liquor: 1.8, wine: 0.3, meat: 1.6, tobacco: 1.3 },
+  norman: { liquor: 1.3, wine: 1.5, meat: 1.5, wheat: 1.1 },
+};
+
+/** 民族投资性格：risk（0.6 保守 ~ 1.4 激进；私营自动投资触发门槛）+ sectorBias（部门偏好） */
+export const RACE_INVEST: Record<RaceId, {
+  risk: number;
+  sectorBias: Partial<Record<'agriculture' | 'extraction' | 'processing' | 'heavy' | 'fine' | 'infra', number>>;
+}> = {
+  ursus: { risk: 0.7, sectorBias: { agriculture: 1.3, extraction: 1.2, fine: 0.8 } },
+  draco: { risk: 1.2, sectorBias: { heavy: 1.2, fine: 1.1, agriculture: 0.8 } },
+  feline: { risk: 1.0, sectorBias: { processing: 1.15, heavy: 1.1 } },
+  liberi: { risk: 1.1, sectorBias: { processing: 1.2, extraction: 0.9 } },
+  aegir: { risk: 1.4, sectorBias: { infra: 1.3, agriculture: 0.8 } },
+  zalak: { risk: 0.8, sectorBias: { agriculture: 1.2, heavy: 0.9 } },
+  sarkaz: { risk: 1.3, sectorBias: { processing: 1.1, fine: 1.05 } },
+  norman: { risk: 0.6, sectorBias: { agriculture: 1.4, heavy: 0.7, fine: 0.8 } },
+};
+
 /** 初始职业构成（工业化前夜；军人/官僚/资本侧少量） */
 export const INITIAL_JOB_MIX: Record<JobId, number> = {
   slave: 0.04,

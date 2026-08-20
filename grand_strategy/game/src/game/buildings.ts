@@ -26,9 +26,9 @@ export type BuildingKind =
   | 'sugarWorks' | 'gunpowderWorks' | 'tannery'
   // 加工业二级（4）
   | 'steelWorks' | 'clothingWorks' | 'foodFactory' | 'luxuryWorkshop'
-  // 工业（7，v0.12 造纸/发动机）
+  // 工业（8，v0.12 造纸/发动机；v0.13 酿酒）
   | 'toolWorks' | 'armory' | 'shipyard' | 'dynamiteWorks' | 'machineWorks'
-  | 'paperMill' | 'engineFactory'
+  | 'paperMill' | 'engineFactory' | 'distillery'
   // 基建与公共服务（9，v0.12 大学）
   | 'road' | 'railroad' | 'canal' | 'port' | 'lighthouse'
   | 'school' | 'bank' | 'market' | 'university'
@@ -322,6 +322,18 @@ export const BUILDING_DEFS: Record<BuildingKind, BuildingDef> = {
     output: 'train', capacity: 1.0, cost: 320, duration: 12, opCost: 1.4, infra: {},
     requireGood: 'steel', desc: '钢＋木材＋铜 → 火车；铁路每月燃料。',
   },
+  distillery: {
+    kind: 'distillery', label: '酿酒厂', category: 'fine', skill: 'technician',
+    employ: ['technician', 'engineer', 'clerk'], // v0.13 酿酒：工艺型
+    inputs: {}, anyOf: ['food', 'wheat'], opt: { tools: 0.3 },
+    output: 'liquor', capacity: 1.6, cost: 140, duration: 6, opCost: 0.6, infra: {},
+    requireGood: 'food',
+    variants: [
+      { label: '烈酒坊', output: 'liquor', inputs: {}, anyOf: ['food', 'wheat'], opt: { tools: 0.3 } },
+      { label: '酒庄', output: 'wine', inputs: {}, anyOf: ['wheat'], opt: { tools: 0.3 } },
+    ],
+    desc: '粗粮/小麦 → 烈酒（穷人嗜好）或 葡萄酒（富人嗜好）；酒庄需小麦。',
+  },
   // ==================== 基建与公共服务（8）====================
   road: {
     kind: 'road', label: '公路', category: 'infra', skill: 'technician',
@@ -398,7 +410,7 @@ export const BUILDING_KINDS: BuildingKind[] = [
   'sugarWorks', 'gunpowderWorks', 'tannery',
   'steelWorks', 'clothingWorks', 'foodFactory', 'luxuryWorkshop',
   'toolWorks', 'armory', 'shipyard', 'dynamiteWorks', 'machineWorks',
-  'paperMill', 'engineFactory',
+  'paperMill', 'engineFactory', 'distillery',
   'road', 'railroad', 'canal', 'port', 'lighthouse',
   'school', 'bank', 'market', 'university',
   'buildyard',

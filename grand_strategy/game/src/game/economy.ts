@@ -44,6 +44,10 @@ import {
   EXPECTED_STD,
   JOB_LADDER,
   JOB_LATERAL,
+  RACES,
+  RACE_CONSUME,
+  RACE_INVEST,
+  provinceRaceMix,
 } from './pops';
 import { classPoliticalWeight, PROGRESSIVE_HAPPINESS, SUFFRAGE_HAPPINESS } from './classes';
 import { classTaxCoefFor, taxPenalty, policyGrowthCoef } from './tax';
@@ -542,11 +546,21 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
     ps.output = out;
     for (const g of GOODS) prodAgg[g] += out[g];
     // 需求（v0.9 消费矩阵：基础需求 × 阶级权重 × 职业乘数 × 阶级消费倍率；渔获为粮食替代）
+    // v0.13 民族嗜好品：按省种族构成加权（RACE_CONSUME）
     const d = zeroGoods();
+    const raceMix = provinceRaceMix(ps);
+    const raceMult = (g: GoodId): number => {
+      let m = 0;
+      for (const r of RACES) {
+        const share = raceMix[r] ?? 0;
+        if (share > 0) m += share * (RACE_CONSUME[r]?.[g] ?? 1);
+      }
+      return m || 1;
+    };
     for (const pop of ps.pops) {
       const cons = classDef(pop.class).consumptionMult;
       const jm = JOB_CONSUME;
-      const m = (g: GoodId, base: number) => base * cons * (CONSUME_MATRIX[g]?.[pop.class] ?? 1) * (jm[g]?.[pop.job] ?? 1);
+      const m = (g: GoodId, base: number) => base * cons * (CONSUME_MATRIX[g]?.[pop.class] ?? 1) * (jm[g]?.[pop.job] ?? 1) * raceMult(g);
       d.food += pop.size * m('food', NEED_PER_WAN.food);
       d.wheat += pop.size * m('wheat', NEED_PER_WAN.wheat);
       d.meat += pop.size * m('meat', NEED_PER_WAN.meat);
@@ -557,6 +571,8 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
       d.clothing += pop.size * m('clothing', NEED_PER_WAN.clothing);
       d.fineFood += pop.size * m('fineFood', NEED_PER_WAN.fineFood);
       d.coal += pop.size * m('coal', NEED_PER_WAN.coal);
+      d.liquor += pop.size * m('liquor', NEED_PER_WAN.liquor);
+      d.wine += pop.size * m('wine', NEED_PER_WAN.wine);
     }
     d.luxury = luxDemand * LUXURY_NEED_BASE * wealthCoef;
     ps.demand = d;
@@ -828,9 +844,37 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
 
   // ---- 7.5 私营自动投资：资本池充裕 → 投利润/成本比最高的可建建筑（v0.11 可透支银行杠杆；危机中冻结） ----
   // 可动用资金 = 资本池 + 银行杠杆（银行资本×0.5）；危机中仅可用现有资本
+  // v0.13 民族投资性格：风险系数 → 触发门槛（激进族更早借钱扩张）；部门偏好 → 利润比加权
   const bankLeverage = bankCapitalOf(n) * 0.5;
   const usableCapital = n.finCrisisMonths > 0 ? Math.max(0, n.capitalWealth) : n.capitalWealth + bankLeverage;
-  if (usableCapital >= 150) {
+  // 国家整体性格 = 种族构成加权（风险取均值、部门偏好取加权和）
+  let natRisk = 1;
+  const natBias: Partial<Record<BuildingCategory, number>> = {};
+  {
+    let wSum = 0;
+    const biasAgg: Record<string, number> = {};
+    for (const pid of provIds) {
+      const ps0 = state.provinces[pid];
+      if (!ps0?.pops) continue;
+      const rm = provinceRaceMix(ps0);
+      for (const r of RACES) {
+        const share = rm[r] ?? 0;
+        if (share <= 0) continue;
+        const inv = RACE_INVEST[r];
+        wSum += ps0.popTotal * share;
+        natRisk += ps0.popTotal * share * inv.risk;
+        for (const [cat, b] of Object.entries(inv.sectorBias)) {
+          biasAgg[cat] = (biasAgg[cat] ?? 0) + ps0.popTotal * share * (b ?? 1);
+        }
+      }
+    }
+    if (wSum > 1e-9) {
+      natRisk /= wSum;
+      for (const [cat, v] of Object.entries(biasAgg)) natBias[cat as BuildingCategory] = v / wSum;
+    }
+  }
+  const investThreshold = 150 / natRisk; // 激进族门槛低（更早借债扩张）
+  if (usableCapital >= investThreshold) {
     let best: { kind: BuildingKind; provId: number; cost: number; ratio: number } | null = null;
     for (const kind of BUILDING_KINDS) {
       const def = BUILDING_DEFS[kind];
@@ -838,6 +882,7 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
       if (GOOD_CATEGORY[def.output] === 'semi') continue; // 中间品无直接需求，资本家不建卖不动的厂
       const estProfit = def.capacity * n.market[def.output].price - def.opCost;
       if (estProfit <= 0) continue;
+      const bias = natBias[def.category] ?? 1; // 部门偏好：同类加权（阿戈尔→基建 1.3×）
       for (const pid of provIds) {
         const prov = map.provinceById.get(pid);
         if (!prov) continue;
@@ -845,7 +890,7 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
         if (!unlock.ok) continue;
         const cost = def.cost * terrainCostFactor(map, kind, prov);
         if (cost > usableCapital) continue;
-        const ratio = estProfit / cost;
+        const ratio = (estProfit / cost) * bias;
         if (!best || ratio > best.ratio) best = { kind, provId: pid, cost, ratio };
       }
     }

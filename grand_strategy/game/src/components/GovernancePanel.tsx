@@ -12,7 +12,7 @@ import MiniChart, { themedBase } from './MiniChart';
 import type { GameMap, Province } from '../game/map';
 import type { GameState, LawCatType } from '../game/state';
 import type { HistoryMonth } from '../game/state';
-import type { ClassId, GoodId } from '../game/types';
+import type { ClassId, GoodId, RaceId } from '../game/types';
 import { NATIONS } from '../game/nations';
 import {
   nationMonthlyIncome,
@@ -23,7 +23,7 @@ import {
   nationClassTaxBurden,
   taxTransmissionHints,
 } from '../game/economy';
-import { GOODS, GOOD_LABEL, JOB_LABEL, JOBS, RACE_LABEL } from '../game/pops';
+import { GOODS, GOOD_LABEL, JOB_LABEL, JOBS, RACE_LABEL, RACES, RACE_INVEST, RACE_CONSUME, provinceRaceMix } from '../game/pops';
 import { CLASSES, CLASS_DEFS } from '../game/classes';
 import { TAX_KINDS, TAX_LABEL, TAX_DESC, TAX_MAX, taxPenalty, weightedTaxRate } from '../game/tax';
 import type { TaxKind } from '../game/tax';
@@ -957,6 +957,60 @@ function supportPctText(game: GameState, map: GameMap, lp: { cat: LawCatType; ta
   return `${s.toFixed(0)}%`;
 }
 
+/** v0.13 民族构成 + 性格摘要（人口 tab） */
+function raceTraitsOf(game: GameState, map: GameMap): { race: RaceId; label: string; share: number; traits: string }[] {
+  const id = game.playerNation;
+  const counts: Record<string, number> = {};
+  let total = 0;
+  for (const p of map.provinces) {
+    if (p.owner !== id || p.isUndiscovered) continue;
+    const ps = game.provinces[p.id];
+    if (!ps?.pops) continue;
+    const rm = provinceRaceMix(ps);
+    for (const r of RACES) {
+      const share = rm[r] ?? 0;
+      if (share > 0) {
+        counts[r] = (counts[r] ?? 0) + ps.popTotal * share;
+        total += ps.popTotal * share;
+      }
+    }
+  }
+  return RACES.filter((r) => (counts[r] ?? 0) > 0)
+    .map((r) => {
+      const share = total > 1e-9 ? (counts[r] ?? 0) / total : 0;
+      const inv = RACE_INVEST[r];
+      const biasTop = Object.entries(inv.sectorBias).sort((a, b) => (b[1] ?? 1) - (a[1] ?? 1))[0];
+      const fav = RACE_CONSUME[r] ?? {};
+      const favTop = Object.entries(fav).sort((a, b) => (b[1] ?? 1) - (a[1] ?? 1))[0];
+      const catLabel = ({ agriculture: '农业', extraction: '采掘', processing: '加工', heavy: '重工', fine: '精工', infra: '基建' } as Record<string, string>)[biasTop?.[0] ?? ''] ?? '';
+      return {
+        race: r, label: RACE_LABEL[r], share,
+        traits: `${inv.risk >= 1.1 ? '激进' : inv.risk <= 0.8 ? '保守' : '稳健'}投资·偏好${catLabel}${favTop ? `·好${GOOD_LABEL[favTop[0] as GoodId]}` : ''}`,
+      };
+    })
+    .sort((a, b) => b.share - a.share);
+}
+
+/** v0.13 国家风险系数（种族构成加权） */
+function nationRiskOf(game: GameState, map: GameMap): number {
+  const id = game.playerNation;
+  let wSum = 0, risk = 0;
+  for (const p of map.provinces) {
+    if (p.owner !== id || p.isUndiscovered) continue;
+    const ps = game.provinces[p.id];
+    if (!ps?.pops) continue;
+    const rm = provinceRaceMix(ps);
+    for (const r of RACES) {
+      const share = rm[r] ?? 0;
+      if (share > 0) {
+        wSum += ps.popTotal * share;
+        risk += ps.popTotal * share * RACE_INVEST[r].risk;
+      }
+    }
+  }
+  return wSum > 1e-9 ? risk / wSum : 1;
+}
+
 /** 阶级页：七级分布 + 权势构成 + 阶级流动提示（政策移至「政策」分区） */
 function ClassTab({ game, map }: { game: GameState; map: GameMap }) {
   const id = game.playerNation;
@@ -1417,6 +1471,22 @@ export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSp
               <section className="p-sec">
                 <h4>阶级分布（最新快照 · 万人）</h4>
                 <MiniChart option={classPie} height={92} />
+              </section>
+              <section className="p-sec">
+                <h4>民族构成与性格（v0.13 嗜好品需求 × 投资倾向）</h4>
+                {raceTraitsOf(game, map).map((r) => (
+                  <div key={r.race} className="bar-row">
+                    <span className="bar-label" style={{ width: 70 }}>{r.label}</span>
+                    <div className="bar-track">
+                      <div className="bar-fill" style={{ width: `${Math.max(0.4, r.share * 100)}%` }} />
+                    </div>
+                    <span className="bar-value">{r.share * 100 < 0.05 ? '<0.1' : (r.share * 100).toFixed(1)}%</span>
+                    <span className="dim" style={{ fontSize: 11 }}>{r.traits}</span>
+                  </div>
+                ))}
+                <p className="dim">
+                  风险系数 {nationRiskOf(game, map).toFixed(2)}（&lt;1 保守 / &gt;1 激进，私营扩张门槛）· 民族嗜好品按省构成加权进消费需求。
+                </p>
               </section>
               <section className="p-sec">
                 <h4>人口概览（v0.5 按容量缩放 · 迁移软化）</h4>
