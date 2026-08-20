@@ -17,6 +17,7 @@ import {
   nationAvgHappiness,
   nationClassMixOf,
   settleEconomyMonth,
+  settlePoliticsMonth,
   zeroLedger,
 } from './economy';
 import type { MonthlyLedger } from './economy';
@@ -31,27 +32,72 @@ import { CLASSES } from './classes';
 import { defaultNationTax } from './tax';
 import type { NationTax } from './tax';
 
-export const SAVE_VERSION = 9;
-export const SAVE_KEY = 'kalt-save-v9';
+export const SAVE_VERSION = 10;
+export const SAVE_KEY = 'kalt-save-v10';
 /** 旧存档键（v0.8 起存档不兼容，提示用；含 v0.7 的 v8 键） */
-export const OLD_SAVE_KEYS = ['kalt-save-v8', 'kalt-save-v7', 'kalt-save-v6', 'kalt-save-v5', 'kalt-save-v4', 'kalt-save-v3'];
+export const OLD_SAVE_KEYS = ['kalt-save-v9', 'kalt-save-v8', 'kalt-save-v7', 'kalt-save-v6', 'kalt-save-v5', 'kalt-save-v4', 'kalt-save-v3'];
 
-/** 国家政策（v0.3）：作用于当前国，写入状态与存档 */
+/** 国家政策（v0.3/v0.10）：作用于当前国，写入状态与存档 */
 export type EconomicLaw = 'traditionalism' | 'laissezFaire' | 'draconian';
 
 export interface NationPolicies {
-  /** 废农奴制：一次性转型（奴隶→佃农/自耕农），短期稳定度↓ + 人口效率长期↑ */
+  /** 废农奴制：一次性转型（奴隶→佃农/自耕农），短期稳定度↓ + 人口效率长期↑（v0.10 由 liberty 法律派生，保留兼容） */
   abolishedSerfdom: boolean;
   /** 累进税：上层税负↑下层↓，可开关 */
   progressiveTax: boolean;
-  /** 普选：下阶层政治权重↑上阶层↓，稳定度混合影响 */
+  /** 普选：下阶层政治权重↑上阶层↓，稳定度混合影响（v0.10 由 suffrage 法律派生，保留兼容） */
   universalSuffrage: boolean;
-  /** v0.9 经济体制：传统主义（政府分红-10% 再投资减半）/ 自由放任（资本+25%）/ 龙本主义（农民地主贵族+50% 政府分红+15%） */
+  /** v0.9 经济体制：传统主义（政府分红-10% 再投资减半）/ 自由放任（资本+25%）/ 农本主义（农民地主贵族+50% 政府分红+15%） */
   economicLaw: EconomicLaw;
+  /** v0.10 政权结构（权力分配支柱：执政联盟 → 合法性/行政效率） */
+  gov: 'autocracy' | 'monarchy' | 'merchantRepublic' | 'parliamentary' | 'presidential';
+  /** v0.10 选举法档位（0 世袭 ~ 5 普选，并列无承接） */
+  suffrage: number;
+  /** v0.10 人身自由档位（0 农奴制 / 1 债务奴隶 / 2 废奴） */
+  liberty: number;
+  /** v0.10 权利法档位（0 无保障 / 1 基本权利 / 2 劳工保护） */
+  rights: number;
+  /** v0.10 立法中（改革推进；null = 无进行中改革） */
+  lawProgress: { cat: 'gov' | 'suffrage' | 'liberty' | 'economy' | 'rights'; target: number; progress: number; momentum: number } | null;
 }
 
 export function defaultPolicies(): NationPolicies {
-  return { abolishedSerfdom: false, progressiveTax: false, universalSuffrage: false, economicLaw: 'laissezFaire' };
+  return {
+    abolishedSerfdom: false, progressiveTax: false, universalSuffrage: false, economicLaw: 'laissezFaire',
+    gov: 'presidential', suffrage: 3, liberty: 0, rights: 1, lawProgress: null,
+  };
+}
+
+/** v0.10 各国初始政权与法律（按世界观；洛林=总统共和+财富选举+基本权利） */
+export function nationPoliciesFor(id: NationId): NationPolicies {
+  const p = defaultPolicies();
+  switch (id) {
+    case 'empire':
+      p.gov = 'autocracy'; p.suffrage = 0; p.liberty = 0; p.rights = 0; p.economicLaw = 'traditionalism';
+      break;
+    case 'lorraine':
+      p.gov = 'presidential'; p.suffrage = 3; p.liberty = 0; p.rights = 1; p.economicLaw = 'laissezFaire';
+      break;
+    case 'ianys':
+      p.gov = 'monarchy'; p.suffrage = 2; p.liberty = 0; p.rights = 1; p.economicLaw = 'laissezFaire';
+      break;
+    case 'orange':
+      p.gov = 'merchantRepublic'; p.suffrage = 3; p.liberty = 0; p.rights = 1; p.economicLaw = 'laissezFaire';
+      break;
+    case 'zalakN':
+      p.gov = 'monarchy'; p.suffrage = 1; p.liberty = 0; p.rights = 0; p.economicLaw = 'traditionalism';
+      break;
+    case 'zalakS':
+      p.gov = 'monarchy'; p.suffrage = 2; p.liberty = 0; p.rights = 0; p.economicLaw = 'traditionalism';
+      break;
+    case 'angland':
+      p.gov = 'merchantRepublic'; p.suffrage = 4; p.liberty = 0; p.rights = 1; p.economicLaw = 'laissezFaire';
+      break;
+    case 'normandy':
+      p.gov = 'autocracy'; p.suffrage = 0; p.liberty = 0; p.rights = 0; p.economicLaw = 'traditionalism';
+      break;
+  }
+  return p;
 }
 
 export interface NationState {
@@ -103,6 +149,12 @@ export interface NationState {
   slavePop: number;
   /** 上月动乱指数（下层不满加权，0 起） */
   unrest: number;
+  /** v0.10 行政效率（容量/消耗，0.3-1.2；月度政治结算更新） */
+  adminEff: number;
+  /** v0.10 合法性（执政联盟权势 × 政权基础 × 稳定度，0-100） */
+  legitimacy: number;
+  /** v0.10 改革通过标记（economy 结算置位 → settleMonth 落实 applyLawPassed） */
+  lawPassedFlag: { cat: 'gov' | 'suffrage' | 'liberty' | 'economy' | 'rights'; target: number } | null;
 }
 
 export interface ProvinceState {
@@ -371,9 +423,12 @@ export function newGameState(playerNation: NationId, seed: number, map: GameMap)
       emigration: 0,
       monthly: zeroLedger(),
       bankruptMonths: 0,
-      policies: defaultPolicies(),
+      policies: nationPoliciesFor(id),
       slavePop: 0,
       unrest: 0,
+      adminEff: 1,
+      legitimacy: 60,
+      lawPassedFlag: null,
     };
   });
 
@@ -434,6 +489,15 @@ export function settleMonth(state: GameState, map: GameMap): void {
   // 1) 经济全循环（三级市场/产业链/阶级/政策/财政/识字率/稳定度）——纯函数式，无随机
   settleEconomyMonth(state, map);
 
+  // 1a) v0.10 政治结算（行政力/合法性/立法推进/债务奴隶）
+  settlePoliticsMonth(state, map);
+  if (n.lawPassedFlag) {
+    const flag = n.lawPassedFlag;
+    n.lawPassedFlag = null;
+    n.policies.lawProgress = null;
+    applyLawPassed(state, map, flag.cat, flag.target);
+  }
+
   // 1b) v0.7 月度历史快照（侧栏图表数据源）
   recordHistory(state, map);
 
@@ -490,6 +554,105 @@ export function setEconomicLaw(state: GameState, law: EconomicLaw): void {
     traditionalism: '传统主义', laissezFaire: '自由放任', draconian: '农本主义',
   };
   addChronicle(state, `经济体制改为「${label[law]}」`, '政府分红与投资池效率修正生效');
+}
+
+/** v0.10 提出改革：目标法律类 + 目标档位（进入立法中；已在进行则覆盖） */
+export function proposeReform(
+  state: GameState,
+  cat: 'gov' | 'suffrage' | 'liberty' | 'economy' | 'rights',
+  target: number,
+): void {
+  const n = state.nations[state.playerNation];
+  n.policies.lawProgress = { cat, target, progress: 0, momentum: 0 };
+  addChronicle(state, `提出改革：${catLabel(cat)} → ${lawTierLabel(cat, target)}`, '议会开始审议');
+}
+
+/** v0.10 撤回改革 */
+export function withdrawReform(state: GameState): void {
+  const n = state.nations[state.playerNation];
+  if (n.policies.lawProgress) {
+    n.policies.lawProgress = null;
+    addChronicle(state, '撤回改革', '立法中止');
+  }
+}
+
+/** v0.10 改革通过（settleMonth 调用）：落实法律档位 + 特别转型（废奴/债务奴隶） */
+export function applyLawPassed(
+  state: GameState,
+  map: GameMap,
+  cat: 'gov' | 'suffrage' | 'liberty' | 'economy' | 'rights',
+  tier: number,
+): void {
+  const n = state.nations[state.playerNation];
+  if (cat === 'gov') {
+    const g = (['autocracy', 'monarchy', 'merchantRepublic', 'parliamentary', 'presidential'] as const)[tier];
+    n.policies.gov = g;
+    n.stability = Math.max(0, n.stability - 8); // 政权更迭短期动荡
+    addChronicle(state, `政体改为「${GOV_LABEL[g]}」`, '权力结构重组，稳定度 -8');
+  } else if (cat === 'suffrage') {
+    n.policies.suffrage = tier;
+    n.policies.universalSuffrage = tier === 5;
+    addChronicle(state, `选举法改为「${lawTierLabel('suffrage', tier)}」`, '选权重划');
+    if (tier === 5) n.stability = Math.max(0, Math.min(100, n.stability + (n.literacy >= 0.5 ? 3 : -4)));
+  } else if (cat === 'liberty') {
+    const prev = n.policies.liberty;
+    n.policies.liberty = tier;
+    if (tier === 2 && prev < 2) {
+      // 废奴：转化现有奴隶
+      let converted = 0;
+      for (const p of map.provinces) {
+        if (p.owner !== state.playerNation || p.isUndiscovered) continue;
+        const ps = state.provinces[p.id];
+        for (const s of ps.pops) {
+          if (s.class !== 7) continue;
+          const toTenant = s.size * 0.6;
+          const toOwner = s.size * 0.4;
+          let t = ps.pops.find((x) => x.class === 6 && x.job === s.job && x.race === s.race);
+          if (!t) { ps.pops.push({ class: 6, job: s.job, race: s.race, size: 0, happiness: 46, wage: s.wage, investIncome: 0, sat: { ...s.sat }, retrainMonths: 0, livingStd: s.livingStd, expected: s.expected, unrest: 0 }); t = ps.pops[ps.pops.length - 1]; }
+          t.size += toTenant;
+          let o = ps.pops.find((x) => x.class === 5 && x.job === s.job && x.race === s.race);
+          if (!o) { ps.pops.push({ class: 5, job: s.job, race: s.race, size: 0, happiness: 54, wage: s.wage, investIncome: 0, sat: { ...s.sat }, retrainMonths: 0, livingStd: s.livingStd, expected: s.expected, unrest: 0 }); o = ps.pops[ps.pops.length - 1]; }
+          o.size += toOwner;
+          converted += s.size;
+          s.size = 0;
+        }
+        ps.pops = ps.pops.filter((x) => x.size > 1e-9 || x.class !== 7);
+        ps.popTotal = 0;
+        for (const pop of ps.pops) ps.popTotal += pop.size;
+      }
+      n.policies.abolishedSerfdom = true;
+      n.slavePop = 0;
+      n.stability = Math.max(0, n.stability - 15);
+      addChronicle(state, '废农奴制', `解放奴隶 ${converted.toFixed(0)} 万 → 佃农/自耕农；地主震怒，稳定度 -15`);
+    } else {
+      addChronicle(state, `人身自由改为「${lawTierLabel('liberty', tier)}」`, '法律生效');
+    }
+  } else if (cat === 'economy') {
+    const law = (['traditionalism', 'laissezFaire', 'draconian'] as const)[tier];
+    n.policies.economicLaw = law;
+    addChronicle(state, `经济体制改为「${lawTierLabel('economy', tier)}」`, '政府分红与投资池效率修正生效');
+  } else if (cat === 'rights') {
+    n.policies.rights = tier;
+    addChronicle(state, `权利法改为「${lawTierLabel('rights', tier)}」`, '民生福祉法律生效');
+  }
+}
+
+/** v0.10 法律类/档位标签（UI/大事记用） */
+export const GOV_LABEL: Record<string, string> = {
+  autocracy: '君主专制', monarchy: '君主立宪', merchantRepublic: '商人共和', parliamentary: '议会共和', presidential: '总统共和',
+};
+const LAW_TIER_LABEL: Record<string, string[]> = {
+  gov: ['君主专制', '君主立宪', '商人共和', '议会共和', '总统共和'],
+  suffrage: ['权力世袭', '寡头政治', '土地选举', '财富选举', '资格性选举', '普选'],
+  liberty: ['农奴制', '债务奴隶', '废奴'],
+  economy: ['传统主义', '自由放任', '农本主义'],
+  rights: ['无保障', '基本权利', '劳工保护'],
+};
+function lawTierLabel(cat: string, tier: number): string {
+  return LAW_TIER_LABEL[cat]?.[tier] ?? `档位${tier}`;
+}
+function catLabel(cat: string): string {
+  return ({ gov: '政权', suffrage: '选举', liberty: '人身自由', economy: '经济', rights: '权利' } as Record<string, string>)[cat] ?? cat;
 }
 
 /** 废农奴制（一次性）：奴隶 → 佃农/自耕农；帝国初始可用 */

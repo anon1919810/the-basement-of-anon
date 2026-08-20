@@ -32,6 +32,7 @@ import { nextJobThreshold } from '../game/labor';
 import { BUILDING_DEFS, BUILDING_KINDS, buildingSkillReqPop, projectProgress, buildingUnlock } from '../game/buildings';
 import type { BuildingKind } from '../game/buildings';
 import { isCoastal } from '../game/logistics';
+import { nationClassPowerOf, supportOf } from '../game/politics';
 
 interface Props {
   game: GameState;
@@ -47,6 +48,9 @@ interface Props {
   onTogglePolicy: (policy: 'progressiveTax' | 'universalSuffrage', on: boolean) => void;
   /** v0.9 经济体制（政府分红效率） */
   onEconomicLaw: (law: 'traditionalism' | 'laissezFaire' | 'draconian') => void;
+  /** v0.10 政治：提出改革 / 撤回 */
+  onProposeReform: (cat: 'gov' | 'suffrage' | 'liberty' | 'economy' | 'rights', target: number) => void;
+  onWithdrawReform: () => void;
   onAbolish: () => void;
   /** v0.8 开放贸易（国家开关） */
   onToggleTrade: (on: boolean) => void;
@@ -612,6 +616,177 @@ function unlockReasons(kind: BuildingKind, infra: { roads: number; ports: number
   return reasons.join('；') || '选址受限';
 }
 
+/** 政治页（v0.10 两大支柱）：①权力分配与行政体制 ②改革与法律 */
+function PoliticsTab({ game, map, onProposeReform, onWithdrawReform }: {
+  game: GameState;
+  map: GameMap;
+  onProposeReform: Props['onProposeReform'];
+  onWithdrawReform: Props['onWithdrawReform'];
+}) {
+  const n = game.nations[game.playerNation];
+  const p = n.policies;
+  const GOV_LIST = [
+    { key: 'autocracy', label: '君主专制' },
+    { key: 'monarchy', label: '君主立宪' },
+    { key: 'merchantRepublic', label: '商人共和' },
+    { key: 'parliamentary', label: '议会共和' },
+    { key: 'presidential', label: '总统共和' },
+  ] as const;
+  const SUFFRAGE_LIST = [
+    { key: 0, label: '权力世袭' }, { key: 1, label: '寡头政治' }, { key: 2, label: '土地选举' },
+    { key: 3, label: '财富选举' }, { key: 4, label: '资格性选举' }, { key: 5, label: '普选' },
+  ] as const;
+  const LIBERTY_LIST = [
+    { key: 0, label: '农奴制' }, { key: 1, label: '债务奴隶' }, { key: 2, label: '废奴' },
+  ] as const;
+  const RIGHTS_LIST = [
+    { key: 0, label: '无保障' }, { key: 1, label: '基本权利' }, { key: 2, label: '劳工保护' },
+  ] as const;
+  const govIdx = GOV_LIST.findIndex((g) => g.key === p.gov);
+  const econTier = p.economicLaw === 'traditionalism' ? 0 : p.economicLaw === 'laissezFaire' ? 1 : 2;
+  const lp = p.lawProgress;
+
+  return (
+    <div className="tab-body">
+      {/* 权力分配：政权 + 合法性 + 行政力 */}
+      <section className="p-sec">
+        <h4>政权结构（执政联盟 → 合法性）</h4>
+        <div className="mkt-pick">
+          <select
+            value={p.gov}
+            onChange={(e) => {
+              const idx = GOV_LIST.findIndex((g) => g.key === e.target.value);
+              if (idx >= 0) onProposeReform('gov', idx);
+            }}
+            title="提出政权改革（立法通过后生效）"
+          >
+            {GOV_LIST.map((g) => <option key={g.key} value={g.key}>{g.label}</option>)}
+          </select>
+          <span className="dim">合法性 {n.legitimacy.toFixed(0)} · 行政效率 {((n.adminEff ?? 1) * 100).toFixed(0)}%</span>
+        </div>
+        <p className="dim">
+          执政联盟：{GOV_LIST[govIdx]?.label} · 合法性 = 联盟权势占比 × 政权基础 × 稳定度修正；
+          行政效率 = 行政容量/消耗（行政支出 vs 人口×复杂度），低于 100% 拖慢识字率与立法。
+        </p>
+      </section>
+
+      {/* 改革与法律：5 类谱系 */}
+      <section className="p-sec">
+        <h4>法律与改革（推动立法 → 支持率 × 合法性 × 行政效率）</h4>
+        {/* 政权 */}
+        <div className="law-row">
+          <span className="law-cat">政权</span>
+          <div className="law-tiers">
+            {GOV_LIST.map((g, i) => (
+              <button
+                key={g.key}
+                className={`law-tier ${i === govIdx ? 'current' : ''}`}
+                onClick={() => i !== govIdx && onProposeReform('gov', i)}
+                title={i === govIdx ? '现行法律' : '推动改革至此'}
+              >
+                {g.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {/* 选举（6 档并列） */}
+        <div className="law-row">
+          <span className="law-cat">选举</span>
+          <div className="law-tiers">
+            {SUFFRAGE_LIST.map((s) => (
+              <button
+                key={s.key}
+                className={`law-tier ${s.key === p.suffrage ? 'current' : ''}`}
+                onClick={() => s.key !== p.suffrage && onProposeReform('suffrage', s.key)}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {/* 人身自由 */}
+        <div className="law-row">
+          <span className="law-cat">人身自由</span>
+          <div className="law-tiers">
+            {LIBERTY_LIST.map((l) => (
+              <button
+                key={l.key}
+                className={`law-tier ${l.key === p.liberty ? 'current' : ''}`}
+                onClick={() => l.key !== p.liberty && onProposeReform('liberty', l.key)}
+              >
+                {l.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {/* 经济 */}
+        <div className="law-row">
+          <span className="law-cat">经济</span>
+          <div className="law-tiers">
+            {(['traditionalism', 'laissezFaire', 'draconian'] as const).map((l, i) => (
+              <button
+                key={l}
+                className={`law-tier ${i === econTier ? 'current' : ''}`}
+                onClick={() => i !== econTier && onProposeReform('economy', i)}
+              >
+                {l === 'traditionalism' ? '传统主义' : l === 'laissezFaire' ? '自由放任' : '农本主义'}
+              </button>
+            ))}
+          </div>
+        </div>
+        {/* 权利 */}
+        <div className="law-row">
+          <span className="law-cat">权利</span>
+          <div className="law-tiers">
+            {RIGHTS_LIST.map((r) => (
+              <button
+                key={r.key}
+                className={`law-tier ${r.key === p.rights ? 'current' : ''}`}
+                onClick={() => r.key !== p.rights && onProposeReform('rights', r.key)}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* 立法进度 */}
+      <section className="p-sec">
+        <h4>立法中</h4>
+        {lp ? (
+          <>
+            <div className="invest-card-head">
+              <b>改革推进中</b>
+              <span className="dim">支持率 {supportPctText(game, map, lp)}</span>
+              {lp.momentum < 0 && <span className="neg">反对激烈，立法倒退</span>}
+            </div>
+            <div className="bar-track">
+              <div className="bar-fill" style={{ width: `${lp.progress.toFixed(0)}%`, background: lp.momentum < 0 ? 'var(--warn, #b5472f)' : 'var(--accent, #466ec8)' }} />
+            </div>
+            <p className="dim">进度 {lp.progress.toFixed(1)}% · 上月 {lp.momentum > 0 ? '+' : ''}{lp.momentum.toFixed(1)}/月 · 支持率低于 15% 会倒退</p>
+            <button className="retrain-btn" onClick={onWithdrawReform}>撤回改革</button>
+          </>
+        ) : (
+          <p className="dim">当前无进行中的改革。点击法律档位推动改革——需要议会（支持率）通过。</p>
+        )}
+      </section>
+    </div>
+  );
+}
+
+/** 立法支持率文本（复用 politics.supportOf） */
+function supportPctText(game: GameState, map: GameMap, lp: { cat: 'gov' | 'suffrage' | 'liberty' | 'economy' | 'rights'; target: number }): string {
+  const power = nationClassPowerOf(game, map, game.playerNation);
+  const tierId = (['autocracy', 'monarchy', 'merchantRepublic', 'parliamentary', 'presidential'][lp.target] ??
+    (['hereditary', 'oligarchy', 'landed', 'wealth', 'merit', 'universal'][lp.target] ??
+      (['serfdom', 'debt', 'free'][lp.target] ??
+        (['traditionalism', 'laissezFaire', 'draconian'][lp.target] ??
+          ['none', 'basic', 'labor'][lp.target])))) as string;
+  const s = supportOf(lp.cat, tierId, power);
+  return `${s.toFixed(0)}%`;
+}
+
 /** 阶级页：七级分布 + 权势构成 + 阶级流动提示（政策移至「政策」分区） */
 function ClassTab({ game, map }: { game: GameState; map: GameMap }) {
   const id = game.playerNation;
@@ -874,7 +1049,7 @@ function TabBar({ tab, onTab }: { tab: Tab; onTab: (t: Tab) => void }) {
   );
 }
 
-export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSpending, onRetrain, onInvest, onCancelInvest, onNationalize, onTogglePolicy, onEconomicLaw, onAbolish, onToggleTrade, onExportRight, collapsed, onToggleCollapse }: Props & { collapsed: boolean; onToggleCollapse: () => void }) {
+export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSpending, onRetrain, onInvest, onCancelInvest, onNationalize, onTogglePolicy, onEconomicLaw, onProposeReform, onWithdrawReform, onAbolish, onToggleTrade, onExportRight, collapsed, onToggleCollapse }: Props & { collapsed: boolean; onToggleCollapse: () => void }) {
   const [tab, setTab] = useState<Tab>('gov');
   const n = game.nations[game.playerNation];
   const def = NATIONS[game.playerNation];
@@ -1050,6 +1225,10 @@ export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSp
                 <p className="dim">政策写入存档；累进税/普选可随时开关，废农奴制仅一次；经济体制决定政府分红效率（国企利润 → 国库）。</p>
               </section>
             </div>
+          )}
+          {/* ---- 国政 tab 续：政治（v0.10 权力分配 + 改革法律） ---- */}
+          {tab === 'gov' && (
+            <PoliticsTab game={game} map={map} onProposeReform={onProposeReform} onWithdrawReform={onWithdrawReform} />
           )}
 
           {/* ---- 人口 tab：阶级 + 人口 + 劳动力 + POP ---- */}

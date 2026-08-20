@@ -1126,6 +1126,57 @@ button.active {
   border-bottom: none;
 }
 
+/* ---- v0.10 政治：法律谱系 ---- */
+.law-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px dashed var(--line);
+}
+
+.law-row:last-child {
+  border-bottom: none;
+}
+
+.law-cat {
+  flex: none;
+  width: 52px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  padding-top: 4px;
+}
+
+.law-tiers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  flex: 1;
+}
+
+.law-tier {
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: none;
+  color: var(--text-dim);
+  font-size: 11px;
+  padding: 3px 6px;
+  cursor: pointer;
+}
+
+.law-tier:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.law-tier.current {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
 /* ---- v0.5 右侧省份详情面板（v0.7 玻璃悬浮） ---- */
 .prov-panel {
   position: absolute;

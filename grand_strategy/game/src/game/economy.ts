@@ -56,6 +56,7 @@ import { countyFreightFactor, provinceFreightFactor, isCoastal } from './logisti
 import { BUILDING_DEFS, BUILDING_KINDS, buildingSkillReqPop, buildingUnlock, startInvestment, terrainCostFactor } from './buildings';
 import type { BuildingCategory, BuildingKind, InvestmentProject } from './buildings';
 import { provinceHasResource } from './resources';
+import { advanceLaw, adminEfficiencyOf, legitimacyOf, nationClassPowerOf } from './politics';
 
 // ---- 税率（v0.4 连续滑块 0%-30%，见 tax.ts；TAX_RATES/TAX_LEVELS 已移除） ----
 
@@ -379,6 +380,70 @@ export function nationAvgHappiness(map: GameMap, state: GameState, nationId: Nat
     total += ps.popTotal;
   }
   return total > 1e-9 ? sum / total : 50;
+}
+
+// ---- v0.10 政治结算（月度）：行政力/合法性/立法推进/债务奴隶 ----
+/**
+ * 政治月度结算（确定性）：
+ *  - 行政效率 = 容量/消耗（行政支出 vs 人口×复杂度）→ 影响识字率增速/税效/立法速度
+ *  - 合法性 = 执政联盟权势占比 × 政权基础 × 稳定度修正
+ *  - 立法推进：lawProgress 存在 → advanceLaw（支持率×合法性×行政效率×0.15；支持率<15% 倒退）
+ *  - 债务奴隶（liberty=1）：生活水平 < 45 的贫困/赤贫 POP 有概率沦为债务奴（class7，可偿债脱离）
+ */
+export function settlePoliticsMonth(state: GameState, map: GameMap): void {
+  const n = state.nations[state.playerNation];
+  const lawCount = ['gov', 'suffrage', 'liberty', 'economy', 'rights'].reduce(
+    (s, c) => s + (c === 'economy' ? 1 : 1), 0);
+  n.adminEff = adminEfficiencyOf(n.spending.admin, n.popWan, n.policies.gov, lawCount);
+  const power = nationClassPowerOf(state, map, state.playerNation);
+  n.legitimacy = legitimacyOf({ stability: n.stability, policies: n.policies, classPower: power });
+
+  // 立法推进
+  const lp = n.policies.lawProgress;
+  if (lp) {
+    const r = advanceLaw(lp, power, n.legitimacy, n.adminEff);
+    lp.progress = r.progress;
+    lp.momentum = r.momentum;
+    if (lp.progress >= 100) {
+      // 通过：交回 state 落实（applyLawPassed 在 settleMonth 中调用）
+      n.lawPassedFlag = { cat: lp.cat, target: lp.target };
+      n.policies.lawProgress = null;
+    }
+  }
+
+  // 债务奴隶（liberty=1）：生活水平过低者沦为债务奴；可偿债脱离（生活水平回升自动脱离）
+  if (n.policies.liberty === 1) {
+    for (const pid of map.provinces
+      .filter((p) => p.owner === state.playerNation && !p.isUndiscovered)
+      .map((p) => p.id)) {
+      const ps = state.provinces[pid];
+      if (!ps?.pops) continue;
+      for (const pop of ps.pops) {
+        if (pop.class === 7) {
+          // 债务奴：生活水平回升 → 偿债脱离（升为佃农6）
+          if (pop.livingStd >= 55) {
+            let t = ps.pops.find((x) => x.class === 6 && x.job === pop.job && x.race === pop.race);
+            if (!t) { ps.pops.push({ class: 6, job: pop.job, race: pop.race, size: 0, happiness: 46, wage: pop.wage, investIncome: 0, sat: { ...pop.sat }, retrainMonths: 0, livingStd: pop.livingStd, expected: pop.expected, unrest: 0 }); t = ps.pops[ps.pops.length - 1]; }
+            t.size += pop.size * 0.05; // 每月 5% 偿债脱离
+            pop.size -= pop.size * 0.05;
+            if (pop.size < 1e-9) pop.size = 0;
+          }
+        } else if (pop.class === 5 || pop.class === 6) {
+          // 自由民 → 债务奴（生活水平 < 45 且无业/赤贫）
+          if (pop.livingStd < 45 && pop.wage < 1.2) {
+            let t = ps.pops.find((x) => x.class === 7 && x.job === pop.job && x.race === pop.race);
+            if (!t) { ps.pops.push({ class: 7, job: pop.job, race: pop.race, size: 0, happiness: 36, wage: pop.wage, investIncome: 0, sat: { ...pop.sat }, retrainMonths: 0, livingStd: pop.livingStd, expected: pop.expected, unrest: 0 }); t = ps.pops[ps.pops.length - 1]; }
+            t.size += pop.size * 0.02; // 每月 2% 沦陷
+            pop.size -= pop.size * 0.02;
+            if (pop.size < 1e-9) pop.size = 0;
+          }
+        }
+      }
+      ps.pops = ps.pops.filter((x) => x.size > 1e-9);
+      ps.popTotal = 0;
+      for (const pop of ps.pops) ps.popTotal += pop.size;
+    }
+  }
 }
 
 /** 月度经济全循环（只结算玩家国家；无随机，确定性） */
@@ -964,7 +1029,9 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
       const satAvg = (pop.sat.food + pop.sat.clothing + pop.sat.housing + pop.sat.fuel + satCoffee * 0.5 + satTobacco * 0.5) / 6;
       // v0.9 阶级分化：收入端（相对全国均值）+ 阶级偏移（贵族 +35 / 奴役 -28）→ 贵族生活 ≈ 奴隶 5-10 倍
       const shift = CLASS_STD_SHIFT[pop.class] ?? 0;
-      pop.livingStd = clamp(clamp(incomeRatio, 0, 2) * 50 + satAvg * 20 + shift, 0, 100);
+      // v0.10 权利法修正：无保障 -5 / 基本权利 0 / 劳工保护 +4（下层受益更大）
+      const rightsBonus = n.policies.rights === 2 ? (pop.class >= 4 ? 4 : 1) : n.policies.rights === 0 ? -5 : 0;
+      pop.livingStd = clamp(clamp(incomeRatio, 0, 2) * 50 + satAvg * 20 + shift + rightsBonus, 0, 100);
       pop.expected = EXPECTED_STD[pop.job];
       // 不满：低于预期每点缺口 +1/月；满意则缓释
       if (pop.livingStd < pop.expected) pop.unrest += pop.expected - pop.livingStd;
@@ -1200,10 +1267,10 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
     migrationIn,
   };
 
-  // ---- 14. 识字率 & 健康（教育/卫生支出） ----
+  // ---- 14. 识字率 & 健康（教育/卫生支出；v0.10 行政效率修正） ----
   const adminRatio = n.spending.admin / Math.max(1, def.sliderMax);
   const healthRatio = n.spending.health / Math.max(1, def.sliderMax);
-  n.literacy = clamp(0, 1, n.literacy + (0.003 + 0.005 * adminRatio) / 12);
+  n.literacy = clamp(0, 1, n.literacy + (0.003 + 0.005 * adminRatio) * (n.adminEff ?? 1) / 12);
   n.health = clamp(0, 1, n.health + (0.002 + 0.004 * healthRatio) / 12);
 
   // ---- 15. 稳定度漂移（综合税负 + 缺粮 + 低幸福度 + 下层动乱） ----

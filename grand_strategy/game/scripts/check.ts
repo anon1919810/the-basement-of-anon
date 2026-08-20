@@ -1,11 +1,12 @@
-// 经济体检：3 年洛林沙盒，检查关键系统健康度（职业/阶级分布、生活水平分化、消费矩阵、资本池、建造力、收支）
+// 经济体检：3 年洛林沙盒，检查关键系统健康度（职业/阶级分布、生活水平分化、消费矩阵、资本池、建造力、收支、政治）
 import { loadMap } from '../src/game/map';
-import { newGameState, tickDay } from '../src/game/state';
+import { newGameState, tickDay, GOV_LABEL } from '../src/game/state';
 import { GOODS_LIST } from '../src/game/market';
 import { JOB_LABEL, zeroJobMix } from '../src/game/pops';
 import { CLASS_DEFS } from '../src/game/classes';
 import { startInvestment } from '../src/game/buildings';
 import { provinceHasResource } from '../src/game/resources';
+import { LAW_TIERS } from '../src/game/politics';
 import type { Province } from '../src/game/map';
 import type { BuildingKind } from '../src/game/buildings';
 
@@ -91,11 +92,18 @@ function main(): void {
   else ok('阶级生活水平分化正常');
   if (avgOf(1) - avgOf(7) < 10) issue('分化幅度过小（<10）');
 
-  // 5. 消费矩阵（肉需求按阶级）
-  const meatByClass: Record<number, number> = {};
-  for (let c = 1; c <= 7; c++) meatByClass[c] = 0;
-  // 从 NEED 推导：肉需求 = Σ pop.size × NEED.meat × 矩阵（近似用上月末 demand）
-  // 直接检查:每阶级肉的满足度
+  // 5. 政治系统（v0.10：合法性/行政效率/法律状态）
+  console.log(`\n政治：政体 ${GOV_LABEL[n.policies.gov] ?? n.policies.gov} · 选举 ${LAW_TIERS.suffrage[n.policies.suffrage]?.label} · 人身 ${LAW_TIERS.liberty[n.policies.liberty]?.label} · 合法性 ${n.legitimacy.toFixed(0)} · 行政效率 ${((n.adminEff ?? 1) * 100).toFixed(0)}%`);
+  if (n.legitimacy < 20) issue(`合法性过低 ${n.legitimacy.toFixed(0)}（执政联盟失势）`);
+  else ok('合法性正常');
+  if ((n.adminEff ?? 1) < 0.5) issue(`行政效率过低 ${((n.adminEff ?? 1) * 100).toFixed(0)}%（行政支出不足）`);
+  else ok('行政效率正常');
+  if (n.policies.liberty === 0 && n.slavePop > 1) {
+    // 农奴制 + 有奴隶：正常组合；若 liberty=2 但仍有奴隶则异常
+  }
+  if (n.policies.liberty === 2 && n.slavePop > 0.01) issue('废奴法律已立但仍有奴隶（转化异常）');
+  else if (n.policies.liberty === 0 || n.policies.liberty === 1) ok('人身自由法律与奴隶人口一致');
+
   console.log('\n=== 体检完成 ===');
   console.log(issues === 0 ? '✅ 全部健康' : `⚠ ${issues} 项需关注`);
 }

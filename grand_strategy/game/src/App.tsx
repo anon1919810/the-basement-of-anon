@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { GameMap } from './game/map';
 import { applyBorderOverrides, loadMap } from './game/map';
 import type { GameState } from './game/state';
-import { loadGame, newGameState, tickDay, saveGame, clearSave, setPolicy, setEconomicLaw, abolishSerfdom, hasOldSave, scaledNationPop } from './game/state';
+import { loadGame, newGameState, tickDay, saveGame, clearSave, setPolicy, setEconomicLaw, abolishSerfdom, hasOldSave, scaledNationPop, proposeReform, withdrawReform } from './game/state';
 import type { NationId, ProvinceOwner, Speed } from './game/types';
 import type { TaxKind } from './game/tax';
 import type { GoodId } from './game/types';
@@ -221,6 +221,17 @@ export default function App() {
       setEconomicLaw(g, law);
       setGame({ ...g });
     },
+    /** v0.10 政治：提出改革 / 撤回 */
+    proposeReform(cat: 'gov' | 'suffrage' | 'liberty' | 'economy' | 'rights', target: number) {
+      const g = gameRef.current;
+      proposeReform(g, cat, target);
+      setGame({ ...g });
+    },
+    withdrawReform() {
+      const g = gameRef.current;
+      withdrawReform(g);
+      setGame({ ...g });
+    },
     /** v0.8 开放贸易（国家开关：false=自给不贸易；true=按世界价进出口+关税） */
     setOpenTrade(on: boolean) {
       const g = gameRef.current;
@@ -415,6 +426,8 @@ export default function App() {
           onNationalize={actions.nationalize}
           onTogglePolicy={actions.togglePolicy}
           onEconomicLaw={actions.setEconomicLaw}
+          onProposeReform={actions.proposeReform}
+          onWithdrawReform={actions.withdrawReform}
           onAbolish={actions.abolish}
           onToggleTrade={actions.setOpenTrade}
           onExportRight={actions.setExportRight}
