@@ -34,6 +34,8 @@ import type { BuildingKind } from '../game/buildings';
 import { isCoastal } from '../game/logistics';
 import { nationClassPowerOf, supportOf, LAW_TIERS } from '../game/politics';
 import { creditLimitOf, actualRateOf, bankCapitalOf } from '../game/finance';
+import { CULTURE_GROUP_LABEL, RELIGION_LABEL, RACE_CULTURE_GROUP } from '../game/culture';
+import type { CultureGroupId, ReligionId } from '../game/culture';
 
 interface Props {
   game: GameState;
@@ -663,6 +665,12 @@ function PoliticsTab({ game, map, onProposeReform, onWithdrawReform }: {
   const PRESS_LIST = [
     { key: 0, label: '异议者禁言' }, { key: 1, label: '出版审查' }, { key: 2, label: '特许出版' }, { key: 3, label: '出版自由' },
   ] as const;
+  const ETHNIC_LIST = [
+    { key: 0, label: '族裔国家' }, { key: 1, label: '种族隔离' }, { key: 2, label: '文化排斥' }, { key: 3, label: '文化多元' },
+  ] as const;
+  const RELIGION_LAW_LIST = [
+    { key: 0, label: '国教制' }, { key: 1, label: '信仰自由' }, { key: 2, label: '政教分离' }, { key: 3, label: '国家无神论' },
+  ] as const;
   const govIdx = GOV_LIST.findIndex((g) => g.key === p.gov);
   const econTier = p.economicLaw === 'traditionalism' ? 0 : p.economicLaw === 'laissezFaire' ? 1 : 2;
   const lp = p.lawProgress;
@@ -845,6 +853,36 @@ function PoliticsTab({ game, map, onProposeReform, onWithdrawReform }: {
             ))}
           </div>
         </div>
+        {/* 民族（4 档：异文化资质/工资惩罚 + 主体民族幸福） */}
+        <div className="law-row">
+          <span className="law-cat">民族</span>
+          <div className="law-tiers">
+            {ETHNIC_LIST.map((e) => (
+              <button
+                key={e.key}
+                className={`law-tier ${e.key === p.ethnic ? 'current' : ''}`}
+                onClick={() => e.key !== p.ethnic && onProposeReform('ethnic', e.key)}
+              >
+                {e.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {/* 宗教（4 档：教士权势/教会建筑/异教幸福 + 无神论教士移民） */}
+        <div className="law-row">
+          <span className="law-cat">宗教</span>
+          <div className="law-tiers">
+            {RELIGION_LAW_LIST.map((r) => (
+              <button
+                key={r.key}
+                className={`law-tier ${r.key === p.religion ? 'current' : ''}`}
+                onClick={() => r.key !== p.religion && onProposeReform('religion', r.key)}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </section>
 
       {/* 立法进度 */}
@@ -1009,6 +1047,31 @@ function nationRiskOf(game: GameState, map: GameMap): number {
     }
   }
   return wSum > 1e-9 ? risk / wSum : 1;
+}
+
+/** v0.14 文化组 + 宗教构成（人口 tab） */
+function cultureReligionOf(game: GameState, map: GameMap): { cultures: { label: string; share: number }[]; religions: { label: string; share: number }[] } {
+  const id = game.playerNation;
+  const cult: Record<string, number> = {};
+  const relig: Record<string, number> = {};
+  let total = 0;
+  for (const p of map.provinces) {
+    if (p.owner !== id || p.isUndiscovered) continue;
+    const ps = game.provinces[p.id];
+    if (!ps?.pops) continue;
+    for (const pop of ps.pops) {
+      cult[RACE_CULTURE_GROUP[pop.race]] = (cult[RACE_CULTURE_GROUP[pop.race]] ?? 0) + pop.size;
+      const r = pop.religion ?? '';
+      if (r) relig[r] = (relig[r] ?? 0) + pop.size;
+      total += pop.size;
+    }
+  }
+  const toArr = (m: Record<string, number>, lab: (k: string) => string) =>
+    Object.entries(m).map(([k, v]) => ({ label: lab(k), share: total > 1e-9 ? v / total : 0 })).sort((a, b) => b.share - a.share);
+  return {
+    cultures: toArr(cult, (k) => CULTURE_GROUP_LABEL[k as CultureGroupId] ?? k),
+    religions: toArr(relig, (k) => RELIGION_LABEL[k as ReligionId] ?? k),
+  };
 }
 
 /** 阶级页：七级分布 + 权势构成 + 阶级流动提示（政策移至「政策」分区） */
@@ -1487,6 +1550,18 @@ export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSp
                 <p className="dim">
                   风险系数 {nationRiskOf(game, map).toFixed(2)}（&lt;1 保守 / &gt;1 激进，私营扩张门槛）· 民族嗜好品按省构成加权进消费需求。
                 </p>
+              </section>
+              <section className="p-sec">
+                <h4>文化组与宗教构成（v0.14）</h4>
+                {cultureReligionOf(game, map).cultures.map((c) => (
+                  <div key={c.label} className="bar-row">
+                    <span className="bar-label" style={{ width: 150 }}>{c.label}</span>
+                    <div className="bar-track"><div className="bar-fill" style={{ width: `${Math.max(0.4, c.share * 100)}%` }} /></div>
+                    <span className="bar-value">{(c.share * 100).toFixed(1)}%</span>
+                  </div>
+                ))}
+                <p className="dim">宗教：{cultureReligionOf(game, map).religions.map((r) => `${r.label} ${(r.share * 100).toFixed(1)}%`).join(' · ')}</p>
+                <p className="dim">民族法：{LAW_TIERS.ethnic[n.policies.ethnic]?.label} · 宗教法：{LAW_TIERS.religion[n.policies.religion]?.label}</p>
               </section>
               <section className="p-sec">
                 <h4>人口概览（v0.5 按容量缩放 · 迁移软化）</h4>

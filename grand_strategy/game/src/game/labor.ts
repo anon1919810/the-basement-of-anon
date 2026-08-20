@@ -15,6 +15,7 @@ import { BASE_WAGE, EXPECTED_STD, JOB_LADDER, LITERACY_REQ, RETRAIN_MONTHS, clam
 import type { Pop } from './pops';
 import type { ClassId, JobId, RaceId } from './types';
 import { classDef } from './classes';
+import { RACE_RELIGION } from './culture';
 
 /** 每格劳动力需求系数（万人/格，决定岗位供需比） */
 export const LABOR_DEMAND_PER_CELL: Record<JobId, number> = {
@@ -28,6 +29,7 @@ export const LABOR_DEMAND_PER_CELL: Record<JobId, number> = {
   soldier: 0.2,
   bureaucrat: 0.15,
   teacher: 0.12, // v0.12 教师（大学岗位）
+  priest: 0.1, // v0.14 教士（教会岗位）
   merchant: 0.2,
   capitalist: 0.1,
   banker: 0.08,
@@ -135,6 +137,7 @@ export function applyClassMobility(state: GameState, map: GameMap): void {
     wage: BASE_WAGE[job], investIncome: 0,
     sat: { food: 0.9, clothing: 0.9, housing: 0.9, fuel: 0.9 },
     retrainMonths: 0, livingStd: 50, expected: EXPECTED_STD[job], unrest: 0,
+    religion: RACE_RELIGION[race],
   });
 
   for (const pid of provIds) {

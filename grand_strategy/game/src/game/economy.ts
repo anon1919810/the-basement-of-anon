@@ -74,7 +74,13 @@ import {
   MILITARY_EFFECT,
   POLICING_EFFECT,
   PRESS_EFFECT,
+  ETHNIC_QUALITY_PENALTY,
+  ETHNIC_WAGE_PENALTY,
+  ETHNIC_RELIGION_HAPPY,
+  ETHNIC_MAJORITY_HAPPY,
+  RELIGION_EFFECT,
 } from './politics';
+import { RACE_CULTURE_GROUP, RELIGION_CLERGY_HAPPY } from './culture';
 
 // ---- 税率（v0.4 连续滑块 0%-30%，见 tax.ts；TAX_RATES/TAX_LEVELS 已移除） ----
 
@@ -420,6 +426,28 @@ export function settlePoliticsMonth(state: GameState, map: GameMap): void {
   const power = nationClassPowerOf(state, map, state.playerNation);
   n.legitimacy = legitimacyOf({ stability: n.stability, policies: n.policies, classPower: power });
 
+  // ---- v0.14 宗教移民：国家无神论 → 教士月 2% 迁往宗教友好国（简化：直接流失，目标国外交轮接入） ----
+  const religTierP = LAW_TIERS.religion[n.policies.religion]?.id ?? 'freedom';
+  const relEffP = RELIGION_EFFECT[religTierP] ?? RELIGION_EFFECT.freedom;
+  if (relEffP.clergyEmigrate > 0) {
+    for (const pid of map.provinces
+      .filter((p) => p.owner === state.playerNation && !p.isUndiscovered)
+      .map((p) => p.id)) {
+      const ps = state.provinces[pid];
+      if (!ps?.pops) continue;
+      for (const pop of ps.pops) {
+        if (pop.job !== 'priest') continue;
+        const emigrate = pop.size * relEffP.clergyEmigrate;
+        pop.size -= emigrate;
+        n.emigration += emigrate; // 计入流民账
+        n.stability = Math.max(0, n.stability - 0.05); // 人才流失微伤稳定
+      }
+      ps.pops = ps.pops.filter((x) => x.size > 1e-9);
+      ps.popTotal = 0;
+      for (const pop of ps.pops) ps.popTotal += pop.size;
+    }
+  }
+
   // 立法推进
   const lp = n.policies.lawProgress;
   if (lp) {
@@ -445,7 +473,7 @@ export function settlePoliticsMonth(state: GameState, map: GameMap): void {
           // 债务奴：生活水平回升 → 偿债脱离（升为佃农6）
           if (pop.livingStd >= 55) {
             let t = ps.pops.find((x) => x.class === 6 && x.job === pop.job && x.race === pop.race);
-            if (!t) { ps.pops.push({ class: 6, job: pop.job, race: pop.race, size: 0, happiness: 46, wage: pop.wage, investIncome: 0, sat: { ...pop.sat }, retrainMonths: 0, livingStd: pop.livingStd, expected: pop.expected, unrest: 0 }); t = ps.pops[ps.pops.length - 1]; }
+            if (!t) { ps.pops.push({ class: 6, job: pop.job, race: pop.race, size: 0, happiness: 46, wage: pop.wage, investIncome: 0, sat: { ...pop.sat }, retrainMonths: 0, livingStd: pop.livingStd, expected: pop.expected, unrest: 0, religion: pop.religion }); t = ps.pops[ps.pops.length - 1]; }
             t.size += pop.size * 0.05; // 每月 5% 偿债脱离
             pop.size -= pop.size * 0.05;
             if (pop.size < 1e-9) pop.size = 0;
@@ -454,7 +482,7 @@ export function settlePoliticsMonth(state: GameState, map: GameMap): void {
           // 自由民 → 债务奴（生活水平 < 45 且无业/赤贫）
           if (pop.livingStd < 45 && pop.wage < 1.2) {
             let t = ps.pops.find((x) => x.class === 7 && x.job === pop.job && x.race === pop.race);
-            if (!t) { ps.pops.push({ class: 7, job: pop.job, race: pop.race, size: 0, happiness: 36, wage: pop.wage, investIncome: 0, sat: { ...pop.sat }, retrainMonths: 0, livingStd: pop.livingStd, expected: pop.expected, unrest: 0 }); t = ps.pops[ps.pops.length - 1]; }
+            if (!t) { ps.pops.push({ class: 7, job: pop.job, race: pop.race, size: 0, happiness: 36, wage: pop.wage, investIncome: 0, sat: { ...pop.sat }, retrainMonths: 0, livingStd: pop.livingStd, expected: pop.expected, unrest: 0, religion: pop.religion }); t = ps.pops[ps.pops.length - 1]; }
             t.size += pop.size * 0.02; // 每月 2% 沦陷
             pop.size -= pop.size * 0.02;
             if (pop.size < 1e-9) pop.size = 0;
@@ -468,6 +496,30 @@ export function settlePoliticsMonth(state: GameState, map: GameMap): void {
   }
 }
 
+/** 国家主流宗教（人口最多；国教制异教判定用） */
+function mainReligOf(state: GameState, map: GameMap, id: NationId): string {
+  const counts: Record<string, number> = {};
+  for (const p of map.provinces) {
+    if (p.owner !== id || p.isUndiscovered) continue;
+    const ps = state.provinces[p.id];
+    if (!ps?.pops) continue;
+    for (const pop of ps.pops) {
+      const r = pop.religion ?? '';
+      counts[r] = (counts[r] ?? 0) + pop.size;
+    }
+  }
+  let best = 'reason', n = -1;
+  for (const [r, v] of Object.entries(counts)) if (v > n) { best = r; n = v; }
+  return best;
+}
+
+/** 教士幸福修正：宗教倾向 + 宗教法（国教+2 / 无神论-6） */
+function clergyHappyOf(religion: string, religTier: string): number {
+  const tilt = RELIGION_CLERGY_HAPPY[religion as keyof typeof RELIGION_CLERGY_HAPPY] ?? 0;
+  const lawAdj = religTier === 'state' ? 2 : religTier === 'atheism' ? -6 : religTier === 'separation' ? -2 : 0;
+  return tilt + lawAdj;
+}
+
 /** 月度经济全循环（只结算玩家国家；无随机，确定性） */
 export function settleEconomyMonth(state: GameState, map: GameMap): void {
   const id = state.playerNation;
@@ -478,6 +530,27 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
   const provIds = map.provinces
     .filter((p) => p.owner === id && !p.isUndiscovered)
     .map((p) => p.id);
+
+  // ---- v0.14 主体文化组（人口最多）与民族/宗教法效果 ----
+  const cultCount: Record<string, number> = {};
+  for (const pid of provIds) {
+    const ps0 = state.provinces[pid];
+    if (!ps0?.pops) continue;
+    for (const pop of ps0.pops) {
+      const g = RACE_CULTURE_GROUP[pop.race];
+      cultCount[g] = (cultCount[g] ?? 0) + pop.size;
+    }
+  }
+  let mainCulture = 'govik';
+  let mainCultPop = -1;
+  for (const [g, v] of Object.entries(cultCount)) if (v > mainCultPop) { mainCulture = g; mainCultPop = v; }
+  const ethnicTier = LAW_TIERS.ethnic[n.policies.ethnic]?.id ?? 'pluralism';
+  const religTier = LAW_TIERS.religion[n.policies.religion]?.id ?? 'freedom';
+  const relEff = RELIGION_EFFECT[religTier] ?? RELIGION_EFFECT.freedom;
+  const ethnicQual = ETHNIC_QUALITY_PENALTY[ethnicTier] ?? 1;
+  const ethnicWage = ETHNIC_WAGE_PENALTY[ethnicTier] ?? 1;
+  const religHappy = ETHNIC_RELIGION_HAPPY[ethnicTier] ?? 0; // 异教惩罚仅国教制叠加
+  const majorityHappy = ETHNIC_MAJORITY_HAPPY[ethnicTier] ?? {};
 
   // ---- 1. 基建演化 ----
   evolveInfra(n);
@@ -674,7 +747,12 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
     if (ps) {
       // v0.12 建筑级雇佣职业（employ）优先，否则按 category 默认
       const allow = def.employ ?? SKILL_ALLOW[def.category];
-      for (const pop of ps.pops) if (allow.includes(pop.job)) skillPop += pop.size;
+      for (const pop of ps.pops) {
+        if (!allow.includes(pop.job)) continue;
+        // v0.14 民族法：异文化 POP 资质折算（族裔国家 ×0.7）
+        const isMain = RACE_CULTURE_GROUP[pop.race] === mainCulture;
+        skillPop += pop.size * (isMain ? 1 : ethnicQual);
+      }
     }
     const skillFactor = clamp(skillPop / buildingSkillReqPop(def), 0, 1);
     // 输入可用性：按本省库存（建筑按项目 id 序确定性占用）
@@ -1075,6 +1153,8 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
       if (pop.class <= 2) pop.wage += 0.3 * classDef(pop.class).landCoef;
       // v0.9 阶级财富乘数：收入 = 职业收入 × 阶级乘数（贵族 ×2.5 / 奴役 ×0.3）——财富地位直接变现
       pop.wage *= CLASS_WAGE_MULT[pop.class] ?? 1;
+      // v0.14 民族法：异文化工资惩罚（族裔国家 ×0.8）
+      if (RACE_CULTURE_GROUP[pop.race] !== mainCulture) pop.wage *= ethnicWage;
       // 收入 = 工资（劳动） + 投资收入（上层；年化计入）
       const effWage = pop.wage + (pop.investIncome * 12) / Math.max(pop.size, 1e-9);
       const wageFactor = effWage / BASE_WAGE[pop.job];
@@ -1118,7 +1198,9 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
         }
       }
       // ---- 自发改行：不满 + 省内存在高薪可得岗位 → 概率转职（不满越高越积极；转职后不满减半） ----
-      if (pop.unrest >= 5) {
+      // v0.14 教士顽固：改行阈值 5→10，概率减半（有信仰的顽固派）
+      const retrainThreshold = pop.job === 'priest' ? 10 : 5;
+      if (pop.unrest >= retrainThreshold) {
         const options: JobId[] = [];
         const up = JOB_LADDER[pop.job];
         if (up) options.push(up);
@@ -1130,7 +1212,7 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
           if (w > bestW) { bestW = w; best = o; }
         }
         if (best && bestW > pop.wage * 1.05) {
-          const chance = Math.min(0.02, 0.001 + pop.unrest / 1500);
+          const chance = Math.min(0.02, 0.001 + pop.unrest / 1500) * (pop.job === 'priest' ? 0.5 : 1);
           const amount = pop.size * chance;
           if (amount > 0.01) {
             pop.size -= amount;
@@ -1147,6 +1229,8 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
           classTaxCoefFor('consumption', pop.class, n.policies.progressiveTax)) /
         2;
       const taxBurden = taxBurdenBase * tc;
+      const isMainCult = RACE_CULTURE_GROUP[pop.race] === mainCulture;
+      const isMainRelig = (pop.religion ?? '') === (religTier === 'state' ? mainReligOf(state, map, id) : '');
       const polHap =
         (n.policies.progressiveTax ? PROGRESSIVE_HAPPINESS[pop.class] : 0) +
         (n.policies.universalSuffrage ? SUFFRAGE_HAPPINESS[pop.class] : 0) +
@@ -1154,7 +1238,15 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
         (EDUCATION_HAPPY[LAW_TIERS.education[n.policies.education]?.id ?? 'none']?.[pop.class] ?? 0) +
         (HEALTH_HAPPY[LAW_TIERS.health[n.policies.health]?.id ?? 'none']?.[pop.class] ?? 0) +
         (pop.class >= 4 ? (POLICING_EFFECT[LAW_TIERS.policing[n.policies.policing]?.id ?? 'none']?.unhappy ?? 0) : 0) +
-        (PRESS_EFFECT[LAW_TIERS.press[n.policies.press]?.id ?? 'censor']?.happy ?? 0);
+        (PRESS_EFFECT[LAW_TIERS.press[n.policies.press]?.id ?? 'censor']?.happy ?? 0) +
+        // v0.14 民族法：主体民族按阶级幸福 / 异文化无额外幸福惩罚（工资与资质已体现）
+        (isMainCult ? (majorityHappy[pop.class] ?? 0) : 0) +
+        // v0.14 宗教法：国教制下异教幸福惩罚（与民族法叠加）；主流宗教幸福
+        (religTier === 'state'
+          ? (isMainRelig ? (relEff.majorityHappy ?? 0) : (religHappy ?? 0))
+          : 0) +
+        // v0.14 教士幸福：随宗教法（国教+2 / 无神论-6）+ 宗教倾向
+        (pop.job === 'priest' ? clergyHappyOf(pop.religion ?? '', religTier) : 0);
       let happiness = clamp(
         0, 100,
         classDef(pop.class).baseHappiness +

@@ -10,7 +10,7 @@
  *  - 经济 3 档并入现有 economicLaw；权利法影响生活水平下限与幸福度
  *  - 立法：玩家提出 → 月推进 = 支持率% × 合法性% × 行政效率 × 0.15 → 满 100 通过；支持率过低倒退
  */
-import type { ClassId, NationId } from './types';
+import type { ClassId, JobId, NationId } from './types';
 import { classPoliticalWeight } from './classes';
 import type { GameMap } from './map';
 import type { GameState } from './state';
@@ -68,7 +68,7 @@ export const INITIAL_GOV: Record<NationId, GovStructure> = {
 };
 
 // ---- ②法律谱系 ----
-export type LawCategory = 'gov' | 'suffrage' | 'liberty' | 'economy' | 'rights' | 'education' | 'health' | 'military' | 'policing' | 'press';
+export type LawCategory = 'gov' | 'suffrage' | 'liberty' | 'economy' | 'rights' | 'education' | 'health' | 'military' | 'policing' | 'press' | 'ethnic' | 'religion';
 
 export interface LawTier {
   id: string;
@@ -147,23 +147,38 @@ export const LAW_TIERS: Record<LawCategory, LawTier[]> = {
     { id: 'licensed', label: '特许出版', desc: '持牌人可出版' },
     { id: 'free', label: '出版自由', desc: '言论不受预审' },
   ],
+  // 民族 4 档（v0.14）：异文化/异宗教 POP 资质与工资负修正；主体民族按档位幸福
+  ethnic: [
+    { id: 'nationState', label: '族裔国家', desc: '异文化异宗教受重罚' },
+    { id: 'segregation', label: '种族隔离', desc: '异文化受中罚' },
+    { id: 'exclusion', label: '文化排斥', desc: '异文化轻罚，宗教惩罚消失' },
+    { id: 'pluralism', label: '文化多元', desc: '无异文化惩罚' },
+  ],
+  // 宗教 4 档（v0.14）：教士权势/教会建筑效率/异教幸福惩罚
+  religion: [
+    { id: 'state', label: '国教制', desc: '主流宗教国教化' },
+    { id: 'freedom', label: '信仰自由', desc: '各教平等' },
+    { id: 'separation', label: '政教分离', desc: '教会脱离国家资助' },
+    { id: 'atheism', label: '国家无神论', desc: '压制宗教，教士移民' },
+  ],
 };
 
 export const LAW_CATEGORY_LABEL: Record<LawCategory, string> = {
   gov: '政权', suffrage: '选举', liberty: '人身自由', economy: '经济', rights: '权利',
   education: '教育', health: '医疗', military: '国防', policing: '治安', press: '言论',
+  ethnic: '民族', religion: '宗教',
 };
 
 /** 初始法律（洛林：总统共和+财富选举+农奴制+自由放任+基本权利；他国按世界观） */
 export const INITIAL_LAWS: Record<NationId, Record<LawCategory, number>> = {
-  empire: { gov: 0, suffrage: 0, liberty: 0, economy: 0, rights: 0, education: 0, health: 0, military: 0, policing: 0, press: 0 },
-  lorraine: { gov: 4, suffrage: 3, liberty: 0, economy: 1, rights: 1, education: 1, health: 1, military: 1, policing: 1, press: 2 },
-  ianys: { gov: 1, suffrage: 2, liberty: 0, economy: 1, rights: 1, education: 1, health: 1, military: 1, policing: 1, press: 1 },
-  orange: { gov: 2, suffrage: 3, liberty: 0, economy: 1, rights: 1, education: 2, health: 1, military: 1, policing: 1, press: 2 },
-  zalakN: { gov: 1, suffrage: 1, liberty: 0, economy: 0, rights: 0, education: 0, health: 0, military: 0, policing: 0, press: 0 },
-  zalakS: { gov: 1, suffrage: 2, liberty: 0, economy: 0, rights: 0, education: 1, health: 0, military: 0, policing: 0, press: 0 },
-  angland: { gov: 2, suffrage: 4, liberty: 0, economy: 1, rights: 1, education: 2, health: 2, military: 1, policing: 2, press: 3 },
-  normandy: { gov: 0, suffrage: 0, liberty: 0, economy: 0, rights: 0, education: 0, health: 0, military: 0, policing: 0, press: 0 },
+  empire: { gov: 0, suffrage: 0, liberty: 0, economy: 0, rights: 0, education: 0, health: 0, military: 0, policing: 0, press: 0, ethnic: 0, religion: 0 },
+  lorraine: { gov: 4, suffrage: 3, liberty: 0, economy: 1, rights: 1, education: 1, health: 1, military: 1, policing: 1, press: 2, ethnic: 3, religion: 1 },
+  ianys: { gov: 1, suffrage: 2, liberty: 0, economy: 1, rights: 1, education: 1, health: 1, military: 1, policing: 1, press: 1, ethnic: 2, religion: 1 },
+  orange: { gov: 2, suffrage: 3, liberty: 0, economy: 1, rights: 1, education: 2, health: 1, military: 1, policing: 1, press: 2, ethnic: 2, religion: 1 },
+  zalakN: { gov: 1, suffrage: 1, liberty: 0, economy: 0, rights: 0, education: 0, health: 0, military: 0, policing: 0, press: 0, ethnic: 1, religion: 0 },
+  zalakS: { gov: 1, suffrage: 2, liberty: 0, economy: 0, rights: 0, education: 1, health: 0, military: 0, policing: 0, press: 0, ethnic: 1, religion: 0 },
+  angland: { gov: 2, suffrage: 4, liberty: 0, economy: 1, rights: 1, education: 2, health: 2, military: 1, policing: 2, press: 3, ethnic: 3, religion: 2 },
+  normandy: { gov: 0, suffrage: 0, liberty: 0, economy: 0, rights: 0, education: 0, health: 0, military: 0, policing: 0, press: 0, ethnic: 0, religion: 0 },
 };
 
 // ---- 阶级对法律的立场（-2 强烈反对 ~ +2 强烈支持；权势加权 → 支持率） ----
@@ -251,6 +266,73 @@ export const PRESS_STANCE: Record<string, Record<ClassId, Stance>> = {
   free: { 1: -2, 2: -1, 3: 2, 4: 2, 5: 1, 6: 1, 7: 1 },
 };
 
+/** 民族法立场（阶级维度：族裔政策按财富利害）：文化多元下 中产支持（无失业压力）、温饱/挣扎反对（失业焦虑） */
+export const ETHNIC_STANCE: Record<string, Record<ClassId, Stance>> = {
+  nationState: { 1: 2, 2: 1, 3: 0, 4: -1, 5: -2, 6: -2, 7: -2 },
+  segregation: { 1: 1, 2: 1, 3: 0, 4: 0, 5: -1, 6: -1, 7: -1 },
+  exclusion: { 1: 2, 2: 1, 3: -1, 4: -1, 5: -1, 6: -1, 7: -1 },
+  pluralism: { 1: -2, 2: -1, 3: 1, 4: -1, 5: -1, 6: 0, 7: 0 },
+};
+
+/** 宗教法立场（职业维度：观念随生产方式，不随财富）：资本家/银行家反教权；底层喜安慰剂 */
+export const RELIGION_STANCE_JOB: Record<string, Record<JobId, Stance>> = {
+  state: {
+    slave: 1, peasant: 1, worker: 1, technician: -1, clerk: 0, engineer: -1,
+    shopkeeper: 0, soldier: 1, bureaucrat: 1, teacher: -1, priest: 2,
+    merchant: -1, capitalist: -1, banker: -1,
+  },
+  freedom: {
+    slave: 1, peasant: 1, worker: 1, technician: 1, clerk: 1, engineer: 1,
+    shopkeeper: 1, soldier: 0, bureaucrat: 1, teacher: 1, priest: 0,
+    merchant: 1, capitalist: 1, banker: 0,
+  },
+  separation: {
+    slave: 0, peasant: 0, worker: 0, technician: 1, clerk: 0, engineer: 1,
+    shopkeeper: 0, soldier: 0, bureaucrat: 0, teacher: 1, priest: -1,
+    merchant: 1, capitalist: 2, banker: 1,
+  },
+  atheism: {
+    slave: -1, peasant: -1, worker: -1, technician: 1, clerk: 0, engineer: 1,
+    shopkeeper: 0, soldier: -1, bureaucrat: 0, teacher: 1, priest: -2,
+    merchant: 0, capitalist: 1, banker: 1,
+  },
+};
+
+/** 民族法效果：异文化资质/工资惩罚（档位索引 → 乘数） */
+export const ETHNIC_QUALITY_PENALTY: Record<string, number> = {
+  nationState: 0.7, segregation: 0.8, exclusion: 0.9, pluralism: 1.0,
+};
+export const ETHNIC_WAGE_PENALTY: Record<string, number> = {
+  nationState: 0.8, segregation: 0.88, exclusion: 0.94, pluralism: 1.0,
+};
+/** 民族法异宗教幸福惩罚（仅国教制宗教法下叠加；档位 → 惩罚值） */
+export const ETHNIC_RELIGION_HAPPY: Record<string, number> = {
+  nationState: -10, segregation: -6, exclusion: 0, pluralism: 0,
+};
+/** 民族法主体民族幸福修正（档位 → 不同阶级加成；中产 vs 上层分化） */
+export const ETHNIC_MAJORITY_HAPPY: Record<string, Record<ClassId, number>> = {
+  nationState: { 1: 0, 2: 0, 3: 4, 4: 2, 5: 1, 6: 0, 7: 0 },
+  segregation: { 1: 0, 2: 0, 3: 2, 4: 2, 5: 1, 6: 0, 7: 0 },
+  exclusion: { 1: 3, 2: 2, 3: -2, 4: -1, 5: -1, 6: 0, 7: 0 },
+  pluralism: { 1: -2, 2: -1, 3: -2, 4: -3, 5: -3, 6: 0, 7: 0 },
+};
+
+/** 宗教法效果：教士政治权重修正（×） / 教会建筑效率（×） / 主流宗教幸福 / 异教幸福 */
+export interface ReligionEffect {
+  clergyPower: number;
+  churchEff: number;
+  majorityHappy: number;
+  minorityHappy: number;
+  /** 教士月移民率（无神论触发） */
+  clergyEmigrate: number;
+}
+export const RELIGION_EFFECT: Record<string, ReligionEffect> = {
+  state: { clergyPower: 1.1, churchEff: 1.2, majorityHappy: 2, minorityHappy: -4, clergyEmigrate: 0 },
+  freedom: { clergyPower: 1.0, churchEff: 1.0, majorityHappy: 0, minorityHappy: 0, clergyEmigrate: 0 },
+  separation: { clergyPower: 0.92, churchEff: 0.9, majorityHappy: 0, minorityHappy: 0, clergyEmigrate: 0 },
+  atheism: { clergyPower: 0.85, churchEff: 0.7, majorityHappy: 0, minorityHappy: 0, clergyEmigrate: 0.02 },
+};
+
 /** 获取某法律类某档的阶级立场表 */
 export function stanceOf(cat: LawCategory, tierId: string): Record<ClassId, Stance> {
   switch (cat) {
@@ -264,6 +346,20 @@ export function stanceOf(cat: LawCategory, tierId: string): Record<ClassId, Stan
     case 'military': return MILITARY_STANCE[tierId] ?? MILITARY_STANCE.peasant;
     case 'policing': return POLICING_STANCE[tierId] ?? POLICING_STANCE.none;
     case 'press': return PRESS_STANCE[tierId] ?? PRESS_STANCE.gag;
+    case 'ethnic': return ETHNIC_STANCE[tierId] ?? ETHNIC_STANCE.nationState;
+    case 'religion': {
+      // 宗教法按职业立场：把职业立场表转成阶级加权（每个阶级取其代表职业的立场）
+      const jobSt = RELIGION_STANCE_JOB[tierId] ?? RELIGION_STANCE_JOB.freedom;
+      const out: Record<ClassId, Stance> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0 };
+      out[1] = (jobSt.capitalist ?? 0) as Stance; // 富裕：资本家代表
+      out[2] = (jobSt.banker ?? 0) as Stance; // 安逸：银行家代表
+      out[3] = (jobSt.teacher ?? 0) as Stance; // 中产：教师代表
+      out[4] = (jobSt.clerk ?? 0) as Stance; // 温饱：职员代表
+      out[5] = (jobSt.worker ?? 0) as Stance; // 挣扎：工人代表
+      out[6] = (jobSt.peasant ?? 0) as Stance; // 赤贫：无业/自耕农代表
+      out[7] = (jobSt.slave ?? 0) as Stance; // 奴役
+      return out;
+    }
   }
 }
 
@@ -451,6 +547,8 @@ export function nationClassPowerOf(state: GameState, map: GameMap, id: NationId)
   const milEff = MILITARY_EFFECT[LAW_TIERS.military[n.policies.military]?.id ?? 'peasant'] ?? MILITARY_EFFECT.peasant;
   const policeEff = POLICING_EFFECT[LAW_TIERS.policing[n.policies.policing]?.id ?? 'none'] ?? POLICING_EFFECT.none;
   const pressEff = PRESS_EFFECT[LAW_TIERS.press[n.policies.press]?.id ?? 'censor'] ?? PRESS_EFFECT.censor;
+  // v0.14 宗教法：教士权势修正（国教 +10% / 无神论 -15%）
+  const religEff = RELIGION_EFFECT[LAW_TIERS.religion[n.policies.religion]?.id ?? 'freedom'] ?? RELIGION_EFFECT.freedom;
   for (const p of map.provinces) {
     if (p.owner !== id || p.isUndiscovered) continue;
     const ps = state.provinces[p.id];
@@ -461,6 +559,8 @@ export function nationClassPowerOf(state: GameState, map: GameMap, id: NationId)
       if (pop.class === 1) w *= milEff.noblePower;
       // 官僚/中产：治安法（秘密警察→官僚权重）与言论法（出版自由→中产权重）
       if (pop.class === 3) w *= policeEff.power * pressEff.power;
+      // v0.14 教士：宗教法权势修正 + 教士职业本身权重提升（教团组织）
+      if (pop.job === 'priest') w *= religEff.clergyPower * 1.5;
       power[pop.class] += pop.size * w;
     }
   }

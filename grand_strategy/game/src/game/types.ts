@@ -48,6 +48,7 @@ export type JobId =
   | 'soldier'
   | 'bureaucrat'
   | 'teacher'
+  | 'priest'
   | 'merchant'
   | 'capitalist'
   | 'banker';

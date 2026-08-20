@@ -368,9 +368,10 @@ export const BUILDING_DEFS: Record<BuildingKind, BuildingDef> = {
   },
   school: {
     kind: 'school', label: '学校', category: 'infra', skill: 'technician',
+    employ: ['technician', 'teacher', 'priest', 'clerk'], // v0.14 教士：教会学校（教育=教会学校时）
     inputs: { lumber: 0.8, stone: 0.8 }, output: undefined, capacity: 0,
     cost: 150, duration: 6, opCost: 0.5, infra: {},
-    desc: '公共服务：识字率↑ → 职员/技术工人资质（C 阶段接入）。',
+    desc: '公共服务：识字率↑ → 职员/技术工人资质；宗教法影响教会学校效率。',
   },
   bank: {
     kind: 'bank', label: '银行', category: 'infra', skill: 'technician',

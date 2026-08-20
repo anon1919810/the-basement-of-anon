@@ -12,6 +12,7 @@ import type { ClassId } from './types';
 import { CLASSES, CLASS_DEFS, INITIAL_CLASS_DIST, classDef } from './classes';
 import { GOODS_LIST, zeroGoods } from './market';
 import { provinceHasFur, provinceHasResource, provinceCoastal } from './resources';
+import { RACE_RELIGION } from './culture';
 
 export function clamp(v: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, v));
@@ -32,11 +33,11 @@ export const RACE_LABEL: Record<RaceId, string> = {
   norman: '诺曼',
 };
 
-export const JOBS: JobId[] = ['slave', 'peasant', 'worker', 'technician', 'clerk', 'engineer', 'shopkeeper', 'soldier', 'bureaucrat', 'teacher', 'merchant', 'capitalist', 'banker'];
+export const JOBS: JobId[] = ['slave', 'peasant', 'worker', 'technician', 'clerk', 'engineer', 'shopkeeper', 'soldier', 'bureaucrat', 'teacher', 'priest', 'merchant', 'capitalist', 'banker'];
 export const JOB_LABEL: Record<JobId, string> = {
   slave: '奴隶', peasant: '自耕农', worker: '工人', technician: '技术工人',
   clerk: '职员', engineer: '工程师', shopkeeper: '店主',
-  soldier: '军人', bureaucrat: '官僚', teacher: '教师',
+  soldier: '军人', bureaucrat: '官僚', teacher: '教师', priest: '教士',
   merchant: '商人', capitalist: '资本家', banker: '银行家',
 };
 
@@ -44,7 +45,7 @@ export const JOB_LABEL: Record<JobId, string> = {
 export function zeroJobMix(): Record<JobId, number> {
   return {
     slave: 0, peasant: 0, worker: 0, technician: 0, clerk: 0, engineer: 0,
-    shopkeeper: 0, soldier: 0, bureaucrat: 0, teacher: 0, merchant: 0, capitalist: 0, banker: 0,
+    shopkeeper: 0, soldier: 0, bureaucrat: 0, teacher: 0, priest: 0, merchant: 0, capitalist: 0, banker: 0,
   };
 }
 
@@ -103,6 +104,7 @@ export const JOB_OUTPUT_PER_WAN: Record<JobId, number> = {
   soldier: 0,        // 军人：吃军饷
   bureaucrat: 0.002, // 官僚：行政管理产出
   teacher: 0,        // 教师：教育服务（大学资质加成）
+  priest: 0,         // 教士：宗教服务（教会建筑加成）
   merchant: 0, capitalist: 0, banker: 0, // 资本侧不出产商品
 };
 
@@ -118,6 +120,7 @@ export const JOB_GOOD: Record<JobId, GoodId> = {
   soldier: 'food',
   bureaucrat: 'clothing',
   teacher: 'clothing',
+  priest: 'clothing',
   merchant: 'luxury',
   capitalist: 'luxury',
   banker: 'luxury',
@@ -158,7 +161,7 @@ export const LUXURY_OUTPUT_PER_WAN: Record<JobId, number> = {
   clerk: 0,
   engineer: 0.0008,
   shopkeeper: 0.0004,
-  soldier: 0, bureaucrat: 0, teacher: 0,
+  soldier: 0, bureaucrat: 0, teacher: 0, priest: 0,
   merchant: 0, capitalist: 0, banker: 0,
 };
 /** 奢侈品需求基数（× 阶级奢侈权重 × 幸福度系数 × 国家财富系数）；v0.9 平衡：0.0022→0.0006（工业化前奢侈品本就稀少） */
@@ -197,8 +200,8 @@ export const JOB_CONSUME: Partial<Record<GoodId, Partial<Record<JobId, number>>>
   food: { soldier: 1.5, peasant: 1.3, worker: 1.1, bureaucrat: 1.2, shopkeeper: 1.1 },
   meat: { soldier: 1.5, peasant: 1.1, worker: 1.1, merchant: 1.2, shopkeeper: 1.2 },
   tobacco: { soldier: 2.0, worker: 1.6, peasant: 1.2, bureaucrat: 1.2, merchant: 1.3, shopkeeper: 1.3 },
-  coffee: { bureaucrat: 2.5, clerk: 1.8, teacher: 1.8, merchant: 1.5, capitalist: 1.5, banker: 1.6, soldier: 1.2, shopkeeper: 1.4 },
-  clothing: { bureaucrat: 1.8, clerk: 1.3, teacher: 1.3, engineer: 1.2, soldier: 1.2, capitalist: 1.3, shopkeeper: 1.3 },
+  coffee: { bureaucrat: 2.5, clerk: 1.8, teacher: 1.8, priest: 1.5, merchant: 1.5, capitalist: 1.5, banker: 1.6, soldier: 1.2, shopkeeper: 1.4 },
+  clothing: { bureaucrat: 1.8, clerk: 1.3, teacher: 1.3, priest: 1.3, engineer: 1.2, soldier: 1.2, capitalist: 1.3, shopkeeper: 1.3 },
   fineFood: { bureaucrat: 1.5, merchant: 1.3, capitalist: 1.4, banker: 1.5, soldier: 1.2, shopkeeper: 1.2 },
   sugar: { capitalist: 1.3, banker: 1.4, merchant: 1.2 },
   luxury: { capitalist: 1.2, banker: 1.3, merchant: 1.2 },
@@ -225,6 +228,7 @@ export const BASE_WAGE: Record<JobId, number> = {
   soldier: 3.0,
   bureaucrat: 3.8,
   teacher: 3.2, // 教师：地位与职员相近（v0.12）
+  priest: 3.5, // 教士：略高于教师（v0.14）
   merchant: 4.0,
   capitalist: 5.0,
   banker: 5.5,
@@ -246,6 +250,7 @@ export const JOB_LADDER: Record<JobId, JobId | null> = {
   soldier: null,
   bureaucrat: null,
   teacher: null,
+  priest: null,
   merchant: 'capitalist',
   capitalist: 'banker',
   banker: null,
@@ -253,14 +258,15 @@ export const JOB_LADDER: Record<JobId, JobId | null> = {
 /** 旁路转职（v0.9）：工人/职员/店主/工程师可获取军人/官僚资质（转职 UI 展开选项） */
 export const JOB_LATERAL: Record<JobId, JobId[]> = {
   worker: ['soldier'],
-  clerk: ['bureaucrat', 'teacher'],
-  technician: ['bureaucrat', 'teacher'],
+  clerk: ['bureaucrat', 'teacher', 'priest'],
+  technician: ['bureaucrat', 'teacher', 'priest'],
   engineer: ['soldier', 'bureaucrat'],
-  shopkeeper: ['bureaucrat', 'soldier'],
+  shopkeeper: ['bureaucrat', 'soldier', 'priest'],
   peasant: ['soldier'],
   soldier: ['peasant', 'worker'],
   bureaucrat: ['worker', 'clerk'],
-  teacher: ['bureaucrat', 'clerk'],
+  teacher: ['bureaucrat', 'clerk', 'priest'],
+  priest: ['teacher', 'bureaucrat', 'clerk'],
   slave: [], merchant: [], capitalist: [], banker: [],
 };
 /** 技能梯子识字率门槛（资质获取） */
@@ -275,6 +281,7 @@ export const LITERACY_REQ: Record<JobId, number> = {
   soldier: 0.15,
   bureaucrat: 0.2,
   teacher: 0.3, // 教师需较高识字（v0.12）
+  priest: 0.35, // 教士需高识字（v0.14）
   merchant: 0.2,
   capitalist: 0.3,
   banker: 0.4,
@@ -292,6 +299,7 @@ export const EXPECTED_STD: Record<JobId, number> = {
   soldier: 50,
   bureaucrat: 65,
   teacher: 52, // 教师：预期与职员相当（v0.12）
+  priest: 55, // 教士：略高于教师（v0.14）
   merchant: 58,
   capitalist: 70,
   banker: 75,
@@ -373,6 +381,7 @@ export const INITIAL_JOB_MIX: Record<JobId, number> = {
   soldier: 0.04,
   bureaucrat: 0.03,
   teacher: 0.01, // v0.12 教师（大学配套）
+  priest: 0.01, // v0.14 教士（教会配套）
   merchant: 0.05,
   capitalist: 0.02,
   banker: 0.01,
@@ -400,6 +409,8 @@ export interface Pop {
   expected: number;
   /** v0.9 不满积累（低于预期每点缺口 +1/月；触发自发改行） */
   unrest: number;
+  /** v0.14 宗教（创建时按种族派生；异教惩罚/教士倾向精确到 POP） */
+  religion: string;
 }
 
 export interface ProvinceEcon {
@@ -454,6 +465,7 @@ export function createProvincePops(
           livingStd: 50,
           expected: EXPECTED_STD[job],
           unrest: 0,
+          religion: RACE_RELIGION[race],
         });
       }
     }

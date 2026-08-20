@@ -67,8 +67,12 @@ export interface NationPolicies {
   policing: number;
   /** v0.10 言论法档位（0 异议者禁言 / 1 出版审查 / 2 特许出版 / 3 出版自由） */
   press: number;
+  /** v0.14 民族法档位（0 族裔国家 / 1 种族隔离 / 2 文化排斥 / 3 文化多元） */
+  ethnic: number;
+  /** v0.14 宗教法档位（0 国教制 / 1 信仰自由 / 2 政教分离 / 3 国家无神论） */
+  religion: number;
   /** v0.10 立法中（改革推进；null = 无进行中改革） */
-  lawProgress: { cat: 'gov' | 'suffrage' | 'liberty' | 'economy' | 'rights' | 'education' | 'health' | 'military' | 'policing' | 'press'; target: number; progress: number; momentum: number } | null;
+  lawProgress: { cat: LawCatType; target: number; progress: number; momentum: number } | null;
 }
 
 export function defaultPolicies(): NationPolicies {
@@ -76,6 +80,7 @@ export function defaultPolicies(): NationPolicies {
     abolishedSerfdom: false, progressiveTax: false, universalSuffrage: false, economicLaw: 'laissezFaire',
     gov: 'presidential', suffrage: 3, liberty: 0, rights: 1,
     education: 1, health: 1, military: 1, policing: 1, press: 2,
+    ethnic: 3, religion: 1,
     lawProgress: null,
   };
 }
@@ -87,34 +92,42 @@ export function nationPoliciesFor(id: NationId): NationPolicies {
     case 'empire':
       p.gov = 'autocracy'; p.suffrage = 0; p.liberty = 0; p.rights = 0; p.economicLaw = 'traditionalism';
       p.education = 0; p.health = 0; p.military = 0; p.policing = 0; p.press = 0;
+      p.ethnic = 0; p.religion = 0;
       break;
     case 'lorraine':
       p.gov = 'presidential'; p.suffrage = 3; p.liberty = 0; p.rights = 1; p.economicLaw = 'laissezFaire';
       p.education = 1; p.health = 1; p.military = 1; p.policing = 1; p.press = 2;
+      p.ethnic = 3; p.religion = 1;
       break;
     case 'ianys':
       p.gov = 'monarchy'; p.suffrage = 2; p.liberty = 0; p.rights = 1; p.economicLaw = 'laissezFaire';
       p.education = 1; p.health = 1; p.military = 1; p.policing = 1; p.press = 1;
+      p.ethnic = 2; p.religion = 1;
       break;
     case 'orange':
       p.gov = 'merchantRepublic'; p.suffrage = 3; p.liberty = 0; p.rights = 1; p.economicLaw = 'laissezFaire';
       p.education = 2; p.health = 1; p.military = 1; p.policing = 1; p.press = 2;
+      p.ethnic = 2; p.religion = 1;
       break;
     case 'zalakN':
       p.gov = 'monarchy'; p.suffrage = 1; p.liberty = 0; p.rights = 0; p.economicLaw = 'traditionalism';
       p.education = 0; p.health = 0; p.military = 0; p.policing = 0; p.press = 0;
+      p.ethnic = 1; p.religion = 0;
       break;
     case 'zalakS':
       p.gov = 'monarchy'; p.suffrage = 2; p.liberty = 0; p.rights = 0; p.economicLaw = 'traditionalism';
       p.education = 1; p.health = 0; p.military = 0; p.policing = 0; p.press = 0;
+      p.ethnic = 1; p.religion = 0;
       break;
     case 'angland':
       p.gov = 'merchantRepublic'; p.suffrage = 4; p.liberty = 0; p.rights = 1; p.economicLaw = 'laissezFaire';
       p.education = 2; p.health = 2; p.military = 1; p.policing = 2; p.press = 3;
+      p.ethnic = 3; p.religion = 2;
       break;
     case 'normandy':
       p.gov = 'autocracy'; p.suffrage = 0; p.liberty = 0; p.rights = 0; p.economicLaw = 'traditionalism';
       p.education = 0; p.health = 0; p.military = 0; p.policing = 0; p.press = 0;
+      p.ethnic = 0; p.religion = 0;
       break;
   }
   return p;
@@ -614,7 +627,7 @@ export function withdrawReform(state: GameState): void {
 
 /** v0.10 改革通过（settleMonth 调用）：落实法律档位 + 特别转型（废奴/债务奴隶） */
 /** v0.10 法律类（含民生/国防扩展） */
-export type LawCatType = 'gov' | 'suffrage' | 'liberty' | 'economy' | 'rights' | 'education' | 'health' | 'military' | 'policing' | 'press';
+export type LawCatType = 'gov' | 'suffrage' | 'liberty' | 'economy' | 'rights' | 'education' | 'health' | 'military' | 'policing' | 'press' | 'ethnic' | 'religion';
 
 export function applyLawPassed(
   state: GameState,
@@ -647,10 +660,10 @@ export function applyLawPassed(
           const toTenant = s.size * 0.6;
           const toOwner = s.size * 0.4;
           let t = ps.pops.find((x) => x.class === 6 && x.job === s.job && x.race === s.race);
-          if (!t) { ps.pops.push({ class: 6, job: s.job, race: s.race, size: 0, happiness: 46, wage: s.wage, investIncome: 0, sat: { ...s.sat }, retrainMonths: 0, livingStd: s.livingStd, expected: s.expected, unrest: 0 }); t = ps.pops[ps.pops.length - 1]; }
+          if (!t) { ps.pops.push({ class: 6, job: s.job, race: s.race, size: 0, happiness: 46, wage: s.wage, investIncome: 0, sat: { ...s.sat }, retrainMonths: 0, livingStd: s.livingStd, expected: s.expected, unrest: 0, religion: s.religion }); t = ps.pops[ps.pops.length - 1]; }
           t.size += toTenant;
           let o = ps.pops.find((x) => x.class === 5 && x.job === s.job && x.race === s.race);
-          if (!o) { ps.pops.push({ class: 5, job: s.job, race: s.race, size: 0, happiness: 54, wage: s.wage, investIncome: 0, sat: { ...s.sat }, retrainMonths: 0, livingStd: s.livingStd, expected: s.expected, unrest: 0 }); o = ps.pops[ps.pops.length - 1]; }
+          if (!o) { ps.pops.push({ class: 5, job: s.job, race: s.race, size: 0, happiness: 54, wage: s.wage, investIncome: 0, sat: { ...s.sat }, retrainMonths: 0, livingStd: s.livingStd, expected: s.expected, unrest: 0, religion: s.religion }); o = ps.pops[ps.pops.length - 1]; }
           o.size += toOwner;
           converted += s.size;
           s.size = 0;
@@ -688,6 +701,12 @@ export function applyLawPassed(
   } else if (cat === 'press') {
     n.policies.press = tier;
     addChronicle(state, `言论法改为「${lawTierLabel('press', tier)}」`, '满意度/识字率/政治力量修正生效');
+  } else if (cat === 'ethnic') {
+    n.policies.ethnic = tier;
+    addChronicle(state, `民族法改为「${lawTierLabel('ethnic', tier)}」`, '异文化资质/工资/幸福修正生效');
+  } else if (cat === 'religion') {
+    n.policies.religion = tier;
+    addChronicle(state, `宗教法改为「${lawTierLabel('religion', tier)}」`, '教士权势/教会建筑/异教幸福修正生效');
   }
 }
 
@@ -706,12 +725,14 @@ const LAW_TIER_LABEL: Record<string, string[]> = {
   military: ['农兵制度', '职业军队', '义务兵役', '大规模征募'],
   policing: ['无治安警察', '地方警察', '职业警察', '军事化警察', '秘密警察', '国民警卫队'],
   press: ['异议者禁言', '出版审查', '特许出版', '出版自由'],
+  ethnic: ['族裔国家', '种族隔离', '文化排斥', '文化多元'],
+  religion: ['国教制', '信仰自由', '政教分离', '国家无神论'],
 };
 function lawTierLabel(cat: string, tier: number): string {
   return LAW_TIER_LABEL[cat]?.[tier] ?? `档位${tier}`;
 }
 function catLabel(cat: string): string {
-  return ({ gov: '政权', suffrage: '选举', liberty: '人身自由', economy: '经济', rights: '权利', education: '教育', health: '医疗', military: '国防', policing: '治安', press: '言论' } as Record<string, string>)[cat] ?? cat;
+  return ({ gov: '政权', suffrage: '选举', liberty: '人身自由', economy: '经济', rights: '权利', education: '教育', health: '医疗', military: '国防', policing: '治安', press: '言论', ethnic: '民族', religion: '宗教' } as Record<string, string>)[cat] ?? cat;
 }
 
 /** 废农奴制（一次性）：奴隶 → 佃农/自耕农；帝国初始可用 */
@@ -730,7 +751,7 @@ export function abolishSerfdom(state: GameState, map: GameMap): boolean {
       if (toTenant > 0) {
         let t = ps.pops.find((x) => x.class === 6 && x.job === s.job && x.race === s.race);
         if (!t) {
-          ps.pops.push({ class: 6, job: s.job, race: s.race, size: 0, happiness: 46, wage: s.wage, investIncome: 0, sat: { ...s.sat }, retrainMonths: 0, livingStd: s.livingStd, expected: s.expected, unrest: 0 });
+          ps.pops.push({ class: 6, job: s.job, race: s.race, size: 0, happiness: 46, wage: s.wage, investIncome: 0, sat: { ...s.sat }, retrainMonths: 0, livingStd: s.livingStd, expected: s.expected, unrest: 0, religion: s.religion });
           t = ps.pops[ps.pops.length - 1];
         }
         t.size += toTenant;
@@ -738,7 +759,7 @@ export function abolishSerfdom(state: GameState, map: GameMap): boolean {
       if (toOwner > 0) {
         let o = ps.pops.find((x) => x.class === 5 && x.job === s.job && x.race === s.race);
         if (!o) {
-          ps.pops.push({ class: 5, job: s.job, race: s.race, size: 0, happiness: 54, wage: s.wage, investIncome: 0, sat: { ...s.sat }, retrainMonths: 0, livingStd: s.livingStd, expected: s.expected, unrest: 0 });
+          ps.pops.push({ class: 5, job: s.job, race: s.race, size: 0, happiness: 54, wage: s.wage, investIncome: 0, sat: { ...s.sat }, retrainMonths: 0, livingStd: s.livingStd, expected: s.expected, unrest: 0, religion: s.religion });
           o = ps.pops[ps.pops.length - 1];
         }
         o.size += toOwner;

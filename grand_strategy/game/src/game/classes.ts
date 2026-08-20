@@ -39,7 +39,7 @@ export interface ClassDef {
 export const CLASS_DEFS: Record<ClassId, ClassDef> = {
   1: {
     id: 1,
-    label: '贵族',
+    label: '富裕',
     members: '世袭贵族·大金融家·大地主',
     taxCoef: 0.2,
     luxuryAccess: 1.0,
@@ -52,7 +52,7 @@ export const CLASS_DEFS: Record<ClassId, ClassDef> = {
   },
   2: {
     id: 2,
-    label: '富裕',
+    label: '安逸',
     members: '大银行家·资本家·富商',
     taxCoef: 0.4,
     luxuryAccess: 0.85,
@@ -91,7 +91,7 @@ export const CLASS_DEFS: Record<ClassId, ClassDef> = {
   },
   5: {
     id: 5,
-    label: '贫困',
+    label: '挣扎',
     members: '自耕农·工人',
     taxCoef: 1.3,
     luxuryAccess: 0,
@@ -131,7 +131,7 @@ export const CLASS_DEFS: Record<ClassId, ClassDef> = {
 };
 
 export const CLASS_LABEL: Record<ClassId, string> = {
-  1: '贵族', 2: '富裕', 3: '中产', 4: '温饱', 5: '贫困', 6: '赤贫', 7: '奴役',
+  1: '富裕', 2: '安逸', 3: '中产', 4: '温饱', 5: '挣扎', 6: '赤贫', 7: '奴役',
 };
 
 export function classDef(c: ClassId): ClassDef {
