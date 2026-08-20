@@ -94,6 +94,7 @@ function main(): void {
 
   // 5. 政治系统（v0.10：合法性/行政效率/法律状态）
   console.log(`\n政治：政体 ${GOV_LABEL[n.policies.gov] ?? n.policies.gov} · 选举 ${LAW_TIERS.suffrage[n.policies.suffrage]?.label} · 人身 ${LAW_TIERS.liberty[n.policies.liberty]?.label} · 合法性 ${n.legitimacy.toFixed(0)} · 行政效率 ${((n.adminEff ?? 1) * 100).toFixed(0)}%`);
+  console.log(`民生：教育 ${LAW_TIERS.education[n.policies.education]?.label} · 医疗 ${LAW_TIERS.health[n.policies.health]?.label} · 国防 ${LAW_TIERS.military[n.policies.military]?.label} · 治安 ${LAW_TIERS.policing[n.policies.policing]?.label} · 言论 ${LAW_TIERS.press[n.policies.press]?.label}`);
   if (n.legitimacy < 20) issue(`合法性过低 ${n.legitimacy.toFixed(0)}（执政联盟失势）`);
   else ok('合法性正常');
   if ((n.adminEff ?? 1) < 0.5) issue(`行政效率过低 ${((n.adminEff ?? 1) * 100).toFixed(0)}%（行政支出不足）`);

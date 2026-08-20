@@ -56,7 +56,20 @@ import { countyFreightFactor, provinceFreightFactor, isCoastal } from './logisti
 import { BUILDING_DEFS, BUILDING_KINDS, buildingSkillReqPop, buildingUnlock, startInvestment, terrainCostFactor } from './buildings';
 import type { BuildingCategory, BuildingKind, InvestmentProject } from './buildings';
 import { provinceHasResource } from './resources';
-import { advanceLaw, adminEfficiencyOf, legitimacyOf, nationClassPowerOf } from './politics';
+import {
+  advanceLaw,
+  adminEfficiencyOf,
+  legitimacyOf,
+  nationClassPowerOf,
+  LAW_TIERS,
+  EDUCATION_LITERACY,
+  EDUCATION_HAPPY,
+  HEALTH_GROWTH,
+  HEALTH_HAPPY,
+  MILITARY_EFFECT,
+  POLICING_EFFECT,
+  PRESS_EFFECT,
+} from './politics';
 
 // ---- 税率（v0.4 连续滑块 0%-30%，见 tax.ts；TAX_RATES/TAX_LEVELS 已移除） ----
 
@@ -852,9 +865,10 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
   }
   // 低俸禄改行移至幸福度段（pop.wage 按省设定后判断）
 
-  // ---- 8.5 义务兵役（v0.9 仅战时）：按政体强度从自耕农/工人强制征兵；平时禁止强制转职 ----
+  // ---- 8.5 义务兵役（v0.9 仅战时；v0.10 国防法决定征兵强度）：按国防法从自耕农/工人强制征兵 ----
   if (n.warTime) {
-    const govRate = /独裁|帝国/.test(n.gov) ? 0.006 : /共和|城邦/.test(n.gov) ? 0.002 : 0.003;
+    const milEff = MILITARY_EFFECT[LAW_TIERS.military[n.policies.military]?.id ?? 'peasant'] ?? MILITARY_EFFECT.peasant;
+    const govRate = milEff.conscriptRate;
     for (const pid of provIds) {
       const ps = state.provinces[pid];
       for (const pop of ps.pops) {
@@ -1080,7 +1094,12 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
       const taxBurden = taxBurdenBase * tc;
       const polHap =
         (n.policies.progressiveTax ? PROGRESSIVE_HAPPINESS[pop.class] : 0) +
-        (n.policies.universalSuffrage ? SUFFRAGE_HAPPINESS[pop.class] : 0);
+        (n.policies.universalSuffrage ? SUFFRAGE_HAPPINESS[pop.class] : 0) +
+        // v0.10 民生/治安/言论幸福度修正（教育/医疗按阶级；治安压下层；言论按自由）
+        (EDUCATION_HAPPY[LAW_TIERS.education[n.policies.education]?.id ?? 'none']?.[pop.class] ?? 0) +
+        (HEALTH_HAPPY[LAW_TIERS.health[n.policies.health]?.id ?? 'none']?.[pop.class] ?? 0) +
+        (pop.class >= 4 ? (POLICING_EFFECT[LAW_TIERS.policing[n.policies.policing]?.id ?? 'none']?.unhappy ?? 0) : 0) +
+        (PRESS_EFFECT[LAW_TIERS.press[n.policies.press]?.id ?? 'censor']?.happy ?? 0);
       let happiness = clamp(
         0, 100,
         classDef(pop.class).baseHappiness +
@@ -1267,18 +1286,48 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
     migrationIn,
   };
 
-  // ---- 14. 识字率 & 健康（教育/卫生支出；v0.10 行政效率修正） ----
+  // ---- 14. 识字率 & 健康（教育/卫生支出；v0.10 教育法/医疗法/言论法修正） ----
   const adminRatio = n.spending.admin / Math.max(1, def.sliderMax);
   const healthRatio = n.spending.health / Math.max(1, def.sliderMax);
-  n.literacy = clamp(0, 1, n.literacy + (0.003 + 0.005 * adminRatio) * (n.adminEff ?? 1) / 12);
-  n.health = clamp(0, 1, n.health + (0.002 + 0.004 * healthRatio) / 12);
+  // 教育法：按人口加权的识字率修正（公立全民受益，私立只富者受益）
+  const eduTier = LAW_TIERS.education[n.policies.education]?.id ?? 'none';
+  const eduTable = EDUCATION_LITERACY[eduTier] ?? EDUCATION_LITERACY.none;
+  let eduW = 0, eduPop = 0;
+  for (const pid of provIds) {
+    const ps = state.provinces[pid];
+    if (!ps?.pops) continue;
+    for (const pop of ps.pops) {
+      eduW += pop.size * (eduTable[pop.class] ?? 0);
+      eduPop += pop.size;
+    }
+  }
+  const eduCoef = eduPop > 1e-9 ? eduW / eduPop : 0.5;
+  const pressEff = PRESS_EFFECT[LAW_TIERS.press[n.policies.press]?.id ?? 'censor'] ?? PRESS_EFFECT.censor;
+  n.literacy = clamp(0, 1, n.literacy + (0.003 + 0.005 * adminRatio) * (n.adminEff ?? 1) * (0.2 + 0.8 * eduCoef) * pressEff.literacy / 12);
+  // 医疗法：按人口加权的健康增速修正
+  const heaTier = LAW_TIERS.health[n.policies.health]?.id ?? 'none';
+  const heaTable = HEALTH_GROWTH[heaTier] ?? HEALTH_GROWTH.none;
+  let heaW = 0, heaPop = 0;
+  for (const pid of provIds) {
+    const ps = state.provinces[pid];
+    if (!ps?.pops) continue;
+    for (const pop of ps.pops) {
+      heaW += pop.size * (heaTable[pop.class] ?? 0);
+      heaPop += pop.size;
+    }
+  }
+  const heaCoef = heaPop > 1e-9 ? heaW / heaPop : 0.5;
+  n.health = clamp(0, 1, n.health + (0.002 + 0.004 * healthRatio) * (0.2 + 0.8 * heaCoef) / 12);
 
-  // ---- 15. 稳定度漂移（综合税负 + 缺粮 + 低幸福度 + 下层动乱） ----
+  // ---- 15. 稳定度漂移（综合税负 + 缺粮 + 低幸福度 + 下层动乱；v0.10 治安压制/言论修正） ----
   const satFoodNat = n.market.food.demand > 0 ? clamp(n.market.food.consumed / n.market.food.demand, 0, 1) : 1;
   const foodPenalty = (1 - satFoodNat) * 25;
   const happPenalty = Math.max(0, (55 - avgHappiness) * 0.25);
-  const unrestPenalty = n.unrest * 10;
-  const target = clamp(15, 100, 72 - penalty - foodPenalty - happPenalty - unrestPenalty);
+  // 治安法压制动乱：越高压制越强（秘密警察 2.2×）
+  const policeEff = POLICING_EFFECT[LAW_TIERS.policing[n.policies.policing]?.id ?? 'none'] ?? POLICING_EFFECT.none;
+  const unrestPenalty = (n.unrest * 10) / policeEff.suppress;
+  const pressStab = PRESS_EFFECT[LAW_TIERS.press[n.policies.press]?.id ?? 'censor']?.stability ?? 0;
+  const target = clamp(15, 100, 72 - penalty - foodPenalty - happPenalty - unrestPenalty + pressStab);
   n.stability += (target - n.stability) * 0.05;
   n.stability = clamp(0, 100, n.stability);
 }

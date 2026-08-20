@@ -68,7 +68,7 @@ export const INITIAL_GOV: Record<NationId, GovStructure> = {
 };
 
 // ---- ②法律谱系 ----
-export type LawCategory = 'gov' | 'suffrage' | 'liberty' | 'economy' | 'rights';
+export type LawCategory = 'gov' | 'suffrage' | 'liberty' | 'economy' | 'rights' | 'education' | 'health' | 'military' | 'policing' | 'press';
 
 export interface LawTier {
   id: string;
@@ -110,22 +110,60 @@ export const LAW_TIERS: Record<LawCategory, LawTier[]> = {
     { id: 'basic', label: '基本权利', desc: '人身财产受保护' },
     { id: 'labor', label: '劳工保护', desc: '工时/工资下限受保护' },
   ],
+  // 教育 4 档：按财富阶级提供识字率/幸福度修正（私立=上层获益，公立=全民）
+  education: [
+    { id: 'none', label: '无教育', desc: '文盲遍地' },
+    { id: 'church', label: '教会学校', desc: '教士传道识字，上层略受益' },
+    { id: 'private', label: '私立学校', desc: '学费门槛，富者受益' },
+    { id: 'public', label: '公立学校', desc: '全民义务教育' },
+  ],
+  // 医疗 4 档：按财富阶级提供健康/幸福度修正
+  health: [
+    { id: 'none', label: '无医疗', desc: '生死由天' },
+    { id: 'church', label: '教会医疗', desc: '教士施药，聊胜于无' },
+    { id: 'private', label: '私人医疗', desc: '名医只为有钱人' },
+    { id: 'public', label: '公立医疗', desc: '全民公共医疗' },
+  ],
+  // 国防 4 档：影响征兵/军费/战争动员 + 军队贵族政治力量
+  military: [
+    { id: 'peasant', label: '农兵制度', desc: '战时征农，战力弱，贵胄掌军' },
+    { id: 'professional', label: '职业军队', desc: '常备军，战力中' },
+    { id: 'conscript', label: '义务兵役', desc: '全民皆兵，动员强' },
+    { id: 'mass', label: '大规模征募', desc: '全面战争动员，代价高' },
+  ],
+  // 治安 6 档：影响动乱压制 + 军队/贵族/官僚/地主政治力量
+  policing: [
+    { id: 'none', label: '无治安警察', desc: '乡里自保' },
+    { id: 'local', label: '地方警察', desc: '县衙捕快' },
+    { id: 'professional', label: '职业警察', desc: '国家警察力量' },
+    { id: 'militarized', label: '军事化警察', desc: '军警一体，高压' },
+    { id: 'secret', label: '秘密警察', desc: '监控渗透，官僚权重' },
+    { id: 'guard', label: '国民警卫队', desc: '民兵常备，动员储备' },
+  ],
+  // 言论 4 档：配合警察制度修正满意度/识字率/政治力量
+  press: [
+    { id: 'gag', label: '异议者禁言', desc: '反对声入狱' },
+    { id: 'censor', label: '出版审查', desc: '特许审批出版' },
+    { id: 'licensed', label: '特许出版', desc: '持牌人可出版' },
+    { id: 'free', label: '出版自由', desc: '言论不受预审' },
+  ],
 };
 
 export const LAW_CATEGORY_LABEL: Record<LawCategory, string> = {
   gov: '政权', suffrage: '选举', liberty: '人身自由', economy: '经济', rights: '权利',
+  education: '教育', health: '医疗', military: '国防', policing: '治安', press: '言论',
 };
 
 /** 初始法律（洛林：总统共和+财富选举+农奴制+自由放任+基本权利；他国按世界观） */
 export const INITIAL_LAWS: Record<NationId, Record<LawCategory, number>> = {
-  empire: { gov: 0, suffrage: 0, liberty: 0, economy: 0, rights: 0 },
-  lorraine: { gov: 4, suffrage: 3, liberty: 0, economy: 1, rights: 1 },
-  ianys: { gov: 1, suffrage: 2, liberty: 0, economy: 1, rights: 1 },
-  orange: { gov: 2, suffrage: 3, liberty: 0, economy: 1, rights: 1 },
-  zalakN: { gov: 1, suffrage: 1, liberty: 0, economy: 0, rights: 0 },
-  zalakS: { gov: 1, suffrage: 2, liberty: 0, economy: 0, rights: 0 },
-  angland: { gov: 2, suffrage: 4, liberty: 0, economy: 1, rights: 1 },
-  normandy: { gov: 0, suffrage: 0, liberty: 0, economy: 0, rights: 0 },
+  empire: { gov: 0, suffrage: 0, liberty: 0, economy: 0, rights: 0, education: 0, health: 0, military: 0, policing: 0, press: 0 },
+  lorraine: { gov: 4, suffrage: 3, liberty: 0, economy: 1, rights: 1, education: 1, health: 1, military: 1, policing: 1, press: 2 },
+  ianys: { gov: 1, suffrage: 2, liberty: 0, economy: 1, rights: 1, education: 1, health: 1, military: 1, policing: 1, press: 1 },
+  orange: { gov: 2, suffrage: 3, liberty: 0, economy: 1, rights: 1, education: 2, health: 1, military: 1, policing: 1, press: 2 },
+  zalakN: { gov: 1, suffrage: 1, liberty: 0, economy: 0, rights: 0, education: 0, health: 0, military: 0, policing: 0, press: 0 },
+  zalakS: { gov: 1, suffrage: 2, liberty: 0, economy: 0, rights: 0, education: 1, health: 0, military: 0, policing: 0, press: 0 },
+  angland: { gov: 2, suffrage: 4, liberty: 0, economy: 1, rights: 1, education: 2, health: 2, military: 1, policing: 2, press: 3 },
+  normandy: { gov: 0, suffrage: 0, liberty: 0, economy: 0, rights: 0, education: 0, health: 0, military: 0, policing: 0, press: 0 },
 };
 
 // ---- 阶级对法律的立场（-2 强烈反对 ~ +2 强烈支持；权势加权 → 支持率） ----
@@ -171,6 +209,48 @@ export const ECONOMY_STANCE: Record<string, Record<ClassId, Stance>> = {
   draconian: { 1: 2, 2: 0, 3: 1, 4: 0, 5: 0, 6: -1, 7: -1 },
 };
 
+/** 教育法立场：无教育/教会=上层支持；公立=下层强烈支持、上层纳税不满 */
+export const EDUCATION_STANCE: Record<string, Record<ClassId, Stance>> = {
+  none: { 1: 2, 2: 1, 3: 0, 4: -1, 5: -2, 6: -2, 7: -2 },
+  church: { 1: 1, 2: 1, 3: 1, 4: 0, 5: -1, 6: -1, 7: -1 },
+  private: { 1: 1, 2: 2, 3: 1, 4: -1, 5: -2, 6: -2, 7: -2 },
+  public: { 1: -2, 2: -1, 3: 1, 4: 2, 5: 2, 6: 2, 7: 1 },
+};
+
+/** 医疗法立场 */
+export const HEALTH_STANCE: Record<string, Record<ClassId, Stance>> = {
+  none: { 1: 2, 2: 1, 3: 0, 4: -1, 5: -2, 6: -2, 7: -2 },
+  church: { 1: 1, 2: 1, 3: 1, 4: 0, 5: -1, 6: -1, 7: -1 },
+  private: { 1: 1, 2: 2, 3: 1, 4: -1, 5: -2, 6: -2, 7: -2 },
+  public: { 1: -2, 2: -1, 3: 1, 4: 2, 5: 2, 6: 2, 7: 1 },
+};
+
+/** 国防法立场：农兵=贵族拥兵自重；义务兵役/大规模征募=平民被征（下层反对）、民族主义上层支持 */
+export const MILITARY_STANCE: Record<string, Record<ClassId, Stance>> = {
+  peasant: { 1: 2, 2: 0, 3: 0, 4: -1, 5: -1, 6: -1, 7: -1 },
+  professional: { 1: 1, 2: 2, 3: 1, 4: 0, 5: -1, 6: -1, 7: -1 },
+  conscript: { 1: -1, 2: 1, 3: 2, 4: 1, 5: 0, 6: 0, 7: -1 },
+  mass: { 1: -2, 2: 0, 3: 1, 4: 1, 5: 1, 6: 1, 7: 0 },
+};
+
+/** 治安法立场：高压警察=上层支持下层反对 */
+export const POLICING_STANCE: Record<string, Record<ClassId, Stance>> = {
+  none: { 1: 0, 2: -1, 3: 0, 4: 1, 5: 1, 6: 1, 7: 1 },
+  local: { 1: 1, 2: 1, 3: 1, 4: 0, 5: -1, 6: -1, 7: -1 },
+  professional: { 1: 1, 2: 2, 3: 2, 4: 0, 5: -1, 6: -1, 7: -1 },
+  militarized: { 1: 2, 2: 1, 3: 0, 4: -1, 5: -2, 6: -2, 7: -2 },
+  secret: { 1: 2, 2: 1, 3: -1, 4: -2, 5: -2, 6: -2, 7: -2 },
+  guard: { 1: 1, 2: 1, 3: 1, 4: 1, 5: 0, 6: 0, 7: 0 },
+};
+
+/** 言论法立场：审查=上层支持；自由=中产/下层支持 */
+export const PRESS_STANCE: Record<string, Record<ClassId, Stance>> = {
+  gag: { 1: 2, 2: 1, 3: -1, 4: -2, 5: -2, 6: -2, 7: -2 },
+  censor: { 1: 1, 2: 1, 3: 0, 4: -1, 5: -1, 6: -1, 7: -1 },
+  licensed: { 1: 0, 2: 1, 3: 1, 4: 0, 5: 0, 6: 0, 7: 0 },
+  free: { 1: -2, 2: -1, 3: 2, 4: 2, 5: 1, 6: 1, 7: 1 },
+};
+
 /** 获取某法律类某档的阶级立场表 */
 export function stanceOf(cat: LawCategory, tierId: string): Record<ClassId, Stance> {
   switch (cat) {
@@ -179,8 +259,101 @@ export function stanceOf(cat: LawCategory, tierId: string): Record<ClassId, Stan
     case 'liberty': return LIBERTY_STANCE[tierId] ?? LIBERTY_STANCE.serfdom;
     case 'economy': return ECONOMY_STANCE[tierId] ?? ECONOMY_STANCE.traditionalism;
     case 'rights': return RIGHTS_STANCE[tierId] ?? RIGHTS_STANCE.none;
+    case 'education': return EDUCATION_STANCE[tierId] ?? EDUCATION_STANCE.none;
+    case 'health': return HEALTH_STANCE[tierId] ?? HEALTH_STANCE.none;
+    case 'military': return MILITARY_STANCE[tierId] ?? MILITARY_STANCE.peasant;
+    case 'policing': return POLICING_STANCE[tierId] ?? POLICING_STANCE.none;
+    case 'press': return PRESS_STANCE[tierId] ?? PRESS_STANCE.gag;
   }
 }
+
+// ---- 民生/国防法律效果表（v0.10）：教育/医疗按阶级修正；国防/治安/言论影响系统系数 ----
+
+/** 教育法各档 × 阶级：识字率增速修正（× 基础增速；0=不识字，1=正常） */
+export const EDUCATION_LITERACY: Record<string, Record<ClassId, number>> = {
+  none: { 1: 0.2, 2: 0.2, 3: 0.1, 4: 0.05, 5: 0, 6: 0, 7: 0 },
+  church: { 1: 0.9, 2: 0.8, 3: 0.6, 4: 0.4, 5: 0.2, 6: 0.1, 7: 0.05 },
+  private: { 1: 1.3, 2: 1.5, 3: 1.0, 4: 0.4, 5: 0.1, 6: 0, 7: 0 },
+  public: { 1: 1.2, 2: 1.3, 3: 1.4, 4: 1.5, 5: 1.5, 6: 1.3, 7: 0.8 },
+};
+
+/** 教育法各档 × 阶级：幸福度修正 */
+export const EDUCATION_HAPPY: Record<string, Record<ClassId, number>> = {
+  none: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0 },
+  church: { 1: 1, 2: 0.5, 3: 0.5, 4: 0, 5: -1, 6: -1, 7: -1 },
+  private: { 1: 1, 2: 2, 3: 0.5, 4: -1, 5: -1, 6: -1, 7: -1 },
+  public: { 1: -2, 2: -1, 3: 1, 4: 2, 5: 2, 6: 2, 7: 1 },
+};
+
+/** 医疗法各档 × 阶级：健康增速修正 */
+export const HEALTH_GROWTH: Record<string, Record<ClassId, number>> = {
+  none: { 1: 0.3, 2: 0.3, 3: 0.2, 4: 0.1, 5: 0, 6: 0, 7: 0 },
+  church: { 1: 0.8, 2: 0.7, 3: 0.6, 4: 0.5, 5: 0.3, 6: 0.2, 7: 0.1 },
+  private: { 1: 1.4, 2: 1.5, 3: 1.0, 4: 0.3, 5: 0.1, 6: 0, 7: 0 },
+  public: { 1: 1.1, 2: 1.2, 3: 1.3, 4: 1.4, 5: 1.5, 6: 1.4, 7: 1.0 },
+};
+
+/** 医疗法各档 × 阶级：幸福度修正 */
+export const HEALTH_HAPPY: Record<string, Record<ClassId, number>> = {
+  none: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0 },
+  church: { 1: 1, 2: 0.5, 3: 0.5, 4: 0, 5: -0.5, 6: -0.5, 7: -0.5 },
+  private: { 1: 1, 2: 2, 3: 0.5, 4: -1, 5: -1, 6: -1, 7: -1 },
+  public: { 1: -2, 2: -1, 3: 1, 4: 2, 5: 2, 6: 2, 7: 1.5 },
+};
+
+/** 国防法效果：征兵率/军费效率/动员系数/贵族政治权重修正 */
+export interface MilitaryEffect {
+  /** 战时征兵月率（× 政体基础） */
+  conscriptRate: number;
+  /** 军费效率（× 军事支出效果） */
+  milEff: number;
+  /** 战争动员系数（未来战争系统用） */
+  mobilization: number;
+  /** 军队/贵族政治权重修正 */
+  noblePower: number;
+}
+export const MILITARY_EFFECT: Record<string, MilitaryEffect> = {
+  peasant: { conscriptRate: 0.004, milEff: 0.7, mobilization: 0.6, noblePower: 1.3 },
+  professional: { conscriptRate: 0.002, milEff: 1.0, mobilization: 1.0, noblePower: 1.1 },
+  conscript: { conscriptRate: 0.006, milEff: 1.1, mobilization: 1.4, noblePower: 0.9 },
+  mass: { conscriptRate: 0.012, milEff: 1.3, mobilization: 1.8, noblePower: 0.7 },
+};
+
+/** 治安法效果：动乱压制/下层幸福惩罚/官僚政治权重修正 */
+export interface PolicingEffect {
+  /** 动乱压制（× 动乱指数惩罚；越高压制越强） */
+  suppress: number;
+  /** 下层（4-7 级）幸福度惩罚（高压社会压抑） */
+  unhappy: number;
+  /** 官僚/地主政治权重修正 */
+  power: number;
+}
+export const POLICING_EFFECT: Record<string, PolicingEffect> = {
+  none: { suppress: 0.5, unhappy: 0, power: 1.0 },
+  local: { suppress: 0.8, unhappy: -0.5, power: 1.0 },
+  professional: { suppress: 1.2, unhappy: -1, power: 1.05 },
+  militarized: { suppress: 1.8, unhappy: -2, power: 1.15 },
+  secret: { suppress: 2.2, unhappy: -3, power: 1.3 },
+  guard: { suppress: 1.5, unhappy: -1.5, power: 1.1 },
+};
+
+/** 言论法效果：识字率传播/稳定度/下层满意/政治权重修正 */
+export interface PressEffect {
+  /** 识字率传播（× 全国识字率增速） */
+  literacy: number;
+  /** 稳定度修正 */
+  stability: number;
+  /** 中产/下层幸福度修正 */
+  happy: number;
+  /** 中产/官僚政治权重修正 */
+  power: number;
+}
+export const PRESS_EFFECT: Record<string, PressEffect> = {
+  gag: { literacy: 0.6, stability: 3, happy: -2, power: 0.9 },
+  censor: { literacy: 0.8, stability: 1.5, happy: -1, power: 1.0 },
+  licensed: { literacy: 1.0, stability: 0, happy: 0, power: 1.05 },
+  free: { literacy: 1.3, stability: -2, happy: 1.5, power: 1.15 },
+};
 
 // ---- 行政力 ----
 /** 行政容量 = 行政支出 × 容量系数（万₭/月 → 容量） */
@@ -269,17 +442,25 @@ function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
 }
 
-/** 阶级权势（由 nationClassPower 计算；供政治系统复用） */
+/** 阶级权势（由 nationClassPower 计算；供政治系统复用；v0.10 国防/治安/言论修正） */
 export function nationClassPowerOf(state: GameState, map: GameMap, id: NationId): Record<ClassId, number> {
   const power: Record<ClassId, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0 };
   const n = state.nations[id];
   const suffrage = n.policies.suffrage === 5; // 普选档
+  // v0.10 法律对政治力量的修正
+  const milEff = MILITARY_EFFECT[LAW_TIERS.military[n.policies.military]?.id ?? 'peasant'] ?? MILITARY_EFFECT.peasant;
+  const policeEff = POLICING_EFFECT[LAW_TIERS.policing[n.policies.policing]?.id ?? 'none'] ?? POLICING_EFFECT.none;
+  const pressEff = PRESS_EFFECT[LAW_TIERS.press[n.policies.press]?.id ?? 'censor'] ?? PRESS_EFFECT.censor;
   for (const p of map.provinces) {
     if (p.owner !== id || p.isUndiscovered) continue;
     const ps = state.provinces[p.id];
     if (!ps?.pops) continue;
     for (const pop of ps.pops) {
-      const w = classPoliticalWeight(pop.class, suffrage);
+      let w = classPoliticalWeight(pop.class, suffrage);
+      // 贵族：国防法（农兵/职业军队→贵族军权更重）
+      if (pop.class === 1) w *= milEff.noblePower;
+      // 官僚/中产：治安法（秘密警察→官僚权重）与言论法（出版自由→中产权重）
+      if (pop.class === 3) w *= policeEff.power * pressEff.power;
       power[pop.class] += pop.size * w;
     }
   }

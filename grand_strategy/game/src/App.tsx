@@ -3,6 +3,7 @@ import type { GameMap } from './game/map';
 import { applyBorderOverrides, loadMap } from './game/map';
 import type { GameState } from './game/state';
 import { loadGame, newGameState, tickDay, saveGame, clearSave, setPolicy, setEconomicLaw, abolishSerfdom, hasOldSave, scaledNationPop, proposeReform, withdrawReform } from './game/state';
+import type { LawCatType } from './game/state';
 import type { NationId, ProvinceOwner, Speed } from './game/types';
 import type { TaxKind } from './game/tax';
 import type { GoodId } from './game/types';
@@ -222,7 +223,7 @@ export default function App() {
       setGame({ ...g });
     },
     /** v0.10 政治：提出改革 / 撤回 */
-    proposeReform(cat: 'gov' | 'suffrage' | 'liberty' | 'economy' | 'rights', target: number) {
+    proposeReform(cat: LawCatType, target: number) {
       const g = gameRef.current;
       proposeReform(g, cat, target);
       setGame({ ...g });

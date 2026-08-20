@@ -10,7 +10,7 @@ import { LineChart, Users, Landmark, Building2 } from 'lucide-react';
 import type { EChartsOption } from 'echarts';
 import MiniChart, { themedBase } from './MiniChart';
 import type { GameMap, Province } from '../game/map';
-import type { GameState } from '../game/state';
+import type { GameState, LawCatType } from '../game/state';
 import type { HistoryMonth } from '../game/state';
 import type { ClassId, GoodId } from '../game/types';
 import { NATIONS } from '../game/nations';
@@ -32,7 +32,7 @@ import { nextJobThreshold } from '../game/labor';
 import { BUILDING_DEFS, BUILDING_KINDS, buildingSkillReqPop, projectProgress, buildingUnlock } from '../game/buildings';
 import type { BuildingKind } from '../game/buildings';
 import { isCoastal } from '../game/logistics';
-import { nationClassPowerOf, supportOf } from '../game/politics';
+import { nationClassPowerOf, supportOf, LAW_TIERS } from '../game/politics';
 
 interface Props {
   game: GameState;
@@ -49,7 +49,7 @@ interface Props {
   /** v0.9 经济体制（政府分红效率） */
   onEconomicLaw: (law: 'traditionalism' | 'laissezFaire' | 'draconian') => void;
   /** v0.10 政治：提出改革 / 撤回 */
-  onProposeReform: (cat: 'gov' | 'suffrage' | 'liberty' | 'economy' | 'rights', target: number) => void;
+  onProposeReform: (cat: LawCatType, target: number) => void;
   onWithdrawReform: () => void;
   onAbolish: () => void;
   /** v0.8 开放贸易（国家开关） */
@@ -642,6 +642,22 @@ function PoliticsTab({ game, map, onProposeReform, onWithdrawReform }: {
   const RIGHTS_LIST = [
     { key: 0, label: '无保障' }, { key: 1, label: '基本权利' }, { key: 2, label: '劳工保护' },
   ] as const;
+  const EDU_LIST = [
+    { key: 0, label: '无教育' }, { key: 1, label: '教会学校' }, { key: 2, label: '私立学校' }, { key: 3, label: '公立学校' },
+  ] as const;
+  const HEALTH_LIST = [
+    { key: 0, label: '无医疗' }, { key: 1, label: '教会医疗' }, { key: 2, label: '私人医疗' }, { key: 3, label: '公立医疗' },
+  ] as const;
+  const MILITARY_LIST = [
+    { key: 0, label: '农兵制度' }, { key: 1, label: '职业军队' }, { key: 2, label: '义务兵役' }, { key: 3, label: '大规模征募' },
+  ] as const;
+  const POLICING_LIST = [
+    { key: 0, label: '无治安警察' }, { key: 1, label: '地方警察' }, { key: 2, label: '职业警察' },
+    { key: 3, label: '军事化警察' }, { key: 4, label: '秘密警察' }, { key: 5, label: '国民警卫队' },
+  ] as const;
+  const PRESS_LIST = [
+    { key: 0, label: '异议者禁言' }, { key: 1, label: '出版审查' }, { key: 2, label: '特许出版' }, { key: 3, label: '出版自由' },
+  ] as const;
   const govIdx = GOV_LIST.findIndex((g) => g.key === p.gov);
   const econTier = p.economicLaw === 'traditionalism' ? 0 : p.economicLaw === 'laissezFaire' ? 1 : 2;
   const lp = p.lawProgress;
@@ -749,6 +765,81 @@ function PoliticsTab({ game, map, onProposeReform, onWithdrawReform }: {
             ))}
           </div>
         </div>
+        {/* 教育（4 档：按财富阶级修正识字率/幸福度） */}
+        <div className="law-row">
+          <span className="law-cat">教育</span>
+          <div className="law-tiers">
+            {EDU_LIST.map((e) => (
+              <button
+                key={e.key}
+                className={`law-tier ${e.key === p.education ? 'current' : ''}`}
+                onClick={() => e.key !== p.education && onProposeReform('education', e.key)}
+              >
+                {e.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {/* 医疗（4 档：按财富阶级修正健康/幸福度） */}
+        <div className="law-row">
+          <span className="law-cat">医疗</span>
+          <div className="law-tiers">
+            {HEALTH_LIST.map((h) => (
+              <button
+                key={h.key}
+                className={`law-tier ${h.key === p.health ? 'current' : ''}`}
+                onClick={() => h.key !== p.health && onProposeReform('health', h.key)}
+              >
+                {h.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {/* 国防（4 档：征兵/军费/动员 + 贵族权势） */}
+        <div className="law-row">
+          <span className="law-cat">国防</span>
+          <div className="law-tiers">
+            {MILITARY_LIST.map((m) => (
+              <button
+                key={m.key}
+                className={`law-tier ${m.key === p.military ? 'current' : ''}`}
+                onClick={() => m.key !== p.military && onProposeReform('military', m.key)}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {/* 治安（6 档：动乱压制 + 官僚/地主权势） */}
+        <div className="law-row">
+          <span className="law-cat">治安</span>
+          <div className="law-tiers">
+            {POLICING_LIST.map((pl) => (
+              <button
+                key={pl.key}
+                className={`law-tier ${pl.key === p.policing ? 'current' : ''}`}
+                onClick={() => pl.key !== p.policing && onProposeReform('policing', pl.key)}
+              >
+                {pl.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {/* 言论（4 档：满意度/识字率/政治力量） */}
+        <div className="law-row">
+          <span className="law-cat">言论</span>
+          <div className="law-tiers">
+            {PRESS_LIST.map((pr) => (
+              <button
+                key={pr.key}
+                className={`law-tier ${pr.key === p.press ? 'current' : ''}`}
+                onClick={() => pr.key !== p.press && onProposeReform('press', pr.key)}
+              >
+                {pr.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </section>
 
       {/* 立法进度 */}
@@ -776,14 +867,11 @@ function PoliticsTab({ game, map, onProposeReform, onWithdrawReform }: {
 }
 
 /** 立法支持率文本（复用 politics.supportOf） */
-function supportPctText(game: GameState, map: GameMap, lp: { cat: 'gov' | 'suffrage' | 'liberty' | 'economy' | 'rights'; target: number }): string {
+function supportPctText(game: GameState, map: GameMap, lp: { cat: LawCatType; target: number }): string {
   const power = nationClassPowerOf(game, map, game.playerNation);
-  const tierId = (['autocracy', 'monarchy', 'merchantRepublic', 'parliamentary', 'presidential'][lp.target] ??
-    (['hereditary', 'oligarchy', 'landed', 'wealth', 'merit', 'universal'][lp.target] ??
-      (['serfdom', 'debt', 'free'][lp.target] ??
-        (['traditionalism', 'laissezFaire', 'draconian'][lp.target] ??
-          ['none', 'basic', 'labor'][lp.target])))) as string;
-  const s = supportOf(lp.cat, tierId, power);
+  const tier = LAW_TIERS[lp.cat]?.[lp.target];
+  if (!tier) return '—';
+  const s = supportOf(lp.cat, tier.id, power);
   return `${s.toFixed(0)}%`;
 }
 

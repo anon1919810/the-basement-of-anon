@@ -32,10 +32,10 @@ import { CLASSES } from './classes';
 import { defaultNationTax } from './tax';
 import type { NationTax } from './tax';
 
-export const SAVE_VERSION = 10;
-export const SAVE_KEY = 'kalt-save-v10';
+export const SAVE_VERSION = 11;
+export const SAVE_KEY = 'kalt-save-v11';
 /** 旧存档键（v0.8 起存档不兼容，提示用；含 v0.7 的 v8 键） */
-export const OLD_SAVE_KEYS = ['kalt-save-v9', 'kalt-save-v8', 'kalt-save-v7', 'kalt-save-v6', 'kalt-save-v5', 'kalt-save-v4', 'kalt-save-v3'];
+export const OLD_SAVE_KEYS = ['kalt-save-v10', 'kalt-save-v9', 'kalt-save-v8', 'kalt-save-v7', 'kalt-save-v6', 'kalt-save-v5', 'kalt-save-v4', 'kalt-save-v3'];
 
 /** 国家政策（v0.3/v0.10）：作用于当前国，写入状态与存档 */
 export type EconomicLaw = 'traditionalism' | 'laissezFaire' | 'draconian';
@@ -57,14 +57,26 @@ export interface NationPolicies {
   liberty: number;
   /** v0.10 权利法档位（0 无保障 / 1 基本权利 / 2 劳工保护） */
   rights: number;
+  /** v0.10 教育法档位（0 无教育 / 1 教会学校 / 2 私立学校 / 3 公立学校） */
+  education: number;
+  /** v0.10 医疗法档位（0 无医疗 / 1 教会医疗 / 2 私人医疗 / 3 公立医疗） */
+  health: number;
+  /** v0.10 国防法档位（0 农兵 / 1 职业军队 / 2 义务兵役 / 3 大规模征募） */
+  military: number;
+  /** v0.10 治安法档位（0 无 / 1 地方 / 2 职业 / 3 军事化 / 4 秘密警察 / 5 国民警卫队） */
+  policing: number;
+  /** v0.10 言论法档位（0 异议者禁言 / 1 出版审查 / 2 特许出版 / 3 出版自由） */
+  press: number;
   /** v0.10 立法中（改革推进；null = 无进行中改革） */
-  lawProgress: { cat: 'gov' | 'suffrage' | 'liberty' | 'economy' | 'rights'; target: number; progress: number; momentum: number } | null;
+  lawProgress: { cat: 'gov' | 'suffrage' | 'liberty' | 'economy' | 'rights' | 'education' | 'health' | 'military' | 'policing' | 'press'; target: number; progress: number; momentum: number } | null;
 }
 
 export function defaultPolicies(): NationPolicies {
   return {
     abolishedSerfdom: false, progressiveTax: false, universalSuffrage: false, economicLaw: 'laissezFaire',
-    gov: 'presidential', suffrage: 3, liberty: 0, rights: 1, lawProgress: null,
+    gov: 'presidential', suffrage: 3, liberty: 0, rights: 1,
+    education: 1, health: 1, military: 1, policing: 1, press: 2,
+    lawProgress: null,
   };
 }
 
@@ -74,27 +86,35 @@ export function nationPoliciesFor(id: NationId): NationPolicies {
   switch (id) {
     case 'empire':
       p.gov = 'autocracy'; p.suffrage = 0; p.liberty = 0; p.rights = 0; p.economicLaw = 'traditionalism';
+      p.education = 0; p.health = 0; p.military = 0; p.policing = 0; p.press = 0;
       break;
     case 'lorraine':
       p.gov = 'presidential'; p.suffrage = 3; p.liberty = 0; p.rights = 1; p.economicLaw = 'laissezFaire';
+      p.education = 1; p.health = 1; p.military = 1; p.policing = 1; p.press = 2;
       break;
     case 'ianys':
       p.gov = 'monarchy'; p.suffrage = 2; p.liberty = 0; p.rights = 1; p.economicLaw = 'laissezFaire';
+      p.education = 1; p.health = 1; p.military = 1; p.policing = 1; p.press = 1;
       break;
     case 'orange':
       p.gov = 'merchantRepublic'; p.suffrage = 3; p.liberty = 0; p.rights = 1; p.economicLaw = 'laissezFaire';
+      p.education = 2; p.health = 1; p.military = 1; p.policing = 1; p.press = 2;
       break;
     case 'zalakN':
       p.gov = 'monarchy'; p.suffrage = 1; p.liberty = 0; p.rights = 0; p.economicLaw = 'traditionalism';
+      p.education = 0; p.health = 0; p.military = 0; p.policing = 0; p.press = 0;
       break;
     case 'zalakS':
       p.gov = 'monarchy'; p.suffrage = 2; p.liberty = 0; p.rights = 0; p.economicLaw = 'traditionalism';
+      p.education = 1; p.health = 0; p.military = 0; p.policing = 0; p.press = 0;
       break;
     case 'angland':
       p.gov = 'merchantRepublic'; p.suffrage = 4; p.liberty = 0; p.rights = 1; p.economicLaw = 'laissezFaire';
+      p.education = 2; p.health = 2; p.military = 1; p.policing = 2; p.press = 3;
       break;
     case 'normandy':
       p.gov = 'autocracy'; p.suffrage = 0; p.liberty = 0; p.rights = 0; p.economicLaw = 'traditionalism';
+      p.education = 0; p.health = 0; p.military = 0; p.policing = 0; p.press = 0;
       break;
   }
   return p;
@@ -154,7 +174,7 @@ export interface NationState {
   /** v0.10 合法性（执政联盟权势 × 政权基础 × 稳定度，0-100） */
   legitimacy: number;
   /** v0.10 改革通过标记（economy 结算置位 → settleMonth 落实 applyLawPassed） */
-  lawPassedFlag: { cat: 'gov' | 'suffrage' | 'liberty' | 'economy' | 'rights'; target: number } | null;
+  lawPassedFlag: { cat: LawCatType; target: number } | null;
 }
 
 export interface ProvinceState {
@@ -559,7 +579,7 @@ export function setEconomicLaw(state: GameState, law: EconomicLaw): void {
 /** v0.10 提出改革：目标法律类 + 目标档位（进入立法中；已在进行则覆盖） */
 export function proposeReform(
   state: GameState,
-  cat: 'gov' | 'suffrage' | 'liberty' | 'economy' | 'rights',
+  cat: LawCatType,
   target: number,
 ): void {
   const n = state.nations[state.playerNation];
@@ -577,10 +597,13 @@ export function withdrawReform(state: GameState): void {
 }
 
 /** v0.10 改革通过（settleMonth 调用）：落实法律档位 + 特别转型（废奴/债务奴隶） */
+/** v0.10 法律类（含民生/国防扩展） */
+export type LawCatType = 'gov' | 'suffrage' | 'liberty' | 'economy' | 'rights' | 'education' | 'health' | 'military' | 'policing' | 'press';
+
 export function applyLawPassed(
   state: GameState,
   map: GameMap,
-  cat: 'gov' | 'suffrage' | 'liberty' | 'economy' | 'rights',
+  cat: LawCatType,
   tier: number,
 ): void {
   const n = state.nations[state.playerNation];
@@ -634,6 +657,21 @@ export function applyLawPassed(
   } else if (cat === 'rights') {
     n.policies.rights = tier;
     addChronicle(state, `权利法改为「${lawTierLabel('rights', tier)}」`, '民生福祉法律生效');
+  } else if (cat === 'education') {
+    n.policies.education = tier;
+    addChronicle(state, `教育法改为「${lawTierLabel('education', tier)}」`, '识字率与幸福度修正生效');
+  } else if (cat === 'health') {
+    n.policies.health = tier;
+    addChronicle(state, `医疗法改为「${lawTierLabel('health', tier)}」`, '健康度与幸福度修正生效');
+  } else if (cat === 'military') {
+    n.policies.military = tier;
+    addChronicle(state, `国防法改为「${lawTierLabel('military', tier)}」`, '征兵/军费/动员修正生效');
+  } else if (cat === 'policing') {
+    n.policies.policing = tier;
+    addChronicle(state, `治安法改为「${lawTierLabel('policing', tier)}」`, '动乱压制与政治力量修正生效');
+  } else if (cat === 'press') {
+    n.policies.press = tier;
+    addChronicle(state, `言论法改为「${lawTierLabel('press', tier)}」`, '满意度/识字率/政治力量修正生效');
   }
 }
 
@@ -647,12 +685,17 @@ const LAW_TIER_LABEL: Record<string, string[]> = {
   liberty: ['农奴制', '债务奴隶', '废奴'],
   economy: ['传统主义', '自由放任', '农本主义'],
   rights: ['无保障', '基本权利', '劳工保护'],
+  education: ['无教育', '教会学校', '私立学校', '公立学校'],
+  health: ['无医疗', '教会医疗', '私人医疗', '公立医疗'],
+  military: ['农兵制度', '职业军队', '义务兵役', '大规模征募'],
+  policing: ['无治安警察', '地方警察', '职业警察', '军事化警察', '秘密警察', '国民警卫队'],
+  press: ['异议者禁言', '出版审查', '特许出版', '出版自由'],
 };
 function lawTierLabel(cat: string, tier: number): string {
   return LAW_TIER_LABEL[cat]?.[tier] ?? `档位${tier}`;
 }
 function catLabel(cat: string): string {
-  return ({ gov: '政权', suffrage: '选举', liberty: '人身自由', economy: '经济', rights: '权利' } as Record<string, string>)[cat] ?? cat;
+  return ({ gov: '政权', suffrage: '选举', liberty: '人身自由', economy: '经济', rights: '权利', education: '教育', health: '医疗', military: '国防', policing: '治安', press: '言论' } as Record<string, string>)[cat] ?? cat;
 }
 
 /** 废农奴制（一次性）：奴隶 → 佃农/自耕农；帝国初始可用 */
