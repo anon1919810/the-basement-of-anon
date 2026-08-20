@@ -7,6 +7,7 @@ import { CLASS_DEFS } from '../src/game/classes';
 import { startInvestment } from '../src/game/buildings';
 import { provinceHasResource } from '../src/game/resources';
 import { LAW_TIERS } from '../src/game/politics';
+import { actualRateOf, creditLimitOf } from '../src/game/finance';
 import type { Province } from '../src/game/map';
 import type { BuildingKind } from '../src/game/buildings';
 
@@ -104,6 +105,18 @@ function main(): void {
   }
   if (n.policies.liberty === 2 && n.slavePop > 0.01) issue('废奴法律已立但仍有奴隶（转化异常）');
   else if (n.policies.liberty === 0 || n.policies.liberty === 1) ok('人身自由法律与奴隶人口一致');
+
+  // 6. 金融系统（v0.11：货币/债务/通胀健康度）
+  const rate = actualRateOf(n);
+  const limit = creditLimitOf(n);
+  const f = (x: number) => Math.round(x).toLocaleString('zh-CN');
+  console.log(`\n金融：货币供给 ${f(n.moneySupply)} · 国债 ${f(n.debtTotal)}（上限 ${f(limit)}）· 利率 ${rate.toFixed(1)}% · 通胀 ${((n.inflation ?? 0) * 100).toFixed(1)}% · 资本池 ${f(n.capitalWealth)}`);
+  if (n.debtTotal > limit * 0.9) issue(`国债接近上限 ${(n.debtTotal / Math.max(1, limit) * 100).toFixed(0)}%（债务风险）`);
+  else ok('债务水平安全');
+  if ((n.inflation ?? 0) > 0.15) issue(`通胀过高 ${((n.inflation ?? 0) * 100).toFixed(1)}%（货币超发）`);
+  else ok('通胀温和');
+  if (n.finCrisisMonths > 0) issue(`金融危机中（资本池透支，投资冻结 ${n.finCrisisMonths} 月）`);
+  else ok('金融稳定');
 
   console.log('\n=== 体检完成 ===');
   console.log(issues === 0 ? '✅ 全部健康' : `⚠ ${issues} 项需关注`);

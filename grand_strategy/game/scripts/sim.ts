@@ -147,10 +147,11 @@ function buildingUsedOfProv(n: { projects: { provId: number; lastInputUsed: Reco
 function assertMonthlyConservation(state: GameState, map: GameMap, snap: Snapshot, at: string): void {
   const id = state.playerNation;
   const n = state.nations[id];
-  // 国库守恒：Δ = 收入 - 支出 + 建筑回报 - 投资成本 + 取消退款
+  // 国库守恒：Δ = 收入 - 支出 + 建筑回报 - 投资成本 + 取消退款 + 金融现金流
   const expT =
     snap.treasury + n.monthly.income - n.monthly.spending +
-    n.monthly.investReturn - n.monthly.investCost + n.monthly.investRefund;
+    n.monthly.investReturn - n.monthly.investCost + n.monthly.investRefund +
+    (n.monthly.finance ?? 0);
   check(Math.abs(n.treasury - expT) < 1e-6, `国库守恒（${at}: ${expT.toFixed(1)} vs ${n.treasury.toFixed(1)}）`);
 
   const provIds = map.provinces.filter((p) => p.owner === id && !p.isUndiscovered).map((p) => p.id);

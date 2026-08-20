@@ -33,6 +33,7 @@ import { BUILDING_DEFS, BUILDING_KINDS, buildingSkillReqPop, projectProgress, bu
 import type { BuildingKind } from '../game/buildings';
 import { isCoastal } from '../game/logistics';
 import { nationClassPowerOf, supportOf, LAW_TIERS } from '../game/politics';
+import { creditLimitOf, actualRateOf, bankCapitalOf } from '../game/finance';
 
 interface Props {
   game: GameState;
@@ -51,6 +52,10 @@ interface Props {
   /** v0.10 政治：提出改革 / 撤回 */
   onProposeReform: (cat: LawCatType, target: number) => void;
   onWithdrawReform: () => void;
+  /** v0.11 金融：国债/铸币 */
+  onIssueDebt: (amount: number) => void;
+  onRepayDebt: (amount: number) => void;
+  onSetMintRate: (rate: number) => void;
   onAbolish: () => void;
   /** v0.8 开放贸易（国家开关） */
   onToggleTrade: (on: boolean) => void;
@@ -866,6 +871,83 @@ function PoliticsTab({ game, map, onProposeReform, onWithdrawReform }: {
   );
 }
 
+/** 金融页（v0.11 三层）：货币供给/通胀 + 国债信贷 + 银行/危机 */
+function FinanceTab({ game, onIssueDebt, onRepayDebt, onSetMintRate }: {
+  game: GameState;
+  onIssueDebt: Props['onIssueDebt'];
+  onRepayDebt: Props['onRepayDebt'];
+  onSetMintRate: Props['onSetMintRate'];
+}) {
+  const n = game.nations[game.playerNation];
+  const [borrow, setBorrow] = useState(100);
+  const [repay, setRepay] = useState(100);
+  const limit = creditLimitOf(n);
+  const rate = actualRateOf(n);
+  const bankCap = bankCapitalOf(n);
+  const infl = (n.inflation ?? 0) * 100;
+  return (
+    <div className="tab-body">
+      {/* 货币层 */}
+      <section className="p-sec">
+        <h4>货币与价格水平</h4>
+        <table className="mini-table">
+          <tbody>
+            <tr><td>货币供给 M</td><td>{fmt(n.moneySupply)} 万₭</td></tr>
+            <tr><td>通胀压力</td><td className={infl > 2 ? 'neg' : infl < -1 ? 'pos' : ''}>{infl > 0 ? '+' : ''}{infl.toFixed(1)}%（温和修正商品价格）</td></tr>
+            <tr><td>实际利率（年化）</td><td>{rate.toFixed(1)}%</td></tr>
+            <tr><td>信贷上限</td><td>{fmt(limit)} 万₭（税收年收入 × 政权系数）</td></tr>
+          </tbody>
+        </table>
+        <p className="dim">货币 = 初始铸币 + 信贷创造；印钞（铸币）增 M → 通胀↑ → 物价↑ → 实际工资↓（下层不满）。</p>
+      </section>
+
+      {/* 铸币 */}
+      <section className="p-sec">
+        <h4>铸币（印钞）</h4>
+        <label className="slider-row">
+          <span className="slider-label">月铸币率</span>
+          <input type="range" min={0} max={50} step={1} value={n.mintRate ?? 0} onChange={(e) => onSetMintRate(Number(e.target.value))} />
+          <span className="slider-value">{n.mintRate ?? 0} 万₭/月</span>
+        </label>
+        <p className="dim">铸 1 万₭ 消耗 0.2 万₭ 铸币成本（铸币税 0.8）；货币供给随之增长。</p>
+      </section>
+
+      {/* 信贷层：国债 */}
+      <section className="p-sec">
+        <h4>国债（信贷）</h4>
+        <table className="mini-table">
+          <tbody>
+            <tr><td>国债余额</td><td>{fmt(n.debtTotal)} 万₭</td></tr>
+            <tr><td>月利息</td><td className="neg">-{((n.debtTotal * rate) / 100 / 12).toFixed(1)} 万₭（付给银行家）</td></tr>
+            <tr><td>月还本（2%）</td><td className="neg">-{(n.debtTotal * 0.02).toFixed(1)} 万₭</td></tr>
+            {n.finCrisisMonths > 0 && <tr><td className="neg">⚠ 金融危机冷却 {n.finCrisisMonths} 月（资本池冻结）</td></tr>}
+          </tbody>
+        </table>
+        <div className="invest-card-foot">
+          <input type="number" min={10} max={limit} step={10} value={borrow} onChange={(e) => setBorrow(Number(e.target.value))} className="num-input" />
+          <button className="retrain-btn" disabled={n.debtTotal >= limit - 1 || borrow <= 0} onClick={() => onIssueDebt(borrow)} title={n.debtTotal >= limit - 1 ? '已达信贷上限' : '发行国债：国库进钱、货币供给增'} >发行国债</button>
+          <input type="number" min={10} step={10} value={repay} onChange={(e) => setRepay(Number(e.target.value))} className="num-input" />
+          <button className="retrain-btn" disabled={n.debtTotal <= 1 || repay <= 0} onClick={() => onRepayDebt(repay)} title="归还国债：回收货币" >还债</button>
+        </div>
+        <p className="dim">信贷上限 = 税收年收入 × 政权系数（专制 2× / 共和 4×）；利率 = 基础 4% + 通胀×2 + 赤字/低稳定度利差。国库赤字会推高利率。</p>
+      </section>
+
+      {/* 银行层 */}
+      <section className="p-sec">
+        <h4>银行与资本池</h4>
+        <table className="mini-table">
+          <tbody>
+            <tr><td>银行资本</td><td>{fmt(bankCap)} 万₭（{bankCap / 200} 座银行）</td></tr>
+            <tr><td>私营杠杆上限</td><td>{fmt(bankCap * 0.5)} 万₭（银行资本 × 0.5 可透支）</td></tr>
+            <tr><td>资本池</td><td className={n.capitalWealth < 0 ? 'neg' : ''}>{fmt(n.capitalWealth)} 万₭{n.capitalWealth < 0 ? '（透支中，月息 1%）' : ''}</td></tr>
+          </tbody>
+        </table>
+        <p className="dim">银行建筑越多 → 信贷杠杆越大；资本池透支超 -300 触发金融危机（投资冻结）。</p>
+      </section>
+    </div>
+  );
+}
+
 /** 立法支持率文本（复用 politics.supportOf） */
 function supportPctText(game: GameState, map: GameMap, lp: { cat: LawCatType; target: number }): string {
   const power = nationClassPowerOf(game, map, game.playerNation);
@@ -1137,7 +1219,7 @@ function TabBar({ tab, onTab }: { tab: Tab; onTab: (t: Tab) => void }) {
   );
 }
 
-export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSpending, onRetrain, onInvest, onCancelInvest, onNationalize, onTogglePolicy, onEconomicLaw, onProposeReform, onWithdrawReform, onAbolish, onToggleTrade, onExportRight, collapsed, onToggleCollapse }: Props & { collapsed: boolean; onToggleCollapse: () => void }) {
+export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSpending, onRetrain, onInvest, onCancelInvest, onNationalize, onTogglePolicy, onEconomicLaw, onProposeReform, onWithdrawReform, onIssueDebt, onRepayDebt, onSetMintRate, onAbolish, onToggleTrade, onExportRight, collapsed, onToggleCollapse }: Props & { collapsed: boolean; onToggleCollapse: () => void }) {
   const [tab, setTab] = useState<Tab>('gov');
   const n = game.nations[game.playerNation];
   const def = NATIONS[game.playerNation];
@@ -1317,6 +1399,10 @@ export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSp
           {/* ---- 国政 tab 续：政治（v0.10 权力分配 + 改革法律） ---- */}
           {tab === 'gov' && (
             <PoliticsTab game={game} map={map} onProposeReform={onProposeReform} onWithdrawReform={onWithdrawReform} />
+          )}
+          {/* ---- 国政 tab 续：金融（v0.11 货币/信贷/银行） ---- */}
+          {tab === 'gov' && (
+            <FinanceTab game={game} onIssueDebt={onIssueDebt} onRepayDebt={onRepayDebt} onSetMintRate={onSetMintRate} />
           )}
 
           {/* ---- 人口 tab：阶级 + 人口 + 劳动力 + POP ---- */}

@@ -32,10 +32,10 @@ import { CLASSES } from './classes';
 import { defaultNationTax } from './tax';
 import type { NationTax } from './tax';
 
-export const SAVE_VERSION = 11;
-export const SAVE_KEY = 'kalt-save-v11';
+export const SAVE_VERSION = 12;
+export const SAVE_KEY = 'kalt-save-v12';
 /** 旧存档键（v0.8 起存档不兼容，提示用；含 v0.7 的 v8 键） */
-export const OLD_SAVE_KEYS = ['kalt-save-v10', 'kalt-save-v9', 'kalt-save-v8', 'kalt-save-v7', 'kalt-save-v6', 'kalt-save-v5', 'kalt-save-v4', 'kalt-save-v3'];
+export const OLD_SAVE_KEYS = ['kalt-save-v11', 'kalt-save-v10', 'kalt-save-v9', 'kalt-save-v8', 'kalt-save-v7', 'kalt-save-v6', 'kalt-save-v5', 'kalt-save-v4', 'kalt-save-v3'];
 
 /** 国家政策（v0.3/v0.10）：作用于当前国，写入状态与存档 */
 export type EconomicLaw = 'traditionalism' | 'laissezFaire' | 'draconian';
@@ -175,6 +175,17 @@ export interface NationState {
   legitimacy: number;
   /** v0.10 改革通过标记（economy 结算置位 → settleMonth 落实 applyLawPassed） */
   lawPassedFlag: { cat: LawCatType; target: number } | null;
+  // ---- v0.11 金融（货币/信贷/银行三层） ----
+  /** 货币供给 M（万₭ = 铸币 + 信贷创造） */
+  moneySupply: number;
+  /** 国债总额（万₭） */
+  debtTotal: number;
+  /** 月铸币率（万₭/月，玩家设定 0-50） */
+  mintRate: number;
+  /** 通胀压力（-0.15~0.25，月度结算更新；修正商品价格） */
+  inflation: number;
+  /** 金融危机冷却（月；资本池超透支触发，投资冻结） */
+  finCrisisMonths: number;
 }
 
 export interface ProvinceState {
@@ -449,6 +460,11 @@ export function newGameState(playerNation: NationId, seed: number, map: GameMap)
       adminEff: 1,
       legitimacy: 60,
       lawPassedFlag: null,
+      moneySupply: def.treasury + 60, // 初始货币 = 国库 + 初始资本
+      debtTotal: 0,
+      mintRate: 0,
+      inflation: 0,
+      finCrisisMonths: 0,
     };
   });
 

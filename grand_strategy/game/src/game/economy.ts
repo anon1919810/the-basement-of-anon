@@ -56,6 +56,7 @@ import { countyFreightFactor, provinceFreightFactor, isCoastal } from './logisti
 import { BUILDING_DEFS, BUILDING_KINDS, buildingSkillReqPop, buildingUnlock, startInvestment, terrainCostFactor } from './buildings';
 import type { BuildingCategory, BuildingKind, InvestmentProject } from './buildings';
 import { provinceHasResource } from './resources';
+import { settleFinanceMonth, bankCapitalOf } from './finance';
 import {
   advanceLaw,
   adminEfficiencyOf,
@@ -190,6 +191,9 @@ export interface MonthlyLedger {
   migrationOut: number;
   /** 本月迁入人口合计（万人，空余省拉引） */
   migrationIn: number;
+  // ---- v0.11 金融（货币/信贷现金流；正=进国库，负=出国库） ----
+  /** 金融月度现金流（铸币税 - 国债利息 - 还本；万₭/月） */
+  finance: number;
 }
 
 export function zeroLedger(): MonthlyLedger {
@@ -199,6 +203,7 @@ export function zeroLedger(): MonthlyLedger {
     foodProd: 0, foodConsumed: 0, foodSurplus: 0, growthRate: 0,
     investIncome: 0, investReturn: 0, investCost: 0, investRefund: 0,
     migrationOut: 0, migrationIn: 0,
+    finance: 0,
   };
 }
 
@@ -769,6 +774,7 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
       natFreight: avgFreight,
       openTrade: n.openTrade,
       exportRights: n.exportRights,
+      inflation: n.inflation ?? 0, // 上月通胀（滞后一月传导）
     },
     marketState,
   );
@@ -819,8 +825,11 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
     }
   }
 
-  // ---- 7.5 私营自动投资：资本池充裕 → 投利润/成本比最高的可建建筑（不超上限） ----
-  if (n.capitalWealth >= 150) {
+  // ---- 7.5 私营自动投资：资本池充裕 → 投利润/成本比最高的可建建筑（v0.11 可透支银行杠杆；危机中冻结） ----
+  // 可动用资金 = 资本池 + 银行杠杆（银行资本×0.5）；危机中仅可用现有资本
+  const bankLeverage = bankCapitalOf(n) * 0.5;
+  const usableCapital = n.finCrisisMonths > 0 ? Math.max(0, n.capitalWealth) : n.capitalWealth + bankLeverage;
+  if (usableCapital >= 150) {
     let best: { kind: BuildingKind; provId: number; cost: number; ratio: number } | null = null;
     for (const kind of BUILDING_KINDS) {
       const def = BUILDING_DEFS[kind];
@@ -834,15 +843,15 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
         const unlock = buildingUnlock(map, kind, prov, n.infra, { stocks: n.stocks, projects: n.projects, literacy: n.literacy });
         if (!unlock.ok) continue;
         const cost = def.cost * terrainCostFactor(map, kind, prov);
-        if (cost > n.capitalWealth) continue;
+        if (cost > usableCapital) continue;
         const ratio = estProfit / cost;
         if (!best || ratio > best.ratio) best = { kind, provId: pid, cost, ratio };
       }
     }
-    if (best && best.cost <= n.capitalWealth) {
+    if (best && best.cost <= usableCapital) {
       startInvestment(state, map, best.kind, best.provId, undefined, 'private');
-      n.capitalWealth -= best.cost;
-      addChronicle(state, `资本家投资新建「${BUILDING_DEFS[best.kind].label}」`, `行省 #${best.provId + 1} · 私营`);
+      n.capitalWealth -= best.cost; // 允许为负（银行杠杆垫付）
+      addChronicle(state, `资本家投资新建「${BUILDING_DEFS[best.kind].label}」`, `行省 #${best.provId + 1} · 私营${n.capitalWealth < 0 ? '（举债扩张）' : ''}`);
     }
   }
 
@@ -1261,7 +1270,9 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
   // 投资成本/退款已在 startInvestment/cancelInvestment 操作发生时入账，此处只记账不重复入账
   // v0.9 政府分红：国企利润按经济体制效率注入国库（传统 -10% / 自由放任 中性 / 龙本 +15%）
   const govDiv = investReturn * (GOV_DIV_EFF[n.policies.economicLaw] ?? 1);
-  n.treasury += income - spending + govDiv;
+  // v0.11 金融结算：铸币税 - 国债利息 - 还本（现金流记入 ledger.finance）
+  const fin = settleFinanceMonth(state);
+  n.treasury += income - spending + govDiv + fin.cashflow;
   n.monthly = {
     income,
     spending,
@@ -1284,6 +1295,7 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
     investRefund,
     migrationOut,
     migrationIn,
+    finance: fin.cashflow,
   };
 
   // ---- 14. 识字率 & 健康（教育/卫生支出；v0.10 教育法/医疗法/言论法修正） ----

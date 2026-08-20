@@ -4,6 +4,7 @@ import { applyBorderOverrides, loadMap } from './game/map';
 import type { GameState } from './game/state';
 import { loadGame, newGameState, tickDay, saveGame, clearSave, setPolicy, setEconomicLaw, abolishSerfdom, hasOldSave, scaledNationPop, proposeReform, withdrawReform } from './game/state';
 import type { LawCatType } from './game/state';
+import { issueDebt, repayDebt, setMintRate } from './game/finance';
 import type { NationId, ProvinceOwner, Speed } from './game/types';
 import type { TaxKind } from './game/tax';
 import type { GoodId } from './game/types';
@@ -233,6 +234,22 @@ export default function App() {
       withdrawReform(g);
       setGame({ ...g });
     },
+    /** v0.11 金融：发行/归还国债、设定铸币率 */
+    issueDebt(amount: number) {
+      const g = gameRef.current;
+      issueDebt(g, amount);
+      setGame({ ...g });
+    },
+    repayDebt(amount: number) {
+      const g = gameRef.current;
+      repayDebt(g, amount);
+      setGame({ ...g });
+    },
+    setMintRate(rate: number) {
+      const g = gameRef.current;
+      setMintRate(g, rate);
+      setGame({ ...g });
+    },
     /** v0.8 开放贸易（国家开关：false=自给不贸易；true=按世界价进出口+关税） */
     setOpenTrade(on: boolean) {
       const g = gameRef.current;
@@ -429,6 +446,9 @@ export default function App() {
           onEconomicLaw={actions.setEconomicLaw}
           onProposeReform={actions.proposeReform}
           onWithdrawReform={actions.withdrawReform}
+          onIssueDebt={actions.issueDebt}
+          onRepayDebt={actions.repayDebt}
+          onSetMintRate={actions.setMintRate}
           onAbolish={actions.abolish}
           onToggleTrade={actions.setOpenTrade}
           onExportRight={actions.setExportRight}

@@ -19,6 +19,16 @@
 import type { GoodId } from './types';
 import { clamp } from './pops';
 
+// v0.11 温和通胀：价格 × (1 + inflation × 商品敏感度)；必需品敏感低、奢侈品/中间品敏感高
+const INFLATION_SENS: Partial<Record<GoodId, number>> = {
+  food: 0.6, wheat: 0.6, coal: 0.7, iron: 0.8, steel: 0.9, tools: 0.8,
+  luxury: 1.1, coffee: 1.0, tobacco: 1.0, clothing: 0.7,
+};
+function priceInflationFactor(inflation: number, good: GoodId): number {
+  const s = INFLATION_SENS[good] ?? 0.8;
+  return 1 + inflation * s;
+}
+
 export type GoodCategory = 'resource' | 'semi' | 'finished';
 
 export const GOODS_LIST: GoodId[] = [
@@ -225,6 +235,8 @@ export interface MarketInput {
   openTrade: boolean;
   /** v0.8 出口权：省 id → 是否获权（获权省商品可入国际市场） */
   exportRights: Record<number, boolean>;
+  /** v0.11 通胀压力（-0.15~0.25；温和修正价格水平） */
+  inflation: number;
 }
 
 export interface MarketState {
@@ -413,7 +425,9 @@ export function settleMarket(input: MarketInput, markets: MarketState): MarketSn
       pm.supply = supply[pid];
       pm.demand = demand[pid];
       pm.prevPrice = pm.price;
-      pm.price = clamp(sdPrice[pid] + costPush, base * PRICE_CLAMP_MIN, base * PRICE_CLAMP_MAX);
+      // v0.11 温和通胀：价格 × (1 + inflation × 商品敏感度)
+      const infFactor = priceInflationFactor(input.inflation ?? 0, g);
+      pm.price = clamp((sdPrice[pid] + costPush) * infFactor, base * PRICE_CLAMP_MIN, base * PRICE_CLAMP_MAX);
       pm.costPush = costPush;
       // 买方有效价 = 市价（含传导）× (1 + 商品税率)
       pm.effPrice = pm.price * (1 + taxRate);
