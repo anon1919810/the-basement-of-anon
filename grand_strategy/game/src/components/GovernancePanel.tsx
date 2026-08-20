@@ -6,13 +6,13 @@
  */
 import { useMemo, useState } from 'react';
 import type { ComponentType } from 'react';
-import { LineChart, Users, Landmark, Building2 } from 'lucide-react';
+import { LineChart, Users, Landmark, Building2, Globe } from 'lucide-react';
 import type { EChartsOption } from 'echarts';
 import MiniChart, { themedBase } from './MiniChart';
 import type { GameMap, Province } from '../game/map';
 import type { GameState, LawCatType } from '../game/state';
 import type { HistoryMonth } from '../game/state';
-import type { ClassId, GoodId, RaceId } from '../game/types';
+import type { ClassId, GoodId, NationId, RaceId } from '../game/types';
 import { NATIONS } from '../game/nations';
 import {
   nationMonthlyIncome,
@@ -36,6 +36,8 @@ import { nationClassPowerOf, supportOf, LAW_TIERS } from '../game/politics';
 import { creditLimitOf, actualRateOf, bankCapitalOf } from '../game/finance';
 import { CULTURE_GROUP_LABEL, RELIGION_LABEL, RACE_CULTURE_GROUP } from '../game/culture';
 import type { CultureGroupId, ReligionId } from '../game/culture';
+import { PEACE_TERMS, monthlyDiploPoints } from '../game/diplomacy';
+import { NATION_LIST } from '../game/nations';
 
 interface Props {
   game: GameState;
@@ -58,6 +60,8 @@ interface Props {
   onIssueDebt: (amount: number) => void;
   onRepayDebt: (amount: number) => void;
   onSetMintRate: (rate: number) => void;
+  /** v0.16 外交行动（返回结果消息） */
+  onDiplo: (action: string, oid: NationId, extra?: number | string) => { ok: boolean; reason?: string; message?: string };
   onAbolish: () => void;
   /** v0.8 开放贸易（国家开关） */
   onToggleTrade: (on: boolean) => void;
@@ -66,7 +70,7 @@ interface Props {
 }
 
 /** v0.10 tab 化：互斥 tab，一次只看一类（不再 9 区平铺） */
-type Tab = 'gov' | 'build' | 'pop' | 'market';
+type Tab = 'gov' | 'build' | 'pop' | 'market' | 'diplo';
 type MktLevel = 'nation' | 'province' | 'county';
 
 /** 阶级饼图配色（与 ClassTab 一致） */
@@ -986,6 +990,100 @@ function FinanceTab({ game, onIssueDebt, onRepayDebt, onSetMintRate }: {
   );
 }
 
+/** 外交页（v0.16）：威望/DP/DR + 7 国关系 + 行动按钮 */
+function DiplomacyTab({ game, map: _map, onDiplo }: {
+  game: GameState;
+  map: GameMap;
+  onDiplo: Props['onDiplo'];
+}) {
+  const id = game.playerNation;
+  const n = game.nations[id];
+  const [msg, setMsg] = useState<string | null>(null);
+  const [pactTier, setPactTier] = useState(1);
+  const [peaceTerm, setPeaceTerm] = useState('statusQuo');
+  const act = (action: string, oid: NationId, extra?: number | string) => {
+    const r = onDiplo(action, oid, extra);
+    setMsg(r.ok ? (r.message ?? '成功') : (r.reason ?? '失败'));
+    setTimeout(() => setMsg(null), 3000);
+  };
+  const relLabel = (r: number) => r <= -60 ? '敌对' : r <= -20 ? '冷淡' : r <= 20 ? '中立' : r <= 60 ? '友好' : '同盟';
+  const vassalLabel: Record<string, string> = { none: '—', cooperate: '合作国', vassal: '附属国', puppet: '傀儡国' };
+
+  return (
+    <div className="tab-body">
+      <section className="p-sec">
+        <h4>国家地位</h4>
+        <table className="mini-table">
+          <tbody>
+            <tr><td>威望</td><td>{Math.round(n.prestige ?? 100)}</td></tr>
+            <tr><td>外交点数 DP</td><td>{Math.round(n.diploPoints ?? 0)} / 100（每月 +{monthlyDiploPoints(n).toFixed(1)}）</td></tr>
+            <tr><td>外交声誉 DR</td><td className={n.diploReputation >= 0 ? 'pos' : 'neg'}>{(n.diploReputation ?? 0).toFixed(0)}</td></tr>
+          </tbody>
+        </table>
+        {msg && <p className="warn-soft">{msg}</p>}
+      </section>
+
+      {NATION_LIST.filter((d) => d.id !== id).map((d) => {
+        const e = n.diplomacy?.[d.id];
+        if (!e) return null;
+        return (
+          <section key={d.id} className="p-sec">
+            <h4 style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <i className="nation-pick-dot" style={{ background: d.color }} />
+              {d.name}
+              <span className="dim">威望 {Math.round(game.nations[d.id]?.prestige ?? 0)}</span>
+            </h4>
+            <div className="bar-row">
+              <span className="bar-label" style={{ width: 60 }}>{relLabel(e.relation)}</span>
+              <div className="bar-track">
+                <div className="bar-fill" style={{ width: `${Math.max(2, (e.relation + 100) / 2)}%`, background: e.relation <= -60 ? 'var(--warn,#b5472f)' : e.relation <= 20 ? '#8a8a8a' : '#2f7d45' }} />
+              </div>
+              <span className="bar-value">{e.relation.toFixed(0)}</span>
+            </div>
+            <p className="dim">
+              贸易协定 {['无', '市场', '关税', '最惠国'][e.tradePact]} · 投资权 {e.investRight === 3 ? '双向' : e.investRight === 1 ? '我方投对方' : e.investRight === 2 ? '对方投我方' : '无'}
+              {e.embargo && <span className="neg"> · 禁运中</span>}
+              {e.vassal !== 'none' && <span> · 附属：{vassalLabel[e.vassal]}</span>}
+              {e.atWar && <span className="neg"> · ⚔ 战争中（分 {e.warScore.toFixed(0)}）</span>}
+              {e.truceMonths > 0 && <span className="dim"> · 停战 {e.truceMonths} 月</span>}
+            </p>
+            <div className="mkt-pick" style={{ flexWrap: 'wrap', gap: 4 }}>
+              <button className="retrain-btn" onClick={() => act('improve', d.id)}>改善关系(10)</button>
+              <button className="retrain-btn" onClick={() => act('pact', d.id, pactTier)}>贸易协定({pactTier})</button>
+              <button className="retrain-btn" onClick={() => setPactTier((t) => (t % 3) + 1)}>协定级{tactHint(pactTier)}</button>
+              <button className="retrain-btn" onClick={() => act('invest', d.id, 3)}>投资权(12)</button>
+              <button className="retrain-btn" onClick={() => act('aid', d.id)}>经济援助(15)</button>
+              <button className="retrain-btn" onClick={() => act('loan', d.id)}>承担贷款(10)</button>
+              <button className="retrain-btn" onClick={() => act('armsSale', d.id)}>军售(8)</button>
+              <button className="retrain-btn" onClick={() => act('armsRequest', d.id)}>求购军舰(8)</button>
+              <button className="retrain-btn" onClick={() => act('embargo', d.id)}>禁运(10)</button>
+              <button className="retrain-btn" onClick={() => act('threat', d.id, 'coal')}>威胁关税(12)</button>
+              <button className="retrain-btn" onClick={() => act('vassalize', d.id)}>要求附庸(20)</button>
+              <button className="retrain-btn" onClick={() => act('border', d.id)}>边境摩擦(5)</button>
+              <button className="retrain-btn" onClick={() => act('insult', d.id)}>外交侮辱(8)</button>
+              {!e.atWar && (
+                <button className="retrain-btn" style={{ color: 'var(--warn,#b5472f)' }} onClick={() => act('war', d.id)}>宣战(25)</button>
+              )}
+              {e.atWar && (
+                <>
+                  <select value={peaceTerm} onChange={(ev) => setPeaceTerm(ev.target.value)}>
+                    {PEACE_TERMS.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+                  </select>
+                  <button className="retrain-btn" onClick={() => act('peace', d.id, peaceTerm)}>和谈</button>
+                </>
+              )}
+            </div>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+function tactHint(t: number): string {
+  return t === 1 ? '一' : t === 2 ? '二' : '三';
+}
+
 /** 立法支持率文本（复用 politics.supportOf） */
 function supportPctText(game: GameState, map: GameMap, lp: { cat: LawCatType; target: number }): string {
   const power = nationClassPowerOf(game, map, game.playerNation);
@@ -1314,6 +1412,7 @@ function TabBar({ tab, onTab }: { tab: Tab; onTab: (t: Tab) => void }) {
     { key: 'build', label: '建设', icon: Building2 },
     { key: 'pop', label: '人口', icon: Users },
     { key: 'market', label: '市场', icon: LineChart },
+    { key: 'diplo', label: '外交', icon: Globe },
   ];
   return (
     <div className="gov-tabs">
@@ -1336,7 +1435,7 @@ function TabBar({ tab, onTab }: { tab: Tab; onTab: (t: Tab) => void }) {
   );
 }
 
-export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSpending, onRetrain, onInvest, onCancelInvest, onNationalize, onTogglePolicy, onEconomicLaw, onProposeReform, onWithdrawReform, onIssueDebt, onRepayDebt, onSetMintRate, onAbolish, onToggleTrade, onExportRight, collapsed, onToggleCollapse }: Props & { collapsed: boolean; onToggleCollapse: () => void }) {
+export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSpending, onRetrain, onInvest, onCancelInvest, onNationalize, onTogglePolicy, onEconomicLaw, onProposeReform, onWithdrawReform, onIssueDebt, onRepayDebt, onSetMintRate, onDiplo, onAbolish, onToggleTrade, onExportRight, collapsed, onToggleCollapse }: Props & { collapsed: boolean; onToggleCollapse: () => void }) {
   const [tab, setTab] = useState<Tab>('gov');
   const n = game.nations[game.playerNation];
   const def = NATIONS[game.playerNation];
@@ -1727,6 +1826,10 @@ export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSp
                 <p className="dim">道路/港口达标解锁建筑；港口扩大贸易容量并解锁炼铁厂/船坞</p>
               </section>
             </div>
+          )}
+          {/* ---- 外交 tab（v0.16） ---- */}
+          {tab === 'diplo' && (
+            <DiplomacyTab game={game} map={map} onDiplo={onDiplo} />
           )}
         </div>
       )}

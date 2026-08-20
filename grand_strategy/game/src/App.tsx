@@ -5,6 +5,7 @@ import type { GameState } from './game/state';
 import { loadGame, newGameState, tickDay, saveGame, clearSave, setPolicy, setEconomicLaw, abolishSerfdom, hasOldSave, scaledNationPop, proposeReform, withdrawReform } from './game/state';
 import type { LawCatType } from './game/state';
 import { issueDebt, repayDebt, setMintRate } from './game/finance';
+import { establish, improve, aid, tradePact, investRight, armsSale, armsRequest, takeLoan, embargo, coEmbargo, threatTariff, vassalize, borderFriction, insult, declareWar, peace } from './game/diplomacy';
 import type { NationId, ProvinceOwner, Speed } from './game/types';
 import type { TaxKind } from './game/tax';
 import type { GoodId } from './game/types';
@@ -250,6 +251,32 @@ export default function App() {
       setMintRate(g, rate);
       setGame({ ...g });
     },
+    /** v0.16 外交行动 */
+    diplo(action: string, oid: NationId, extra?: number | string) {
+      const g = gameRef.current;
+      let r;
+      switch (action) {
+        case 'establish': r = establish(g, oid); break;
+        case 'improve': r = improve(g, oid); break;
+        case 'aid': r = aid(g, oid); break;
+        case 'pact': r = tradePact(g, oid, (extra ?? 1) as 1 | 2 | 3); break;
+        case 'invest': r = investRight(g, oid, (extra ?? 3) as 1 | 2 | 3); break;
+        case 'armsSale': r = armsSale(g, oid); break;
+        case 'armsRequest': r = armsRequest(g, oid); break;
+        case 'loan': r = takeLoan(g, oid); break;
+        case 'embargo': r = embargo(g, oid); break;
+        case 'coEmbargo': r = coEmbargo(g, oid, (extra ?? '') as NationId); break;
+        case 'threat': r = threatTariff(g, oid, (extra ?? 'coal') as string); break;
+        case 'vassalize': r = vassalize(g, oid); break;
+        case 'border': r = borderFriction(g, oid); break;
+        case 'insult': r = insult(g, oid); break;
+        case 'war': r = declareWar(g, oid); break;
+        case 'peace': r = peace(g, oid, (extra ?? 'statusQuo') as string); break;
+        default: r = { ok: false, reason: '未知行动' };
+      }
+      if (r.ok) setGame({ ...g });
+      return r;
+    },
     /** v0.8 开放贸易（国家开关：false=自给不贸易；true=按世界价进出口+关税） */
     setOpenTrade(on: boolean) {
       const g = gameRef.current;
@@ -449,6 +476,7 @@ export default function App() {
           onIssueDebt={actions.issueDebt}
           onRepayDebt={actions.repayDebt}
           onSetMintRate={actions.setMintRate}
+          onDiplo={actions.diplo}
           onAbolish={actions.abolish}
           onToggleTrade={actions.setOpenTrade}
           onExportRight={actions.setExportRight}

@@ -21,6 +21,7 @@ import {
   zeroLedger,
 } from './economy';
 import { settleMaritimeMonth } from './maritime';
+import { newDiploEntry, histRel, monthlyDiploPoints, prestigeOf, settleTribute, settleWarScore, driftOf } from './diplomacy';
 import type { MonthlyLedger } from './economy';
 import { initProvinceEcon } from './pops';
 import type { Pop } from './pops';
@@ -217,6 +218,15 @@ export interface NationState {
   sailorReserve: number;
   /** 海员转化中（海军扩建中，月 2-5% 水手→海员） */
   marineDrafting: number;
+  // ---- v0.16 外交 ----
+  /** 外交关系表（对方国 id → 条目） */
+  diplomacy: Record<string, import('./diplomacy').DiploEntry>;
+  /** 威望（四维加权；外交声誉计入） */
+  prestige: number;
+  /** 外交点数（每月生成，行动消耗，上限 100） */
+  diploPoints: number;
+  /** 外交声誉 -100~100（合作+ / 敌对-；影响成功率） */
+  diploReputation: number;
 }
 
 export interface ProvinceState {
@@ -504,8 +514,20 @@ export function newGameState(playerNation: NationId, seed: number, map: GameMap)
       seaTransport: 0,
       sailorReserve: 0,
       marineDrafting: 0,
+      diplomacy: {},
+      prestige: 100,
+      diploPoints: 20,
+      diploReputation: 0,
     };
   });
+  // v0.16 初始化外交表（各国对其他国家建条目 + 历史关系）
+  for (const id of Object.keys(nations) as NationId[]) {
+    const n = nations[id];
+    for (const oid of Object.keys(nations) as NationId[]) {
+      if (oid === id) continue;
+      n.diplomacy[oid] = { ...newDiploEntry(), relation: histRel(id, oid) };
+    }
+  }
 
   const provinces: Record<number, ProvinceState> = {};
   for (const p of map.provinces) {
@@ -575,6 +597,24 @@ export function settleMonth(state: GameState, map: GameMap): void {
 
   // 1a2) v0.15 海上结算（泊位/商船维护/水手转海员/军舰维护）
   settleMaritimeMonth(state, map);
+
+  // 1a3) v0.16 外交月度（威望/DP 生成/停战冷却）
+  n.prestige = prestigeOf(state, map, id);
+  n.diploPoints = Math.min(100, (n.diploPoints ?? 0) + monthlyDiploPoints(n));
+  for (const oid of Object.keys(n.diplomacy) as NationId[]) {
+    const e = n.diplomacy[oid];
+    if (e.truceMonths > 0) e.truceMonths--;
+    if (e.atWar) e.atWar = false; // 战争状态由事件维护（月度重置，事件续期）
+  }
+  // 每季（3 月）：漂移 + 上贡 + 战争分
+  if (state.day % 90 === 0) {
+    for (const oid of Object.keys(n.diplomacy) as NationId[]) {
+      const e = n.diplomacy[oid];
+      e.relation = Math.max(-100, Math.min(100, e.relation + driftOf(state, map, id, oid)));
+    }
+    settleTribute(state);
+    settleWarScore(state, map);
+  }
 
   // 1b) v0.7 月度历史快照（侧栏图表数据源）
   recordHistory(state, map);
