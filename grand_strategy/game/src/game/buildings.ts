@@ -26,11 +26,12 @@ export type BuildingKind =
   | 'sugarWorks' | 'gunpowderWorks' | 'tannery'
   // 加工业二级（4）
   | 'steelWorks' | 'clothingWorks' | 'foodFactory' | 'luxuryWorkshop'
-  // 工业（5）
+  // 工业（7，v0.12 造纸/发动机）
   | 'toolWorks' | 'armory' | 'shipyard' | 'dynamiteWorks' | 'machineWorks'
-  // 基建与公共服务（8）
+  | 'paperMill' | 'engineFactory'
+  // 基建与公共服务（9，v0.12 大学）
   | 'road' | 'railroad' | 'canal' | 'port' | 'lighthouse'
-  | 'school' | 'bank' | 'market'
+  | 'school' | 'bank' | 'market' | 'university'
   | 'buildyard'; // 建造部门（产建造力）
 
 export type BuildingCategory = 'agriculture' | 'extraction' | 'processing' | 'heavy' | 'fine' | 'infra';
@@ -52,6 +53,8 @@ export interface BuildingDef {
   category: BuildingCategory;
   /** 技能要求（对应职业 POP；职业三分后扩展） */
   skill: JobId;
+  /** v0.12 雇佣职业集合（建筑级覆盖 SKILL_ALLOW；未设则按 category 默认） */
+  employ?: JobId[];
   /** 必输输入（每月单位，按满产能；'+'=都要） */
   inputs: Partial<Record<GoodId, number>>;
   /** 任一输入即可（'、'=任一） */
@@ -305,6 +308,20 @@ export const BUILDING_DEFS: Record<BuildingKind, BuildingDef> = {
     cost: 280, duration: 10, opCost: 1.3, infra: {}, requireGood: 'steel',
     desc: '钢＋工具 → 机器；工业化的心脏。',
   },
+  paperMill: {
+    kind: 'paperMill', label: '造纸厂', category: 'fine', skill: 'technician',
+    employ: ['merchant', 'clerk', 'worker'], // v0.12 造纸厂雇佣商人/职员/工人
+    inputs: { timber: 1.6 }, opt: { tools: 0.3, machines: 0.2 },
+    output: 'paper', capacity: 2.0, cost: 160, duration: 6, opCost: 0.7, infra: {},
+    requireResource: 'timber', desc: '木材（/工具/机器）→ 纸张；银行与大学的维护原料。',
+  },
+  engineFactory: {
+    kind: 'engineFactory', label: '发动机工厂', category: 'heavy', skill: 'engineer',
+    employ: ['merchant', 'clerk', 'worker'], // v0.12 发动机厂雇佣商人/职员/工人
+    inputs: { steel: 1.2, timber: 1.0, copper: 0.8 }, opt: { tools: 0.3, machines: 0.2 },
+    output: 'train', capacity: 1.0, cost: 320, duration: 12, opCost: 1.4, infra: {},
+    requireGood: 'steel', desc: '钢＋木材＋铜 → 火车；铁路每月燃料。',
+  },
   // ==================== 基建与公共服务（8）====================
   road: {
     kind: 'road', label: '公路', category: 'infra', skill: 'technician',
@@ -314,9 +331,10 @@ export const BUILDING_DEFS: Record<BuildingKind, BuildingDef> = {
   },
   railroad: {
     kind: 'railroad', label: '铁路', category: 'infra', skill: 'engineer',
-    inputs: { steel: 1.0, iron: 1.0, stone: 0.8 }, opt: { tools: 0.3, machines: 0.2 },
-    output: 'transport', capacity: 3.0, cost: 300, duration: 12, opCost: 1.0, infra: {},
-    requireGood: 'steel', desc: '产运力：山地效率 ×1.6；重工业时代主力。',
+    employ: ['clerk', 'worker'], // v0.12 铁路雇佣职员/工人
+    inputs: { train: 0.6, coal: 1.5 }, opt: { tools: 0.3, machines: 0.2 },
+    output: 'transport', capacity: 4.0, cost: 300, duration: 12, opCost: 1.0, infra: {},
+    requireGood: 'train', desc: '产运力：每月输入火车与煤；山地效率 ×1.6；重工业时代主力。',
   },
   canal: {
     kind: 'canal', label: '运河', category: 'infra', skill: 'technician',
@@ -344,9 +362,17 @@ export const BUILDING_DEFS: Record<BuildingKind, BuildingDef> = {
   },
   bank: {
     kind: 'bank', label: '银行', category: 'infra', skill: 'technician',
-    inputs: { stone: 0.8, copper: 0.5 }, output: undefined, capacity: 0,
+    employ: ['clerk', 'merchant', 'banker'], // v0.12 银行雇佣职员/商人/银行家
+    inputs: { paper: 0.5 }, output: undefined, capacity: 0, // 维护每月耗纸
     cost: 220, duration: 8, opCost: 0.8, infra: {},
-    desc: '公共服务：资本积累速度↑（私营扩张加速，D 阶段接入）。',
+    desc: '公共服务：资本积累速度↑（私营扩张加速）；建造耗 木材＋石料＋铁锭，维护耗纸。',
+  },
+  university: {
+    kind: 'university', label: '大学', category: 'infra', skill: 'teacher',
+    employ: ['clerk', 'bureaucrat', 'teacher'], // v0.12 大学雇佣职员/官僚/教师
+    inputs: { paper: 0.8 }, output: undefined, capacity: 0, // 维护每月耗纸
+    cost: 300, duration: 12, opCost: 1.2, infra: {},
+    requireLiteracy: 0.25, desc: '公共服务：所在省资质提升 + 按财富为 POP 提供识字率修正；建造耗 木材＋石料＋铁锭，维护耗纸。',
   },
   market: {
     kind: 'market', label: '市场', category: 'infra', skill: 'technician',
@@ -372,8 +398,9 @@ export const BUILDING_KINDS: BuildingKind[] = [
   'sugarWorks', 'gunpowderWorks', 'tannery',
   'steelWorks', 'clothingWorks', 'foodFactory', 'luxuryWorkshop',
   'toolWorks', 'armory', 'shipyard', 'dynamiteWorks', 'machineWorks',
+  'paperMill', 'engineFactory',
   'road', 'railroad', 'canal', 'port', 'lighthouse',
-  'school', 'bank', 'market',
+  'school', 'bank', 'market', 'university',
   'buildyard',
 ];
 

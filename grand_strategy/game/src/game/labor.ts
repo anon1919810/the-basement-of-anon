@@ -27,6 +27,7 @@ export const LABOR_DEMAND_PER_CELL: Record<JobId, number> = {
   shopkeeper: 0.25,
   soldier: 0.2,
   bureaucrat: 0.15,
+  teacher: 0.12, // v0.12 教师（大学岗位）
   merchant: 0.2,
   capitalist: 0.1,
   banker: 0.08,

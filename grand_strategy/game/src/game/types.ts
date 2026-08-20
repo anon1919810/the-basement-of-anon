@@ -47,6 +47,7 @@ export type JobId =
   | 'shopkeeper'
   | 'soldier'
   | 'bureaucrat'
+  | 'teacher'
   | 'merchant'
   | 'capitalist'
   | 'banker';
@@ -72,7 +73,7 @@ export type GoodId =
   | 'oil' // 油（捕鲸）
   | 'coffee' // 咖啡（成瘾物）
   | 'tobacco' // 烟草（成瘾物）
-  // 半成品（11）
+  // 半成品（12）
   | 'lumber' // 木料
   | 'cloth' // 布料
   | 'iron' // 铁锭
@@ -84,7 +85,8 @@ export type GoodId =
   | 'gunpowder' // 火药
   | 'dynamite' // 炸药
   | 'machines' // 机器
-  // 成品（9）
+  | 'paper' // 纸张（银行/大学维护消耗）
+  // 成品（10）
   | 'tools' // 工具
   | 'swords' // 刀剑
   | 'muskets' // 燧发枪
@@ -93,6 +95,7 @@ export type GoodId =
   | 'clothing' // 服装
   | 'fineFood' // 高级食物
   | 'luxury' // 奢侈品
+  | 'train' // 火车（发动机工厂产出；铁路/运河消耗）
   | 'transport'; // 运力（基建产出）
 
 /**

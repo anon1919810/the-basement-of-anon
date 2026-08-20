@@ -656,7 +656,8 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
     const ps = state.provinces[p.provId];
     let skillPop = 0;
     if (ps) {
-      const allow = SKILL_ALLOW[def.category];
+      // v0.12 建筑级雇佣职业（employ）优先，否则按 category 默认
+      const allow = def.employ ?? SKILL_ALLOW[def.category];
       for (const pop of ps.pops) if (allow.includes(pop.job)) skillPop += pop.size;
     }
     const skillFactor = clamp(skillPop / buildingSkillReqPop(def), 0, 1);
@@ -1314,8 +1315,25 @@ export function settleEconomyMonth(state: GameState, map: GameMap): void {
     }
   }
   const eduCoef = eduPop > 1e-9 ? eduW / eduPop : 0.5;
+  // v0.12 大学加成：每座在产大学提升识字率修正（按财富——上层+教师受益更多，用 eduTable 权重叠加）
+  let uniBonus = 0;
+  for (const p of n.projects) {
+    if (p.status === 'active' && p.kind === 'university') {
+      const psU = state.provinces[p.provId];
+      if (psU?.pops) {
+        let uw = 0, upop = 0;
+        for (const pop of psU.pops) {
+          // 大学按财富给识字率修正：上层 1.0 / 中产 0.8 / 下层 0.4（复用 eduTable 倾向 + 教师职业）
+          const wClass = pop.class <= 2 ? 1.0 : pop.class === 3 ? 0.8 : 0.4;
+          uw += pop.size * wClass * (pop.job === 'teacher' ? 1.2 : 1);
+          upop += pop.size;
+        }
+        uniBonus += upop > 1e-9 ? uw / upop : 0.4;
+      } else uniBonus += 0.4;
+    }
+  }
   const pressEff = PRESS_EFFECT[LAW_TIERS.press[n.policies.press]?.id ?? 'censor'] ?? PRESS_EFFECT.censor;
-  n.literacy = clamp(0, 1, n.literacy + (0.003 + 0.005 * adminRatio) * (n.adminEff ?? 1) * (0.2 + 0.8 * eduCoef) * pressEff.literacy / 12);
+  n.literacy = clamp(0, 1, n.literacy + (0.003 + 0.005 * adminRatio) * (n.adminEff ?? 1) * (0.2 + 0.8 * eduCoef + 0.08 * uniBonus) * pressEff.literacy / 12);
   // 医疗法：按人口加权的健康增速修正
   const heaTier = LAW_TIERS.health[n.policies.health]?.id ?? 'none';
   const heaTable = HEALTH_GROWTH[heaTier] ?? HEALTH_GROWTH.none;
