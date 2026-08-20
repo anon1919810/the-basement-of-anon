@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react';
 import type { GameState } from '../game/state';
 import type { NationId, Speed } from '../game/types';
 import { NATIONS, NATION_LIST } from '../game/nations';
-import { SPEED_LABEL, dateLabel } from '../game/clock';
+import { SPEED_LABEL, dateLabel, monthLabel } from '../game/clock';
 import { weightedTaxRate } from '../game/tax';
 import { isSoundOn, setSoundOn, sfxClick } from '../game/sound';
-import { Pencil, Volume2, VolumeX } from 'lucide-react';
+import { Pencil, Volume2, VolumeX, Newspaper } from 'lucide-react';
 
 interface Props {
   game: GameState;
@@ -35,6 +35,9 @@ export default function TopBar({ game, onSpeed, onNation, onSave, onNewGame, edi
     setSoundOnState(isSoundOn());
     sfxClick();
   };
+  // v0.10 大事记铃铛（点击展开下拉）
+  const [showLog, setShowLog] = useState(false);
+  const logCount = game.chronicle.length;
   return (
     <header className="topbar">
       <div className="brand">
@@ -114,6 +117,39 @@ export default function TopBar({ game, onSpeed, onNation, onSave, onNewGame, edi
         <button className="tb-btn" onClick={onNewGame} title="开始新游戏" disabled={editMode}>
           新游戏
         </button>
+        <div className="tb-log-wrap">
+          <button
+            className={`tb-btn log-btn ${showLog ? 'active' : ''} ${logCount > 0 ? 'has-log' : ''}`}
+            onClick={() => setShowLog((v) => !v)}
+            data-sfx="panel"
+            title={`大事记（${logCount} 条）`}
+          >
+            <Newspaper size={12} />
+            大事记{logCount > 0 ? `·${logCount}` : ''}
+          </button>
+          {showLog && (
+            <div className="tb-log-drop" onClick={(e) => e.stopPropagation()}>
+              <div className="tb-log-head">大事记（{logCount} 条 · 被动记录）</div>
+              {logCount === 0 ? (
+                <p className="dim tb-log-empty">暂无大事。历史正在书写…</p>
+              ) : (
+                <ul className="tb-log-list">
+                  {game.chronicle
+                    .slice()
+                    .reverse()
+                    .slice(0, 100)
+                    .map((e, i) => (
+                      <li key={i}>
+                        <span className="log-date">{monthLabel(e.day)}</span>
+                        <span className="log-title">{e.title}</span>
+                        {e.detail && <span className="log-choice">{e.detail}</span>}
+                      </li>
+                    ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
         <button
           className={`tb-btn sound-toggle ${soundOn ? 'active' : ''}`}
           onClick={toggleSound}

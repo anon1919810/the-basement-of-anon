@@ -1,12 +1,12 @@
 /**
- * v0.5/v0.7 左侧治理面板：国家治理元素从右侧 NationPanel 移到左侧边栏。
- * 分区（可折叠手风琴）：经济 / 稳定度 / 市场 / 税收 / 阶级 / 人口 / 政策 / 投资 / 大事记。
- * v0.7：五个分区内嵌 ECharts 迷你图表（经济/人口/市场/税收/稳定度，近 12 月历史快照）。
+ * v0.7 左侧治理面板（tab 化）：国家治理元素从右侧 NationPanel 移到左侧边栏。
+ * v0.10：9 个平铺手风琴区 → 4 个互斥 tab（国政/建设/人口/市场），一次只看一类；
+ * 大事记移出到顶栏铃铛（TopBar）。v0.7 五分区内嵌 ECharts 迷你图表保留。
  * 右侧区域让位给 地图 + 选中省份详情（ProvincePanel）。
  */
 import { useMemo, useState } from 'react';
 import type { ComponentType } from 'react';
-import { Coins, LineChart, BadgePercent, Users2, Users, ScrollText, Factory, Newspaper, HeartPulse } from 'lucide-react';
+import { LineChart, Users, Landmark, Building2 } from 'lucide-react';
 import type { EChartsOption } from 'echarts';
 import MiniChart, { themedBase } from './MiniChart';
 import type { GameMap, Province } from '../game/map';
@@ -31,7 +31,6 @@ import { GOOD_CATEGORY } from '../game/market';
 import { nextJobThreshold } from '../game/labor';
 import { BUILDING_DEFS, BUILDING_KINDS, buildingSkillReqPop, projectProgress, buildingUnlock } from '../game/buildings';
 import type { BuildingKind } from '../game/buildings';
-import { monthLabel } from '../game/clock';
 import { isCoastal } from '../game/logistics';
 
 interface Props {
@@ -55,7 +54,8 @@ interface Props {
   onExportRight: (provId: number, on: boolean) => void;
 }
 
-type Section = 'economy' | 'stability' | 'market' | 'tax' | 'class' | 'pop' | 'policy' | 'invest' | 'log';
+/** v0.10 tab 化：互斥 tab，一次只看一类（不再 9 区平铺） */
+type Tab = 'gov' | 'build' | 'pop' | 'market';
 type MktLevel = 'nation' | 'province' | 'county';
 
 /** 阶级饼图配色（与 ClassTab 一致） */
@@ -845,23 +845,37 @@ function TaxTab({ game, map, onTaxRate, onGoodsTax }: {
   );
 }
 
-/** 手风琴分区头部（v0.6：各分区配 Lucide 图标；v0.7 data-sfx=panel → 面板开合「哗啦」音效） */
-function SectionHead({ title, icon: Icon, open, onToggle }: { title: string; icon: ComponentType<{ size?: number | string; className?: string }>; open: boolean; onToggle: () => void }) {
+/** v0.10 tab 栏（互斥单选，替代 9 区手风琴；data-sfx=panel → 切换「哗啦」音效） */
+function TabBar({ tab, onTab }: { tab: Tab; onTab: (t: Tab) => void }) {
+  const TABS: { key: Tab; label: string; icon: ComponentType<{ size?: number | string; className?: string }> }[] = [
+    { key: 'gov', label: '国政', icon: Landmark },
+    { key: 'build', label: '建设', icon: Building2 },
+    { key: 'pop', label: '人口', icon: Users },
+    { key: 'market', label: '市场', icon: LineChart },
+  ];
   return (
-    <button className={`gov-sec-head ${open ? 'active' : ''}`} onClick={onToggle} data-sfx="panel">
-      <span className="gov-sec-title">
-        <Icon size={14} className="gov-sec-icon" />
-        {title}
-      </span>
-      <span className="gov-caret">{open ? '▾' : '▸'}</span>
-    </button>
+    <div className="gov-tabs">
+      {TABS.map((t) => {
+        const Icon = t.icon;
+        return (
+          <button
+            key={t.key}
+            className={`gov-tab ${tab === t.key ? 'active' : ''}`}
+            onClick={() => onTab(t.key)}
+            data-sfx="panel"
+            title={t.label}
+          >
+            <Icon size={13} />
+            {t.label}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
 export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSpending, onRetrain, onInvest, onCancelInvest, onNationalize, onTogglePolicy, onEconomicLaw, onAbolish, onToggleTrade, onExportRight, collapsed, onToggleCollapse }: Props & { collapsed: boolean; onToggleCollapse: () => void }) {
-  const [open, setOpen] = useState<Record<Section, boolean>>({
-    economy: true, stability: false, market: true, tax: false, class: false, pop: true, policy: false, invest: false, log: false,
-  });
+  const [tab, setTab] = useState<Tab>('gov');
   const n = game.nations[game.playerNation];
   const def = NATIONS[game.playerNation];
   const incomeM = nationMonthlyIncome(map, game, game.playerNation);
@@ -873,7 +887,6 @@ export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSp
   const focusProv = ownedProvs[0] ?? null;
   const focusPs = focusProv ? game.provinces[focusProv.id] ?? null : null;
   const netInvest = ledger.investReturn - ledger.investCost + ledger.investRefund;
-  const toggle = (s: Section) => setOpen((prev) => ({ ...prev, [s]: !prev[s] }));
 
   // ---- v0.7 侧栏图表（历史快照 → ECharts option；主题色随 CSS 变量） ----
   const history = game.history[game.playerNation] ?? [];
@@ -898,10 +911,10 @@ export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSp
       </div>
       {!collapsed && (
         <div className="gov-body">
-          {/* ---- 经济 ---- */}
-          <SectionHead title="经济" icon={Coins} open={open.economy} onToggle={() => toggle('economy')} />
-          {open.economy && (
-            <div className="gov-sec-body">
+          <TabBar tab={tab} onTab={setTab} />
+          {tab === 'gov' && (
+            <div className="gov-tab-body">
+              {/* 财政总览：国库/收支图 + 支出滑块 + 结算 + 稳定度 */}
               <section className="p-sec">
                 <h4>国库 / 月收支（近 12 月 · 万₭）</h4>
                 <MiniChart option={ecoOption} height={92} />
@@ -948,42 +961,6 @@ export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSp
               </section>
 
               <section className="p-sec">
-                <h4>基建（道路 / 港口）</h4>
-                <div className="bar-row">
-                  <span className="bar-label">道路</span>
-                  <div className="bar-track"><div className="bar-fill" style={{ width: `${n.infra.roads}%` }} /></div>
-                  <span className="bar-value">{n.infra.roads.toFixed(0)}</span>
-                </div>
-                <div className="bar-row">
-                  <span className="bar-label">港口</span>
-                  <div className="bar-track"><div className="bar-fill" style={{ width: `${n.infra.ports}%` }} /></div>
-                  <span className="bar-value">{n.infra.ports.toFixed(0)}</span>
-                </div>
-                <p className="dim">道路/港口达标解锁建筑；港口扩大贸易容量并解锁炼铁厂/船坞</p>
-              </section>
-
-              <section className="p-sec">
-                <h4>劳动力市场（工资 = 基础 × 供需比）</h4>
-                <table className="mini-table">
-                  <tbody>
-                    {JOBS.map((job) => {
-                      const supply = focusPs ? focusPs.pops.filter((p) => p.job === job).reduce((s, p) => s + p.size, 0) : 0;
-                      const wage = focusPs?.pops.find((p) => p.job === job)?.wage ?? 0;
-                      const { next, literacyReq } = nextJobThreshold(job);
-                      return (
-                        <tr key={job}>
-                          <td>{JOB_LABEL[job]}</td>
-                          <td>{supply.toFixed(1)} 万</td>
-                          <td>₭{wage.toFixed(1)}</td>
-                          <td className="dim">{next ? `→${JOB_LABEL[next]}(识字${(literacyReq * 100).toFixed(0)}%)` : '已到顶'}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </section>
-
-              <section className="p-sec">
                 <h4>月度结算</h4>
                 <table className="mini-table">
                   <tbody>
@@ -998,13 +975,7 @@ export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSp
                 {n.stability < 30 && <p className="warn">⚠ 稳定度低于 30：民怨沸腾，危机四伏</p>}
                 {n.emigration > 0 && <p className="warn">⚠ 人口外流 {fmt(n.emigration)} 万：住房拥挤或民生恶化</p>}
               </section>
-            </div>
-          )}
 
-          {/* ---- 稳定度（v0.7 新分区） ---- */}
-          <SectionHead title="稳定度" icon={HeartPulse} open={open.stability} onToggle={() => toggle('stability')} />
-          {open.stability && (
-            <div className="gov-sec-body">
               <section className="p-sec">
                 <h4>幸福度 / 稳定度（近 12 月 · 0-100）</h4>
                 <MiniChart option={stabilityOption} height={96} />
@@ -1017,116 +988,14 @@ export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSp
             </div>
           )}
 
-          {/* ---- 市场 ---- */}
-          <SectionHead title="市场" icon={LineChart} open={open.market} onToggle={() => toggle('market')} />
-          {open.market && (
-            <div className="gov-sec-body">
-              <section className="p-sec">
-                <h4>主要商品价格走势（近 12 月）</h4>
-                <MiniChart option={marketOption} height={96} />
-                {historyTip}
-              </section>
-              <section className="p-sec">
-                <h4>市场价目（17 商品 · 供需定价 0.4~2.5 倍）</h4>
-                <MarketTable game={game} map={map} ownedProvs={ownedProvs} focusProvId={focusProv?.id ?? null} />
-                <p className="dim">
-                  产/消：{GOODS.map((g) => `${GOOD_LABEL[g]} ${n.market[g].supply.toFixed(1)}/${n.market[g].consumed.toFixed(1)}`).join(' · ')}
-                  {n.market.food.unmet > 0.001 && <span className="neg"> · ⚠ 缺粮 {n.market.food.unmet.toFixed(1)}</span>}
-                </p>
-                <p className="dim">建筑输入参与定价与进口补足；省/县宽表可横向滚动，悬停查看供需比与净流</p>
-              </section>
+          {/* ---- 国政 tab 续：税收 + 政策 ---- */}
+          {tab === 'gov' && (
+            <div className="gov-tab-body">
+              <TaxTab game={game} map={map} onTaxRate={onTaxRate} onGoodsTax={onGoodsTax} />
             </div>
           )}
-
-          {/* ---- 税收 ---- */}
-          <SectionHead title="税收" icon={BadgePercent} open={open.tax} onToggle={() => toggle('tax')} />
-          {open.tax && (
-            <TaxTab game={game} map={map} onTaxRate={onTaxRate} onGoodsTax={onGoodsTax} />
-          )}
-
-          {/* ---- 阶级 ---- */}
-          <SectionHead title="阶级" icon={Users2} open={open.class} onToggle={() => toggle('class')} />
-          {open.class && <ClassTab game={game} map={map} />}
-
-          {/* ---- 人口 ---- */}
-          <SectionHead title="人口" icon={Users} open={open.pop} onToggle={() => toggle('pop')} />
-          {open.pop && (
-            <div className="gov-sec-body">
-              <section className="p-sec">
-                <h4>人口曲线（近 12 月 · 万人）</h4>
-                <MiniChart option={popOption} height={88} />
-                {historyTip}
-              </section>
-              <section className="p-sec">
-                <h4>阶级分布（最新快照 · 万人）</h4>
-                <MiniChart option={classPie} height={92} />
-              </section>
-              <section className="p-sec">
-                <h4>人口概览（v0.5 按容量缩放 · 迁移软化）</h4>
-                <table className="mini-table">
-                  <tbody>
-                    <tr><td>总人口</td><td>{fmt(n.popWan)} 万</td></tr>
-                    <tr><td>识字率</td><td>{(n.literacy * 100).toFixed(1)}%</td></tr>
-                    <tr><td>健康</td><td>{(n.health * 100).toFixed(0)}%</td></tr>
-                    <tr><td>年增长率</td><td className={ledger.growthRate >= 0 ? 'pos' : 'neg'}>{(ledger.growthRate * 100).toFixed(2)}% / 年</td></tr>
-                    <tr><td>上月迁出</td><td>{ledger.migrationOut > 0 ? `-${ledger.migrationOut.toFixed(2)} 万` : '—'}</td></tr>
-                    <tr><td>上月迁入</td><td>{ledger.migrationIn > 0 ? `+${ledger.migrationIn.toFixed(2)} 万` : '—'}</td></tr>
-                    <tr><td>流民（流失他国）</td><td className={n.emigration > 0 ? 'neg' : ''}>{n.emigration > 0 ? `-${fmt(n.emigration)} 万` : '—'}</td></tr>
-                  </tbody>
-                </table>
-                <p className="dim">初始人口 = 全图住房容量×0.75 按国比例缩放（容量不足封顶）；月迁移 ≤ 单省容量 2% + 推拉因子（拥挤度/幸福度）。</p>
-              </section>
-
-              {focusProv && focusPs && (
-                <section className="p-sec">
-                  <h4>
-                    POP 明细 · 行省 #{focusProv.id + 1}
-                    <span className="dim">（{focusProv.counties.length} 县 · 人口 {fmt(focusPs.popTotal)}/容量 {fmt(focusPs.housingCap)} 万 · 幸福 {focusPs.happiness.toFixed(0)}）</span>
-                  </h4>
-                  <table className="mini-table pop-table">
-                    <tbody>
-                      {focusPs.pops.map((pop, i) => {
-                        const { next, literacyReq } = nextJobThreshold(pop.job);
-                        const canRetrain = n.warTime && next !== null && n.literacy >= literacyReq && pop.size > 0.001;
-                        return (
-                          <tr key={i}>
-                            <td>{RACE_LABEL[pop.race]}{JOB_LABEL[pop.job]}<em className="dim">·{CLASS_DEFS[pop.class].label}</em></td>
-                            <td>{pop.size.toFixed(1)}万</td>
-                            <td className={pop.happiness >= 60 ? 'pos' : pop.happiness >= 40 ? '' : 'neg'}>{pop.happiness.toFixed(0)}</td>
-                            <td title={`生活水平 ${pop.livingStd.toFixed(0)} / 预期 ${pop.expected}`}>
-                              生活{pop.livingStd.toFixed(0)}<em className="dim">/预期{pop.expected}</em>
-                              {pop.unrest >= 5 ? <em className="neg">·不满{pop.unrest.toFixed(0)}</em> : null}
-                            </td>
-                            <td>₭{pop.wage.toFixed(1)}{pop.investIncome > 0.01 ? <em className="dim">+投{pop.investIncome.toFixed(1)}</em> : null}</td>
-                            <td>
-                              {next ? (
-                                <button
-                                  className={`retrain-btn ${canRetrain ? '' : 'disabled'}`}
-                                  disabled={!canRetrain}
-                                  onClick={() => onRetrain(focusProv.id, i)}
-                                  title={!n.warTime ? '仅战时强制转职（平时靠待遇吸引/自发改行）' : canRetrain ? '转职：3 个月产出减半' : `识字率需 ≥${(literacyReq * 100).toFixed(0)}%`}
-                                >
-                                  转{next === 'worker' ? '工' : next === 'technician' ? '技' : next === 'clerk' ? '职' : next === 'merchant' ? '商' : next === 'capitalist' ? '资' : '升'}
-                                </button>
-                              ) : (
-                                <span className="dim">顶</span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                  <p className="dim">转职代价：3 个月产出减半。识字率 {(n.literacy * 100).toFixed(1)}%；上层（1-4 级）另获投资收入；奴隶幸福恒低</p>
-                </section>
-              )}
-            </div>
-          )}
-
-          {/* ---- 政策 ---- */}
-          <SectionHead title="政策" icon={ScrollText} open={open.policy} onToggle={() => toggle('policy')} />
-          {open.policy && (
-            <div className="gov-sec-body">
+          {tab === 'gov' && (
+            <div className="gov-tab-body">
               <section className="p-sec">
                 <div className="policy-row">
                   <div>
@@ -1180,7 +1049,135 @@ export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSp
                 </div>
                 <p className="dim">政策写入存档；累进税/普选可随时开关，废农奴制仅一次；经济体制决定政府分红效率（国企利润 → 国库）。</p>
               </section>
+            </div>
+          )}
 
+          {/* ---- 人口 tab：阶级 + 人口 + 劳动力 + POP ---- */}
+          {tab === 'pop' && (
+            <div className="gov-tab-body">
+              <ClassTab game={game} map={map} />
+              <section className="p-sec">
+                <h4>人口曲线（近 12 月 · 万人）</h4>
+                <MiniChart option={popOption} height={88} />
+                {historyTip}
+              </section>
+              <section className="p-sec">
+                <h4>阶级分布（最新快照 · 万人）</h4>
+                <MiniChart option={classPie} height={92} />
+              </section>
+              <section className="p-sec">
+                <h4>人口概览（v0.5 按容量缩放 · 迁移软化）</h4>
+                <table className="mini-table">
+                  <tbody>
+                    <tr><td>总人口</td><td>{fmt(n.popWan)} 万</td></tr>
+                    <tr><td>识字率</td><td>{(n.literacy * 100).toFixed(1)}%</td></tr>
+                    <tr><td>健康</td><td>{(n.health * 100).toFixed(0)}%</td></tr>
+                    <tr><td>年增长率</td><td className={ledger.growthRate >= 0 ? 'pos' : 'neg'}>{(ledger.growthRate * 100).toFixed(2)}% / 年</td></tr>
+                    <tr><td>上月迁出</td><td>{ledger.migrationOut > 0 ? `-${ledger.migrationOut.toFixed(2)} 万` : '—'}</td></tr>
+                    <tr><td>上月迁入</td><td>{ledger.migrationIn > 0 ? `+${ledger.migrationIn.toFixed(2)} 万` : '—'}</td></tr>
+                    <tr><td>流民（流失他国）</td><td className={n.emigration > 0 ? 'neg' : ''}>{n.emigration > 0 ? `-${fmt(n.emigration)} 万` : '—'}</td></tr>
+                  </tbody>
+                </table>
+                <p className="dim">初始人口 = 全图住房容量×0.75 按国比例缩放（容量不足封顶）；月迁移 ≤ 单省容量 2% + 推拉因子（拥挤度/幸福度）。</p>
+              </section>
+              <section className="p-sec">
+                <h4>劳动力市场（工资 = 基础 × 供需比）</h4>
+                <table className="mini-table">
+                  <tbody>
+                    {JOBS.map((job) => {
+                      const supply = focusPs ? focusPs.pops.filter((p) => p.job === job).reduce((s, p) => s + p.size, 0) : 0;
+                      const wage = focusPs?.pops.find((p) => p.job === job)?.wage ?? 0;
+                      const { next, literacyReq } = nextJobThreshold(job);
+                      return (
+                        <tr key={job}>
+                          <td>{JOB_LABEL[job]}</td>
+                          <td>{supply.toFixed(1)} 万</td>
+                          <td>₭{wage.toFixed(1)}</td>
+                          <td className="dim">{next ? `→${JOB_LABEL[next]}(识字${(literacyReq * 100).toFixed(0)}%)` : '已到顶'}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </section>
+              <section className="p-sec">
+                <h4>基建（道路 / 港口）</h4>
+                <div className="bar-row">
+                  <span className="bar-label">道路</span>
+                  <div className="bar-track"><div className="bar-fill" style={{ width: `${n.infra.roads}%` }} /></div>
+                  <span className="bar-value">{n.infra.roads.toFixed(0)}</span>
+                </div>
+                <div className="bar-row">
+                  <span className="bar-label">港口</span>
+                  <div className="bar-track"><div className="bar-fill" style={{ width: `${n.infra.ports}%` }} /></div>
+                  <span className="bar-value">{n.infra.ports.toFixed(0)}</span>
+                </div>
+                <p className="dim">道路/港口达标解锁建筑；港口扩大贸易容量并解锁炼铁厂/船坞</p>
+              </section>
+
+              {focusProv && focusPs && (
+                <section className="p-sec">
+                  <h4>
+                    POP 明细 · 行省 #{focusProv.id + 1}
+                    <span className="dim">（{focusProv.counties.length} 县 · 人口 {fmt(focusPs.popTotal)}/容量 {fmt(focusPs.housingCap)} 万 · 幸福 {focusPs.happiness.toFixed(0)}）</span>
+                  </h4>
+                  <table className="mini-table pop-table">
+                    <tbody>
+                      {focusPs.pops.map((pop, i) => {
+                        const { next, literacyReq } = nextJobThreshold(pop.job);
+                        const canRetrain = n.warTime && next !== null && n.literacy >= literacyReq && pop.size > 0.001;
+                        return (
+                          <tr key={i}>
+                            <td>{RACE_LABEL[pop.race]}{JOB_LABEL[pop.job]}<em className="dim">·{CLASS_DEFS[pop.class].label}</em></td>
+                            <td>{pop.size.toFixed(1)}万</td>
+                            <td className={pop.happiness >= 60 ? 'pos' : pop.happiness >= 40 ? '' : 'neg'}>{pop.happiness.toFixed(0)}</td>
+                            <td title={`生活水平 ${pop.livingStd.toFixed(0)} / 预期 ${pop.expected}`}>
+                              生活{pop.livingStd.toFixed(0)}<em className="dim">/预期{pop.expected}</em>
+                              {pop.unrest >= 5 ? <em className="neg">·不满{pop.unrest.toFixed(0)}</em> : null}
+                            </td>
+                            <td>₭{pop.wage.toFixed(1)}{pop.investIncome > 0.01 ? <em className="dim">+投{pop.investIncome.toFixed(1)}</em> : null}</td>
+                            <td>
+                              {next ? (
+                                <button
+                                  className={`retrain-btn ${canRetrain ? '' : 'disabled'}`}
+                                  disabled={!canRetrain}
+                                  onClick={() => onRetrain(focusProv.id, i)}
+                                  title={!n.warTime ? '仅战时强制转职（平时靠待遇吸引/自发改行）' : canRetrain ? '转职：3 个月产出减半' : `识字率需 ≥${(literacyReq * 100).toFixed(0)}%`}
+                                >
+                                  转{next === 'worker' ? '工' : next === 'technician' ? '技' : next === 'clerk' ? '职' : next === 'merchant' ? '商' : next === 'capitalist' ? '资' : '升'}
+                                </button>
+                              ) : (
+                                <span className="dim">顶</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  <p className="dim">转职代价：3 个月产出减半。识字率 {(n.literacy * 100).toFixed(1)}%；上层（1-4 级）另获投资收入；奴隶幸福恒低</p>
+                </section>
+              )}
+            </div>
+          )}
+
+          {/* ---- 市场 tab：价格 + 市场价目 + 对外贸易 ---- */}
+          {tab === 'market' && (
+            <div className="gov-tab-body">
+              <section className="p-sec">
+                <h4>主要商品价格走势（近 12 月）</h4>
+                <MiniChart option={marketOption} height={96} />
+                {historyTip}
+              </section>
+              <section className="p-sec">
+                <h4>市场价目（17 商品 · 供需定价 0.4~2.5 倍）</h4>
+                <MarketTable game={game} map={map} ownedProvs={ownedProvs} focusProvId={focusProv?.id ?? null} />
+                <p className="dim">
+                  产/消：{GOODS.map((g) => `${GOOD_LABEL[g]} ${n.market[g].supply.toFixed(1)}/${n.market[g].consumed.toFixed(1)}`).join(' · ')}
+                  {n.market.food.unmet > 0.001 && <span className="neg"> · ⚠ 缺粮 {n.market.food.unmet.toFixed(1)}</span>}
+                </p>
+                <p className="dim">建筑输入参与定价与进口补足；省/县宽表可横向滚动，悬停查看供需比与净流</p>
+              </section>
               <section className="p-sec">
                 <h4>对外贸易（v0.8 市场中心 · 省为结算单元）</h4>
                 <label className="policy-toggle">
@@ -1213,35 +1210,23 @@ export default function GovernancePanel({ game, map, onTaxRate, onGoodsTax, onSp
             </div>
           )}
 
-          {/* ---- 投资 ---- */}
-          <SectionHead title="投资" icon={Factory} open={open.invest} onToggle={() => toggle('invest')} />
-          {open.invest && (
-            <InvestTab game={game} map={map} ownedProvs={ownedProvs} onInvest={onInvest} onCancelInvest={onCancelInvest} onNationalize={onNationalize} />
-          )}
-
-          {/* ---- 大事记 ---- */}
-          <SectionHead title="大事记" icon={Newspaper} open={open.log} onToggle={() => toggle('log')} />
-          {open.log && (
-            <div className="gov-sec-body">
+          {/* ---- 建设 tab：投资 + 基建 ---- */}
+          {tab === 'build' && (
+            <div className="gov-tab-body">
+              <InvestTab game={game} map={map} ownedProvs={ownedProvs} onInvest={onInvest} onCancelInvest={onCancelInvest} onNationalize={onNationalize} />
               <section className="p-sec">
-                <h4>大事记（{game.chronicle.length} 条 · 被动记录）</h4>
-                {game.chronicle.length === 0 ? (
-                  <p className="dim">暂无大事。历史正在书写…</p>
-                ) : (
-                  <ul className="log-list">
-                    {game.chronicle
-                      .slice()
-                      .reverse()
-                      .slice(0, 200)
-                      .map((e, i) => (
-                        <li key={i}>
-                          <span className="log-date">{monthLabel(e.day)}</span>
-                          <span className="log-title">{e.title}</span>
-                          {e.detail && <span className="log-choice">{e.detail}</span>}
-                        </li>
-                      ))}
-                  </ul>
-                )}
+                <h4>基建（道路 / 港口）</h4>
+                <div className="bar-row">
+                  <span className="bar-label">道路</span>
+                  <div className="bar-track"><div className="bar-fill" style={{ width: `${n.infra.roads}%` }} /></div>
+                  <span className="bar-value">{n.infra.roads.toFixed(0)}</span>
+                </div>
+                <div className="bar-row">
+                  <span className="bar-label">港口</span>
+                  <div className="bar-track"><div className="bar-fill" style={{ width: `${n.infra.ports}%` }} /></div>
+                  <span className="bar-value">{n.infra.ports.toFixed(0)}</span>
+                </div>
+                <p className="dim">道路/港口达标解锁建筑；港口扩大贸易容量并解锁炼铁厂/船坞</p>
               </section>
             </div>
           )}

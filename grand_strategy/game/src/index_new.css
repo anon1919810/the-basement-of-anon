@@ -1017,6 +1017,115 @@ button.active {
   padding: 2px 2px 6px;
 }
 
+/* ---- v0.10 治理面板 tab 化（互斥 tab 替代 9 区手风琴） ---- */
+.gov-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 6px 0 8px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 6px;
+  position: sticky;
+  top: 0;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.2);
+  z-index: 2;
+}
+
+.gov-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 6px 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: none;
+  cursor: pointer;
+}
+
+.gov-tab:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.gov-tab.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.gov-tab-body {
+  padding: 2px 2px 6px;
+}
+
+/* ---- v0.10 顶栏大事记铃铛（下拉面板） ---- */
+.tb-log-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.tb-log-btn.has-log {
+  color: var(--gold, #d9a441);
+}
+
+.tb-log-btn.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.tb-log-drop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 380px;
+  max-height: 70vh;
+  overflow-y: auto;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.2);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.2);
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  z-index: 100;
+  padding: 8px 10px;
+}
+
+.tb-log-head {
+  font-size: 12px;
+  font-weight: 600;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 4px;
+}
+
+.tb-log-empty {
+  padding: 8px 0;
+  font-size: 12px;
+}
+
+.tb-log-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.tb-log-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 2px;
+  font-size: 12px;
+  border-bottom: 1px dashed var(--line);
+}
+
+.tb-log-list li:last-child {
+  border-bottom: none;
+}
+
 /* ---- v0.5 右侧省份详情面板（v0.7 玻璃悬浮） ---- */
 .prov-panel {
   position: absolute;
